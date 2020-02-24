@@ -1,0 +1,8 @@
+libcv_bin.a
+cv
+cmake_install.cmake
+CMakeFiles/*
+Makefile
+cv.exe
+CMakeCache.txt
+.vscode

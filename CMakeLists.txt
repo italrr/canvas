@@ -8,11 +8,14 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/builds/cmake)
 
 # src
 set (cv_src
-    src/Object.cpp)
+    src/Ctx.cpp
+    src/Tools.cpp
+    src/NT.cpp
+    src/Obj.cpp)
 
 add_library(cv_bin ${cv_src})
 
 target_link_libraries(cv_bin -pthread)
 
-add_executable(cv src/cv.cpp)
+add_executable(cv src/CV.cpp)
 target_link_libraries(cv cv_bin)
