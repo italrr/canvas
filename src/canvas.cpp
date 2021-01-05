@@ -14,8 +14,9 @@
 
 
 const std::string KEYWORDLIST[] = {
-    "def", "object", "splice", "func",
-    "for", "while", "nil", "print"
+    "def", "object", "func", "if",
+    "for", "while", "nil", "print",
+    "continue", "break", "return"
 };
 const static int KEYWORDN = sizeof(KEYWORDLIST) / sizeof(std::string);
 
@@ -96,7 +97,14 @@ enum ObjectType : int {
     STRING,
     LIST,
     OBJECT,
-    LAMBDA
+    LAMBDA,
+    INTERRUPT
+};
+
+enum InterruptType : int {
+    BREAK,
+    CONTINUE,
+    RETURN
 };
 
 struct Object {
@@ -146,6 +154,13 @@ struct List : Object {
 struct String : Object {
     std::string literal;
     String();
+    std::string str() const;
+};
+
+struct Interrupt : Object {
+    int intype;
+    std::shared_ptr<Object> payload;
+    Interrupt(int intype = InterruptType::BREAK, std::shared_ptr<Object> payload = std::make_shared<Object>(Object()));
     std::string str() const;
 };
 
@@ -341,6 +356,36 @@ std::string String::str() const {
     }
 }
 
+Interrupt::Interrupt(int intype, std::shared_ptr<Object> payload){
+    this->type = ObjectType::INTERRUPT;
+    this->intype = type;
+    this->payload = payload;
+}
+
+std::string Interrupt::str() const {
+    switch(type){
+        case ObjectType::INTERRUPT: {
+            switch(intype){
+                case InterruptType::BREAK: {
+                    return "[INTERRUPT-BREAK]";
+                } break;
+                case InterruptType::CONTINUE: {
+                    return "[INTERRUPT-CONTINUE]";
+                } break;
+                case InterruptType::RETURN: {
+                    return "[INTERRUPT-RETURN]";
+                } break;
+                default: {
+                    return "[INTERRUPT]";
+                } break;                             
+            }
+        } break;
+        case ObjectType::NONE: {
+            return "nil";
+        } break;
+    }
+}
+
 Context::Context(Context *head){
     // default operators
     this->add(std::make_shared<Function>(Function("+", [](const std::vector<std::shared_ptr<Object>> &operands, Context &ctx, Cursor &cursor){
@@ -470,7 +515,7 @@ Context::Context(Context *head){
         return r;
     })));    
 
-    this->add(std::make_shared<Function>(Function("reverse", [](const std::vector<std::shared_ptr<Object>> &operands, Context &ctx, Cursor &cursor){
+    this->add(std::make_shared<Function>(Function("l-reverse", [](const std::vector<std::shared_ptr<Object>> &operands, Context &ctx, Cursor &cursor){
         auto r = std::make_shared<List>(List());
         std::vector<std::shared_ptr<Object>> elements;
         for(int j = 0; j < operands.size(); ++j){
@@ -496,13 +541,36 @@ Context::Context(Context *head){
     this->add(std::make_shared<Function>(Function("splice", [](const std::vector<std::shared_ptr<Object>> &operands, Context &ctx, Cursor &cursor){
         auto r = std::make_shared<List>(List());
         std::vector<std::shared_ptr<Object>> elements;
-        auto list = std::dynamic_pointer_cast<List>(operands[0]);
-        for(double i = 0; i < list->n; ++i){
-            elements.push_back(list->list[list->n - 1 - i]);
+        for(int i = 0; i < operands.size(); ++i){
+            if(operands[i]->type == ObjectType::LIST){
+                auto list = std::dynamic_pointer_cast<List>(operands[i]);
+                for(int j = 0; j < list->n; ++j){
+                    elements.push_back(list->list[j]);
+                }
+            }else{
+                elements.push_back(operands[i]);
+            }
         }
         r->build(elements);
         return r;
-    })));           
+    })));    
+
+
+    this->add(std::make_shared<Function>(Function("noop", [](const std::vector<std::shared_ptr<Object>> &operands, Context &ctx, Cursor &cursor){
+        return std::make_shared<List>(List());
+    })));        
+
+
+    // this->add(std::make_shared<Function>(Function("first", [](const std::vector<std::shared_ptr<Object>> &operands, Context &ctx, Cursor &cursor){
+    //     auto r = std::make_shared<List>(List());
+    //     std::vector<std::shared_ptr<Object>> elements;
+    //     auto list = std::dynamic_pointer_cast<List>(operands[0]);
+    //     for(double i = 0; i < list->n; ++i){
+    //         elements.push_back(list->list[list->n - 1 - i]);
+    //     }
+    //     r->build(elements);
+    //     return r;
+    // })));              
 
     this->head = head;              
 }
@@ -592,9 +660,10 @@ std::shared_ptr<Object> infer(const std::string &input, Context &ctx, Cursor &cu
 std::unordered_map<std::string, std::string> fetchSpecs(std::vector<std::string> input, std::vector<std::string> &output, Context &ctx){
     std::unordered_map<std::string, std::string> traits;
     for(int i = 1; i < input.size(); ++i){
-        if((input[i] == "with" || input[i] == "as")  && i < input.size()){
+        if((input[i] == "with" || input[i] == "as") && i < input.size()-1){
             traits[input[i]] = input[i + 1];
-            input.erase(input.begin() + i, input.begin() + i + 1);
+            input.erase(input.begin() + i, input.begin() + i + 2);
+            --i;
         }
     }
     output = input;
@@ -629,11 +698,11 @@ std::shared_ptr<Object> eval(const std::string &input, Context &ctx, Cursor &cur
         }else
         // for
         if(imp == "for"){
-            Context fctx(ctx);;
+            Context fctx(ctx);
             auto range = eval(tokens[1], ctx, cursor);
             auto itn = specs["with"];
             if(range->type != ObjectType::LIST){
-                std::cout << "for expects a List" << std::endl;
+                cursor.setError("'for' expects a List as range: for (range) `with (x,y)/i` (code)");
                 return std::make_shared<Object>(Object());
             }
             auto list = std::dynamic_pointer_cast<List>(range);
@@ -643,14 +712,64 @@ std::shared_ptr<Object> eval(const std::string &input, Context &ctx, Cursor &cur
                 _it->name = itn;
                 fctx.add(_it);
                 last = eval(specs["as"], fctx, cursor);
+                if(last->type == ObjectType::INTERRUPT){
+                    auto interrupt = std::dynamic_pointer_cast<Interrupt>(last);
+                    if(interrupt->intype == InterruptType::BREAK){
+                        last = interrupt->payload;
+                        break;
+                    }
+                    if(interrupt->intype == InterruptType::CONTINUE){
+                        last = interrupt->payload;                        
+                        continue;
+                    }    
+                    if(interrupt->intype == InterruptType::RETURN){
+                        last = interrupt->payload;
+                        break;
+                    }                                       
+                }
             }
             return last;
-        }
+        }else
         // print (temporarily hardcoded)
         if(imp == "print"){
             auto r = eval(tokens[1], ctx, cursor);
             std::cout << r->str() << std::endl;
             return r;
+        }else
+        if(imp == "if"){
+            bool v = false;
+            auto cond = eval(tokens[1], ctx, cursor);
+            if(cond->type != ObjectType::NUMBER){
+                cursor.setError("'if' expects a real number as conditional");
+                return std::make_shared<Object>(Object());                    
+            }
+            if(tokens.size() > 4){
+                cursor.setError("'if' expects 3 params max: (if (cond)(branch-true)(branch-false)");
+                return std::make_shared<Object>(Object());                  
+            }
+            v = *static_cast<double*>(cond->data);
+            return v ? eval(tokens[2], ctx, cursor) : (tokens.size() > 3 ? eval(tokens[3], ctx, cursor) : std::make_shared<Object>(Object()));
+        }else
+        if(imp == "continue"){
+            auto interrupt = std::make_shared<Interrupt>(Interrupt(InterruptType::CONTINUE));
+            if(tokens.size() > 1){
+                interrupt->payload = eval(tokens[1], ctx, cursor);
+            }
+            return interrupt;
+        }else
+        if(imp == "break"){
+            auto interrupt = std::make_shared<Interrupt>(Interrupt(InterruptType::BREAK));
+            if(tokens.size() > 1){
+                interrupt->payload = eval(tokens[1], ctx, cursor);
+            }
+            return interrupt;            
+        }else
+        if(imp == "return"){
+            auto interrupt = std::make_shared<Interrupt>(Interrupt(InterruptType::RETURN));
+            if(tokens.size() > 1){
+                interrupt->payload = eval(tokens[1], ctx, cursor);
+            }
+            return interrupt;            
         }
     }else
     // lambda
@@ -688,12 +807,12 @@ int main(int argc, const char *argv[]){
     cursor.column += 1;
     cursor.line += 1;
 
-    // std::cout << eval("for (.. 0 10) as i ((print i))# lol comment #(let a (+ 2 2))", main)->str() << std::endl;
-    std::cout << eval("(reverse (1 2 3)(4 5 6))", main, cursor)->str() << std::endl;
+   
+    eval("(for (.. 0 10) with i as (if (= i 5)(continue)(print i)))", main, cursor);
 
-    // auto toks = parse("for (.. 0 10) as i ((print i))");
-    // // auto toks = parse("(for (0..2) as i ((print i)))# lol comment #(let a (+ 2 2))");
-
+    if(cursor.error){
+        std::cout << cursor.message << std::endl;
+    }
 
 
     return 0;

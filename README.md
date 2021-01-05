@@ -8,7 +8,7 @@ This is rather a toy project of my own, mainly for learning.
 
 Short summary:
 - There are no classes. Only objects akin to JS-like objects
-- Designed around to be fully functional (unmutability), although mutations are possible
+- Designed to be fully functional (unmutability), although mutations are possible
 - Just like Lisp, everything is a list one way or the other
 - Strings are formed using single quotes (') for now
 
@@ -19,14 +19,17 @@ Examples:
 (print a)
 
 
-(func a as (x y)(
+(func b as (x y) -> (
     (let b 5)
     (return (+ x y b))
 ))
 
 # loop from 0 to 10 #
-(for (.. 0 10) with i as (
-    (if (eq i 5))
+(for (.. 0 10) with i (
+    (if (= i 5)
+        (print i)
+        
+    )
 ))
 
 # creates structure #
