@@ -4,7 +4,7 @@ canvas
 `canvas` is a simple multi-paradigm scripting language, heavily
 inspired by Lisp, JS and C++.
 
-This is rather a toy project of my own, mainly for learning.
+This is rather a toy project.
 
 Short summary:
 - There are no classes. Only objects akin to JS-like objects
@@ -15,11 +15,11 @@ Short summary:
 Examples: 
 ```
 
-(def a as (+ 2 2))
+(def a (+ 2 2))
 (print a)
 
 
-(func b as (x y) -> (
+(defn b (x y) -> (
     (let b 5)
     (return (+ x y b))
 ))
@@ -33,16 +33,15 @@ Examples:
 ))
 
 # creates structure #
-(struct b as (
-    (let a as 5)
-    (let b as 5)
-    (let c as 8)
+(obj b (
+    (def a)
+
 ))
 
 # defines c as b and a dynamic object joined #
-(splice c as b (object (
-    (let d as 5)
-    (let e as 5)
+(splice c b (object (
+    (let d 5)
+    (let e 5)
 )))
 
 

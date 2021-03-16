@@ -7,11 +7,15 @@ set(CMAKE_CXX_FLAGS "-std=c++11 -g")
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/builds/cmake)
 
 # src
-#set (cv_src src/canvas.cpp)
+set (cv_src 
+            src/Eval.cpp
+            src/Tools.cpp
+            src/Object.cpp
+            src/Context.cpp)
 
-#add_library(cv_bin ${cv_src})
+add_library(cv_bin ${cv_src})
 
 # target_link_libraries(cv_bin -pthread)
 
 add_executable(cv src/canvas.cpp)
-#target_link_libraries(cv cv_bin)
+target_link_libraries(cv cv_bin)
