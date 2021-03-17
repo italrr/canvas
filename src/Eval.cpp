@@ -1,7 +1,7 @@
 #include "Tools.hpp"
 #include "Eval.hpp"
 
-std::vector<std::string> parse(const std::string &input){
+std::vector<std::string> parse(const std::string &input, Cursor &cursor){
     auto clean = removeExtraSpace(input);
     std::vector<std::string> tokens;
     int open = 0;
@@ -10,6 +10,7 @@ std::vector<std::string> parse(const std::string &input){
     std::string hold;
     for(int i = 0; i < input.length(); ++i){
         char c = input[i];
+        ++c;
         if(c == '(') ++open;
         if(c == ')') --open;
         if(c == '#'){
@@ -31,6 +32,9 @@ std::vector<std::string> parse(const std::string &input){
                 hold = "";
             }
         }
+    }
+    if(open != 0){
+        cursor.setError("missing '"+std::string(open > 0 ? ")" : "(")+"' parenthesis");
     }
     return tokens;
 }
@@ -56,7 +60,7 @@ std::shared_ptr<Object> infer(const std::string &input, Context &ctx, Cursor &cu
     }else{
         // consider it a list otherwise list
         auto result = std::make_shared<List>(List());
-        auto tokens = parse(input);
+        auto tokens = parse(input, cursor);
         std::vector<std::shared_ptr<Object>> list;
         for(int i = 0; i < tokens.size(); ++i){
             list.push_back(eval(tokens[i], ctx, cursor));
@@ -82,13 +86,14 @@ std::unordered_map<std::string, std::string> fetchSpecs(std::vector<std::string>
 }
 
 std::shared_ptr<Object> eval(const std::string &input, Context &ctx, Cursor &cursor){
-    auto tokens = parse(input);
-    auto imp = tokens[0];    
+    auto tokens = parse(input, cursor);
 
     if(cursor.error){
-        std::cout << "exception line " << cursor.line << " col " << cursor.column << ": " << cursor.message << std::endl;
+        std::cout << "error at line " << cursor.line << " col " << cursor.column << ": " << cursor.message << std::endl;
         std::exit(1);
     }
+
+    auto imp = tokens[0];    
 
     if(tokens.size() == 1 && tokens[0].length() > 1 && tokens[0][0] == '(' && tokens[0][tokens[0].length()-1] == ')'){
         imp = tokens[0].substr(1, tokens[0].length() - 2);
@@ -112,7 +117,7 @@ std::shared_ptr<Object> eval(const std::string &input, Context &ctx, Cursor &cur
             if(largs.length() > 1 && largs[0] == '(' && largs[largs.length()-1] == ')'){
                 largs = largs.substr(1, largs.length() - 2);
             }
-            auto args = parse(largs);
+            auto args = parse(largs, cursor);
             auto fn = std::make_shared<Function>(Function());
             fn->set(tokens[2], args);
             return fn;
@@ -135,18 +140,14 @@ std::shared_ptr<Object> eval(const std::string &input, Context &ctx, Cursor &cur
                 last = eval(specs["as"], fctx, cursor);
                 if(last->type == ObjectType::INTERRUPT){
                     auto interrupt = std::static_pointer_cast<Interrupt>(last);
-                    if(interrupt->intype == InterruptType::BREAK){
+                    if(interrupt->intype == InterruptType::BREAK || interrupt->intype == InterruptType::RETURN){
                         last = interrupt->payload;
                         break;
                     }
                     if(interrupt->intype == InterruptType::CONTINUE){
                         last = interrupt->payload;                        
                         continue;
-                    }    
-                    if(interrupt->intype == InterruptType::RETURN){
-                        last = interrupt->payload;
-                        break;
-                    }                                       
+                    }                                     
                 }
             }
             return last;

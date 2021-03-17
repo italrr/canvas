@@ -23,10 +23,14 @@
             error = false;
             message = "";
         }
-        void setError(const std::string &message, int line = 0, int column = 0){
+        void setError(const std::string &message, int line, int column){
             this->message = message;
             this->line = line;
             this->column = column;
+            this->error = true;
+        }
+        void setError(const std::string &message){
+            this->message = message;
             this->error = true;
         }
     };

@@ -52,6 +52,19 @@ void Object::write(void *data, size_t size, int type){
     memcpy(this->data, data, size);
 }
 
+std::shared_ptr<Object> Object::copy(){
+    auto r = std::make_shared<Object>(Object());
+    r->type = type;
+    r->innerType = innerType;
+    r->name = name;
+    r->traits = traits;
+    r->n = n;
+    r->size = size;
+    r->data = new char[size];
+    memcpy(r->data, data, size);
+    return r;
+}
+
 Object::~Object(){
     clear();
 }
@@ -67,6 +80,16 @@ void Function::set(const std::string &body, const std::vector<std::string> &para
     this->body = body;
     this->innerType = false;
     this->params = params;
+}
+
+std::shared_ptr<Object> Function::copy(){
+    auto r = std::make_shared<Function>(Function());
+    r->name = name;
+    r->traits = traits;
+    r->lambda = lambda;
+    r->params = params;
+    r->body = body;
+    return r;
 }
 
 Function::Function() : Object(){
@@ -120,6 +143,16 @@ void List::build(const std::vector<std::shared_ptr<Object>> &objects){
     this->n = objects.size();
 }
 
+std::shared_ptr<Object> List::copy(){
+    auto r = std::make_shared<List>(List());
+    r->name = name;
+    r->traits = traits;
+    for(int i = 0; i < this->n; ++i){
+        r->list.push_back(this->list[i]->copy());
+    }
+    return r;
+}
+
 std::string List::str() const {
     switch(type){
         case ObjectType::LIST: {
@@ -146,6 +179,14 @@ String::String() :  Object(){
     this->literal = "";
 }
 
+std::shared_ptr<Object> String::copy(){
+    auto r = std::make_shared<String>(String());
+    r->literal = literal;
+    r->name = name;
+    r->traits = traits;
+    return r;
+}
+
 std::string String::str() const {
     switch(type){
         case ObjectType::STRING: {
@@ -163,6 +204,14 @@ Interrupt::Interrupt(int intype, std::shared_ptr<Object> payload){
     this->type = ObjectType::INTERRUPT;
     this->intype = type;
     this->payload = payload;
+}
+
+std::shared_ptr<Object> Interrupt::copy(){
+    auto r = std::make_shared<Interrupt>();
+    r->intype = intype;
+    r->name = name;
+    r->traits = traits;
+    return r;
 }
 
 std::string Interrupt::str() const {

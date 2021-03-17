@@ -40,6 +40,7 @@
         virtual std::string str() const;
         void clear();
         void write(void *data, size_t size, int type);
+        virtual std::shared_ptr<Object> copy();
         ~Object();
         operator std::string() const;
     };
@@ -53,6 +54,7 @@
                     const std::function<std::shared_ptr<Object>(const std::vector<std::shared_ptr<Object>> &operands, Context &ctx, Cursor &cursor)> &lambda,
                     const std::vector<std::string> &params = {});
         void set(const std::string &body, const std::vector<std::string> &params = {});
+        std::shared_ptr<Object> copy();
         std::string str() const;
     };
 
@@ -61,18 +63,21 @@
         std::vector<std::shared_ptr<Object>> list;
         List();
         void build(const std::vector<std::shared_ptr<Object>> &objects);
+        std::shared_ptr<Object> copy();
         std::string str() const;
     };
 
     struct String : Object {
         std::string literal;
         String();
+        std::shared_ptr<Object> copy();
         std::string str() const;
     };
 
     struct Interrupt : Object {
         int intype;
         std::shared_ptr<Object> payload;
+        std::shared_ptr<Object> copy();
         Interrupt(int intype = InterruptType::BREAK, std::shared_ptr<Object> payload = std::make_shared<Object>(Object()));
         std::string str() const;
     };
