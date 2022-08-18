@@ -9,7 +9,7 @@
         "def", "object", "func", "if",
         "for", "while", "nil", "print",
         "continue", "break", "return",
-        "fn"
+        "fn", "proto"
     };
 
     struct Cursor {

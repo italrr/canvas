@@ -10,7 +10,7 @@ std::vector<std::string> parse(const std::string &input, Cursor &cursor){
     std::string hold;
     for(int i = 0; i < input.length(); ++i){
         char c = input[i];
-        ++c;
+        // ++c;
         if(c == '(') ++open;
         if(c == ')') --open;
         if(c == '#'){
