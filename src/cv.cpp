@@ -21,7 +21,7 @@
 	]
 	
     [def type
-        [proto [
+        [mock [
             a: 5,
             b: 10,
             c: 15
@@ -29,6 +29,35 @@
     ]
 
 */
+
+static const std::vector<std::string> RESERVED_WORDS = {
+	"nil", "set", "mock", "fn",
+	"ret", "skip", "stop",
+	"if", "do", "para"
+};
+
+namespace ItemType {
+	enum ItemType : unsigned {
+		NIL,
+		NUMBER,
+		STRING,
+		LIST,
+		MOCK,
+		FUNCTION,
+		INTERRUPT
+	};
+}
+
+
+namespace InterruptType {
+	enum InterruptType : unsigned {
+        BREAK,
+        CONTINUE,
+        RETURN		
+	};
+}
+
+
 
 struct Cursor {
 	int line;
@@ -124,28 +153,6 @@ static unsigned genItemCountId(){
 	return id;
 }
 
-namespace ItemType {
-	enum ItemType : unsigned {
-		NIL,
-		NUMBER,
-		STRING,
-		LIST,
-		PROTO,
-		FUNCTION,
-		INTERRUPT
-	};
-}
-
-
-namespace InterruptType {
-	enum InterruptType : unsigned {
-        BREAK,
-        CONTINUE,
-        RETURN		
-	};
-}
-
-
 struct Item {
 	unsigned id;
 	void *data;
@@ -204,14 +211,14 @@ struct Item {
 	}	
 };
 
-struct String : Item {
+struct StringType : Item {
 	std::string literal;
-	String(){
+	StringType(){
 		this->type = ItemType::STRING;
 		this->literal = "";
 	}
 	std::shared_ptr<Item> copy(){
-		auto copy = std::shared_ptr<String>(new String());
+		auto copy = std::shared_ptr<StringType>(new StringType());
 		copy->literal = this->literal;
 		return std::static_pointer_cast<Item>(copy);
 	}
@@ -233,12 +240,12 @@ struct String : Item {
 struct Context;
 std::shared_ptr<Item> infer(const std::string &input, Context *ctx, Cursor *cursor);
 
-struct Proto : Item {
+struct MockType : Item {
 	std::unordered_map<std::string, std::shared_ptr<Item>> items;
 
-	void populate(const std::vector<std::string> &names, const std::vector<std::string> &values, Context *ctx, Cursor *cursor){
+	void populate(const std::vector<std::string> &names, const std::vector<std::shared_ptr<Item>> &values, Context *ctx, Cursor *cursor){
 		for(unsigned i = 0; i < names.size(); ++i){
-			this->items[names[i]] = infer(values[i], ctx, cursor);
+			this->items[names[i]] = values[i];
 		}
 	}
 
@@ -251,7 +258,7 @@ struct Proto : Item {
 	}
 
 	// std::shared_ptr<Item> copy(){
-	// 	auto copied = std::shared_ptr<Proto>(new Proto());
+	// 	auto copied = std::shared_ptr<MOCK>(new MOCK());
 	// 	for(auto &it : this->items){
 	// 		copied->items[it.first] = it.second;
 	// 	}
@@ -355,7 +362,7 @@ std::shared_ptr<Item> infer(const std::string &input, Context *ctx, Cursor *curs
     }
     // string
     if(isString(input)){
-        auto result = std::make_shared<String>(String());
+        auto result = std::make_shared<StringType>(StringType());
         result->literal = input.substr(1, input.length() - 2);
         return result;        
     }
@@ -377,6 +384,9 @@ std::shared_ptr<Item> infer(const std::string &input, Context *ctx, Cursor *curs
     return std::make_shared<Item>(Item());
 }
 
+static bool isKeyword(const std::string &word){
+
+}
 
 static std::shared_ptr<Item> eval(const std::string &input, Context *ctx, Cursor *cursor){
 	auto tokens = parse(input);
@@ -389,20 +399,22 @@ static std::shared_ptr<Item> eval(const std::string &input, Context *ctx, Cursor
         return eval(imp, ctx, cursor);
     }
 
-	// DECLARE VARIABLE IN CURRENT CONTEXT
-	if(imp == "def"){
-
+	if(imp == "nil"){
+		return std::make_shared<Item>(Item());
 	}else
-	// FUNCTION
-	if(imp == "fn"){
-
+	// DECLARE VARIABLE IN CURRENT CONTEXT (unless context switching colons are used)
+	if(imp == "set"){
+		auto name =  tokens[1];
+		auto val = eval(tokens[2], ctx, cursor);
+		ctx->add(name, val);
+		return val;
 	}else
-	// PROTOTYPE OBJECT
-	if(imp == "proto"){
-		auto proto = std::make_shared<Proto>(Proto());
+	// MOCKTYPE OBJECT
+	if(imp == "mock"){
+		auto mock = std::make_shared<MockType>(MockType());
 
 		std::vector<std::string> names;
-		std::vector<std::string> values;
+		std::vector<std::shared_ptr<Item>> values;
 
 		for(unsigned i = 1; i < tokens.size(); ++i){
 			auto &token = tokens[i];
@@ -413,12 +425,22 @@ static std::shared_ptr<Item> eval(const std::string &input, Context *ctx, Cursor
 			std::string varvalue = token.substr(fc+1, token.length()-fc-1);
 
 			names.push_back(varname);
-			values.push_back(varvalue);
+			values.push_back(eval(varvalue, ctx, cursor));
 		}
 
-		proto->populate(names, values, ctx, cursor);	
+		mock->populate(names, values, ctx, cursor);	
 
-		return proto;		
+		return mock;		
+	}
+	// FOR / WHILE / ITERATE
+	if(imp == "iter"){
+		// first argument is the conditional
+		// second argument is the function
+		
+
+	}else
+	if(imp == "for"){
+
 	}
 
 
@@ -438,11 +460,11 @@ int main(int argc, char* argv[]){
 	};
 
 
-	// printList(parse("proto [ a:4 b:5 c:[fn [][print 'lol']] ]"));
+	// printList(parse("MOCK [ a:4 b:5 c:[fn [][print 'lol']] ]"));
 
 	Cursor cursor;
 	Context ctx;
-	std::cout << eval("proto a:4 b:5", &ctx, &cursor)->str() << std::endl;
+	std::cout << eval("MOCK a:4 b:5", &ctx, &cursor)->str() << std::endl;
 
 
 
