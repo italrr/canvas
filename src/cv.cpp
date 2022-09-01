@@ -36,8 +36,8 @@ static const std::vector<std::string> RESERVED_WORDS = {
 	"if", "do", "iter"
 };
 
-namespace ItemType {
-	enum ItemType : unsigned {
+namespace ItemTypes {
+	enum ItemTypes : unsigned {
 		NIL,
 		NUMBER,
 		STRING,
@@ -49,11 +49,11 @@ namespace ItemType {
 }
 
 
-namespace InterruptType {
-	enum InterruptType : unsigned {
-        BREAK,
-        CONTINUE,
-        RETURN		
+namespace InterruptTypes {
+	enum InterruptTypes : unsigned {
+        STOP,
+        SKIP,
+        RET		
 	};
 }
 
@@ -86,9 +86,35 @@ bool isNumber(const std::string &s){
     return (s.find_first_not_of( "-.0123456789" ) == std::string::npos);
 }
 
-bool isString (const std::string &s){
+bool isString(const std::string &s){
     return s.size() > 1 && s[0] == '\'' && s[s.length()-1] == '\'';
 }
+
+bool isList(const std::string &s){
+
+	if(s.length() < 3){
+		return false;
+	}
+
+	bool str = false;
+
+	for(unsigned i = 0; i < s.length(); ++i){
+		char c = s[i];
+        if(c == '\''){
+            str = !str;
+        }     
+		if(!str && s[i] == ' '){
+			return true;
+		}
+	}
+
+	return false;
+
+	// if()
+
+    // return s.size() > 1 && s[0] == '[' && s[s.length()-1] == ']' && s.find(' ') == -1;
+}
+
 
 std::string removeExtraSpace(const std::string &in){
     std::string cpy;
@@ -159,16 +185,16 @@ struct Item {
 	unsigned size;
 	unsigned type;
 	Item(){
-		type = ItemType::NIL;
+		type = ItemTypes::NIL;
 		data = NULL;
 		size = 0;
 		id = genItemCountId();		
 	}
 	void clear(){	
-		if(type != ItemType::NIL){
+		if(type != ItemTypes::NIL){
 			free(data);
 		}
-		type = ItemType::NIL;
+		type = ItemTypes::NIL;
 		data = NULL;
 		size = 0;
 	}
@@ -192,12 +218,12 @@ struct Item {
 
 	virtual std::string str() const {
 		switch(type){
-			case ItemType::NUMBER: {
+			case ItemTypes::NUMBER: {
 				std::ostringstream oss;
 				oss << std::setprecision(8) << std::noshowpoint << *static_cast<double*>(data);
 				return oss.str();
 			} break;
-			case ItemType::NIL: {
+			case ItemTypes::NIL: {
 				return "nil";
 			} break;
 			default:
@@ -214,7 +240,7 @@ struct Item {
 struct StringType : Item {
 	std::string literal;
 	StringType(){
-		this->type = ItemType::STRING;
+		this->type = ItemTypes::STRING;
 		this->literal = "";
 	}
 	std::shared_ptr<Item> copy(){
@@ -224,10 +250,10 @@ struct StringType : Item {
 	}
 	std::string str() const {
 		switch(type){
-			case ItemType::STRING: {
+			case ItemTypes::STRING: {
 				return "'"+this->literal+"'";
 			} break;
-			case ItemType::NIL: {
+			case ItemTypes::NIL: {
 				return "nil";
 			} break;
 			default: 
@@ -245,7 +271,7 @@ struct ListType : Item {
 	int n;
 	std::vector<std::shared_ptr<Item>> list;
 	ListType(){
-		type = ItemType::LIST;
+		type = ItemTypes::LIST;
 		n = 0;
 	}
 	void build(const std::vector<std::shared_ptr<Item>> &objects){
@@ -257,7 +283,7 @@ struct ListType : Item {
 	}
 	std::string str() const {
 		switch(type){
-			case ItemType::LIST: {
+			case ItemTypes::LIST: {
 				std::string _params;
 				std::string buff = "";
 				for(int i = 0; i < n; ++i){
@@ -268,7 +294,7 @@ struct ListType : Item {
 				}
 				return "["+buff+"]";
 			} break;
-			case ItemType::NIL: {
+			case ItemTypes::NIL: {
 				return "nil";
 			} break;
 			default: 
@@ -283,7 +309,7 @@ struct FunctionType : Item {
 	std::vector<std::string> params;
 	std::string body;
 	FunctionType(){
-		this->type = ItemType::FUNCTION;
+		this->type = ItemTypes::FUNCTION;
 		this->body = "";
 		// this->innerType = true;
 		this->lambda = [](const std::vector<std::shared_ptr<Item>> &operands, Context *ctx, Cursor *cursor){
@@ -311,7 +337,7 @@ struct FunctionType : Item {
 
 	std::string str() const {
 		switch(type){
-			case ItemType::FUNCTION: {
+			case ItemTypes::FUNCTION: {
 				std::string _params;
 				for(int i = 0; i < params.size(); ++i){
 					_params += params[i];
@@ -321,7 +347,7 @@ struct FunctionType : Item {
 				}
 				return "["+_params+"]["+body+"]";
 			} break;
-			case ItemType::NIL: {
+			case ItemTypes::NIL: {
 				return "nil";
 			} break;
 			default:
@@ -330,7 +356,49 @@ struct FunctionType : Item {
 	}
 };
 
-struct MockType : Item {
+struct InterruptType : Item {
+	int intype;
+	std::shared_ptr<Item> payload;
+
+	std::shared_ptr<Item> copy(){
+		auto r = std::make_shared<InterruptType>();
+		r->intype = intype;
+		return r;		
+	}
+
+	InterruptType(int intype = InterruptTypes::STOP, std::shared_ptr<Item> payload = std::make_shared<Item>(Item())){
+		this->type = ItemTypes::INTERRUPT;
+		this->intype = type;
+		this->payload = payload;
+	}
+	std::string str() const {
+		switch(type) {
+			case ItemTypes::INTERRUPT: {
+				switch(intype){
+					case InterruptTypes::STOP: {
+						return "[INTERRUPT-STOP]";
+					} break;
+					case InterruptTypes::SKIP: {
+						return "[INTERRUPT-SKIP]";
+					} break;
+					case InterruptTypes::RET: {
+						return "[INTERRUPT-RET]";
+					} break;
+					default: {
+						return "[INTERRUPT]";
+					} break;                             
+				}
+			} break;
+			case ItemTypes::NIL: {
+				return "nil";
+			} break;
+			default: 
+				std::exit(1);
+		}
+	}
+};
+
+struct ProtoType : Item {
 	std::unordered_map<std::string, std::shared_ptr<Item>> items;
 
 	void populate(const std::vector<std::string> &names, const std::vector<std::shared_ptr<Item>> &values, Context *ctx, Cursor *cursor){
@@ -442,36 +510,31 @@ struct Context {
 
 
 std::shared_ptr<Item> infer(const std::string &input, Context *ctx, Cursor *cursor){
-    // auto v = ctx.find(input);
-    // number
+    // Number
     if(isNumber(input) && input.find(' ') == -1){
         auto result = std::make_shared<Item>(Item());
         auto v = std::stod(input);
-        result->write(&v, sizeof(v), ItemType::NUMBER);
+        result->write(&v, sizeof(v), ItemTypes::NUMBER);
         return result;
     }else
-    // string
+    // String
     if(isString(input)){
         auto result = std::make_shared<StringType>(StringType());
         result->literal = input.substr(1, input.length() - 2);
         return result;        
-    }else{
-		auto var = ctx->find(input);
-		if(var->type != ItemType::NIL){
-			return var;
-		}else{
-			auto result = std::make_shared<ListType>(ListType());
-			auto tokens = parse(input);
-			std::vector<std::shared_ptr<Item>> list;
-			for(int i = 0; i < tokens.size(); ++i){
-				list.push_back(eval(tokens[i], ctx, cursor));
-			}
-			result->build(list);
-			return result;      
+    }else
+	if(isList(input)){
+		auto result = std::make_shared<ListType>(ListType());
+		auto tokens = parse(input);
+		std::vector<std::shared_ptr<Item>> list;
+		for(int i = 0; i < tokens.size(); ++i){
+			list.push_back(infer(tokens[i], ctx, cursor));
 		}
+		result->build(list);
+		return result;
+	}else{
+		return ctx->find(input);
 	}
-
-    return std::make_shared<Item>(Item());
 }
 
 static bool isReserved(const std::string &word){
@@ -506,9 +569,9 @@ static std::shared_ptr<Item> eval(const std::string &input, Context *ctx, Cursor
 			ctx->add(name, val);
 			return val;
 		}else
-		// MOCK builds a prototype item: the other first class citizen of canvas (other one being list)
-		if(imp == "mock"){
-			auto mock = std::make_shared<MockType>(MockType());
+		// PROTO builds a prototype item: the other first class citizen of canvas (other one being list)
+		if(imp == "proto"){
+			auto proto = std::make_shared<ProtoType>(ProtoType());
 
 			std::vector<std::string> names;
 			std::vector<std::shared_ptr<Item>> values;
@@ -525,9 +588,9 @@ static std::shared_ptr<Item> eval(const std::string &input, Context *ctx, Cursor
 				values.push_back(eval(varvalue, ctx, cursor));
 			}
 
-			mock->populate(names, values, ctx, cursor);	
+			proto->populate(names, values, ctx, cursor);	
 
-			return mock;		
+			return proto;		
 		}else
 		// FUNCTION
 		if(imp == "fn"){
@@ -542,15 +605,27 @@ static std::shared_ptr<Item> eval(const std::string &input, Context *ctx, Cursor
 		}else
 		// RET
 		if(imp == "ret"){
-
+            auto interrupt = std::make_shared<InterruptType>(InterruptType(InterruptTypes::RET));
+            if(tokens.size() > 1){
+                interrupt->payload = infer(tokens[1], ctx, cursor);
+            }
+            return interrupt;  
 		}else
 		// SKIP (skips current execution ie inside a loop, next iteration [do true [[std:print test][skip]]]))
 		if(imp == "skip"){
-
+            auto interrupt = std::make_shared<InterruptType>(InterruptType(InterruptTypes::SKIP));
+            if(tokens.size() > 1){
+                interrupt->payload = infer(tokens[1], ctx, cursor);
+            }
+            return interrupt;
 		}else
-		// STOP (stops current execution [do true [[std:print test][stop]]])
+		// STOP (stops current execution [do [cond] [[std:print test][stop]]])
 		if(imp == "stop"){
-
+            auto interrupt = std::make_shared<InterruptType>(InterruptType(InterruptTypes::STOP));
+            if(tokens.size() > 1){
+                interrupt->payload = infer(tokens[1], ctx, cursor);
+            }
+            return interrupt;
 		}else
 		// IF conditional statement ([if [cond] [branch-true][branch-false]])
 		if(imp == "if"){
@@ -562,12 +637,67 @@ static std::shared_ptr<Item> eval(const std::string &input, Context *ctx, Cursor
 		}else
 		// ITER goes through a list ([iter [1 2 3 4] [code]...[code]]) ([iter [proto a:1 b:2 c:3] [code]...[code]])
 		if(imp == "iter"){
+			if(tokens.size() < 3){
+				return std::make_shared<Item>(Item());
+			}
+			auto iteratable = eval(tokens[1], ctx, cursor);
+			auto function = eval(tokens[2], ctx, cursor);
+
+			if(iteratable->type != ItemTypes::LIST && iteratable->type != ItemTypes::PROTO){
+				// TODO: ERROR
+				return std::make_shared<Item>(Item());
+			}
+
+			if(function->type != ItemTypes::FUNCTION){
+				// TODO: ERROR
+				return std::make_shared<Item>(Item());
+			}			
+
+			auto functIter = static_cast<FunctionType*>(function.get());
+
+			switch(iteratable->type){
+				case ItemTypes::PROTO: {
+					auto proto = static_cast<ProtoType*>(iteratable.get());
+				} break;
+				case ItemTypes::LIST: {
+					auto list = static_cast<ListType*>(iteratable.get());
+					
+
+					std::shared_ptr<Item> last;
+					for(int i = 0; i < list->n; ++i){
+						
+						Context fctx(ctx);
+						auto _it = list->list[i];
+						
+					
+						last = functIter->lambda(operands, &fctx, cursor);
+
+						if(last->type == ItemTypes::INTERRUPT){
+							auto interrupt = std::static_pointer_cast<InterruptType>(last);
+							if(interrupt->intype == InterruptTypes::STOP || interrupt->intype == InterruptTypes::RET){
+								last = interrupt->payload;
+								break;
+							}
+							if(interrupt->intype == InterruptTypes::SKIP){
+								last = interrupt->payload;                        
+								continue;
+							}                                     
+						}
+
+					}
+
+
+
+					return last;
+
+				};				
+			}
 
 		}
 	}else{
 		// Is it a variable?
 		auto var = ctx->find(imp);
-		if(var->type == ItemType::FUNCTION){
+		if(var->type == ItemTypes::FUNCTION){
 
 			Context lctx(ctx);
 			auto func = static_cast<FunctionType*>(var.get());
