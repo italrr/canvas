@@ -513,6 +513,7 @@ struct Context {
 
 
 std::shared_ptr<Item> infer(const std::string &input, Context *ctx, Cursor *cursor){
+	std::cout << "infering \"" << input << "\"" << std::endl;
     // Number
     if(isNumber(input) && input.find(' ') == -1){
         auto result = std::make_shared<Item>(Item());
@@ -711,13 +712,14 @@ static std::shared_ptr<Item> eval(const std::string &input, Context *ctx, Cursor
 				return std::make_shared<Item>(Item());
 			}
 			std::vector<std::shared_ptr<Item>> operands;
+			bool useFuncParams = func->params.size() >= tokens.size()-1;
 			for(int i = 1; i < tokens.size(); ++i){
-				auto ev = eval(tokens[i], &lctx, cursor);
+				auto ev = infer(tokens[i], &lctx, cursor);
 				// ev->name = std::to_string(i-1);
 				if(useParams){
 					// ev->name = func->params[i-1];
 				}
-				lctx.add(func->params[i-1], ev);
+				lctx.add(useFuncParams ?  func->params[i-1] : "__param"+std::to_string(i), ev);
 				operands.push_back(ev);
 			} 
 			return func->lambda(operands, &lctx, cursor);  
@@ -766,7 +768,7 @@ int main(int argc, char* argv[]){
 	auto sum = std::make_shared<FunctionType>(FunctionType(
 		[](const std::vector<std::shared_ptr<Item>> &operands, Context *ctx, Cursor *cursor){
 			auto result = std::make_shared<Item>(Item());
-			float v = 0;
+			double v = 0;
 			for(unsigned i = 0; i < operands.size(); ++i){
 				if(operands[i]->type == ItemTypes::NUMBER){
 					v += *static_cast<double*>(operands[i]->data);
@@ -777,7 +779,7 @@ int main(int argc, char* argv[]){
 		}, {}
 	));
 
-	ctx.add("+", sum);
+	ctx.add("+", sum); 
 	// std::cout << eval("MOCK a:4 b:5", &ctx, &cursor)->str() << std::endl;
 	// std::cout << eval("set a 5", &ctx, &cursor)->str() << std::endl;
 
