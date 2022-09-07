@@ -1,4 +1,6 @@
 #include <iostream>
+#include <signal.h>
+#include <cstring>
 #include <vector>
 #include <memory>
 #include <mutex>
@@ -316,10 +318,11 @@ struct FunctionType : Item {
 			return std::make_shared<Item>(Item());
 		};  
 	}
-	FunctionType(   const std::string &name,
-				const std::function<std::shared_ptr<Item>(const std::vector<std::shared_ptr<Item>> &operands, Context &ctx, Cursor &cursor)> &lambda,
+	FunctionType(const std::function<std::shared_ptr<Item>(const std::vector<std::shared_ptr<Item>> &operands, Context *ctx, Cursor *cursor)> &lambda,
 				const std::vector<std::string> &params = {}){
-
+					this->type = ItemTypes::FUNCTION;
+					this->lambda = lambda;
+					this->params = params;
 				}
 	
 	void set(const std::string &body, const std::vector<std::string> &params = {}){
@@ -363,7 +366,7 @@ struct InterruptType : Item {
 	std::shared_ptr<Item> copy(){
 		auto r = std::make_shared<InterruptType>();
 		r->intype = intype;
-		return r;		
+		return std::static_pointer_cast<Item>(r);		
 	}
 
 	InterruptType(int intype = InterruptTypes::STOP, std::shared_ptr<Item> payload = std::make_shared<Item>(Item())){
@@ -609,7 +612,7 @@ static std::shared_ptr<Item> eval(const std::string &input, Context *ctx, Cursor
             if(tokens.size() > 1){
                 interrupt->payload = infer(tokens[1], ctx, cursor);
             }
-            return interrupt;  
+            return std::static_pointer_cast<Item>(interrupt);  
 		}else
 		// SKIP (skips current execution ie inside a loop, next iteration [do true [[std:print test][skip]]]))
 		if(imp == "skip"){
@@ -617,7 +620,7 @@ static std::shared_ptr<Item> eval(const std::string &input, Context *ctx, Cursor
             if(tokens.size() > 1){
                 interrupt->payload = infer(tokens[1], ctx, cursor);
             }
-            return interrupt;
+            return std::static_pointer_cast<Item>(interrupt);  
 		}else
 		// STOP (stops current execution [do [cond] [[std:print test][stop]]])
 		if(imp == "stop"){
@@ -625,7 +628,7 @@ static std::shared_ptr<Item> eval(const std::string &input, Context *ctx, Cursor
             if(tokens.size() > 1){
                 interrupt->payload = infer(tokens[1], ctx, cursor);
             }
-            return interrupt;
+            return std::static_pointer_cast<Item>(interrupt);  
 		}else
 		// IF conditional statement ([if [cond] [branch-true][branch-false]])
 		if(imp == "if"){
@@ -661,16 +664,17 @@ static std::shared_ptr<Item> eval(const std::string &input, Context *ctx, Cursor
 				} break;
 				case ItemTypes::LIST: {
 					auto list = static_cast<ListType*>(iteratable.get());
-					
 
 					std::shared_ptr<Item> last;
 					for(int i = 0; i < list->n; ++i){
 						
 						Context fctx(ctx);
+						
 						auto _it = list->list[i];
+						fctx.add(functIter->params[0], _it);
 						
 					
-						last = functIter->lambda(operands, &fctx, cursor);
+						last = functIter->lambda({_it}, &fctx, cursor);
 
 						if(last->type == ItemTypes::INTERRUPT){
 							auto interrupt = std::static_pointer_cast<InterruptType>(last);
@@ -729,6 +733,20 @@ static std::shared_ptr<Item> eval(const std::string &input, Context *ctx, Cursor
 
 }
 
+static bool isRunning = true;
+static Cursor cursor;
+static Context ctx;
+
+static void onExit(){
+	isRunning = false;
+	std::cout << ctx.str() << std::endl;
+}
+
+static void catchCtrlC(int s){
+	std::cout << "[CTRL+C]" << std::endl;
+	onExit();
+}
+
 
 
 
@@ -740,15 +758,31 @@ int main(int argc, char* argv[]){
 	};
 
 
+	signal(SIGINT, catchCtrlC);
+
 	// printList(parse("MOCK [ a:4 b:5 c:[fn [][print 'lol']] ]"));
 
-	Cursor cursor;
-	Context ctx;
+
+	auto sum = std::make_shared<FunctionType>(FunctionType(
+		[](const std::vector<std::shared_ptr<Item>> &operands, Context *ctx, Cursor *cursor){
+			auto result = std::make_shared<Item>(Item());
+			float v = 0;
+			for(unsigned i = 0; i < operands.size(); ++i){
+				if(operands[i]->type == ItemTypes::NUMBER){
+					v += *static_cast<double*>(operands[i]->data);
+				}
+			}
+			result->write(&v, sizeof(v), ItemTypes::NUMBER);
+			return result;
+		}, {}
+	));
+
+	ctx.add("+", sum);
 	// std::cout << eval("MOCK a:4 b:5", &ctx, &cursor)->str() << std::endl;
 	// std::cout << eval("set a 5", &ctx, &cursor)->str() << std::endl;
 
 
-	while(true){
+	while(isRunning){
 		std::cout << std::endl;
 		std::string input;
 		std::cout << "> ";
@@ -757,5 +791,8 @@ int main(int argc, char* argv[]){
 		std::cout << eval(input, &ctx, &cursor)->str() << std::endl;
 	}
 
+	onExit();
+
+	return 0;
 
 }

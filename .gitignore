@@ -1,6 +1,7 @@
 libcv_bin.a
 cv
 cvint.exe
+cvint
 cmake_install.cmake
 CMakeFiles/*
 Makefile
