@@ -1038,13 +1038,13 @@ int main(int argc, char* argv[]){
 	// std::cout << eval("set a 5", &ctx, &cursor)->str() << std::endl;
 
 
-	// while(isRunning){
-	// 	std::cout << std::endl;
-	// 	std::string input;
-	// 	std::cout << "> ";
-	// 	std::getline (std::cin, input);
-	// 	// std::cout << std::endl;
-		// std::cout << eval("[set a 0]", &ctx, &cursor)->str() << std::endl;
+	while(isRunning){
+		std::cout << std::endl;
+		std::string input;
+		std::cout << "> ";
+		std::getline (std::cin, input);
+		// std::cout << std::endl;
+		std::cout << eval(input, &ctx, &cursor)->str() << std::endl;
 		
 		// std::cout << eval("[1 2 3 4]", &ctx, &cursor)->str() << std::endl;
 		// if(cursor.error){
@@ -1055,8 +1055,8 @@ int main(int argc, char* argv[]){
 		// std::cout << eval("set a [proto a:1 b:2]", &ctx, &cursor)->str() << std::endl;
 		// std::cout << eval("a", &ctx, &cursor)->str() << std::endl;
 		//std::cout <<
-		 eval("set a [proto z:15 b:[fn [a][ret + 25 a]]]", &ctx, &cursor);// << std::endl;
-		std::cout << eval("a:b 1", &ctx, &cursor)->str() << std::endl;
+		//  eval("set a [proto z:15 b:[fn [a][ret + 25 a]]]", &ctx, &cursor);// << std::endl;
+		// std::cout << eval("a:b 1", &ctx, &cursor)->str() << std::endl;
 		// std::cout << eval("a 1", &ctx, &cursor)->str() << std::endl;
 
 
@@ -1067,7 +1067,7 @@ int main(int argc, char* argv[]){
 		// std::cout << eval("iter [1 2 3 4 5] [fn [set a [+ a 1]]]", &ctx, &cursor)->str() << std::endl;
 
 		// std::cout << eval("+ 1 1", &ctx, &cursor)->str() << std::endl;
-	// }
+	}
 
 	onExit();
 
