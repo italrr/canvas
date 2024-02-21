@@ -85,11 +85,26 @@ struct Cursor {
 };
 
 bool isNumber(const std::string &s){
-    return (s.find_first_not_of( "-.0123456789" ) == std::string::npos);
+    return (s.find_first_not_of( "-.0123456789") == std::string::npos);
+}
+
+bool isValidVarName(const std::string &s){
+    return (s.substr(0, 1).find_first_not_of( "-.0123456789" ) != std::string::npos);
 }
 
 bool isString(const std::string &s){
     return s.size() > 1 && s[0] == '\'' && s[s.length()-1] == '\'';
+}
+
+std::vector<std::string> split(const std::string &str, const char sep){
+	std::vector<std::string> tokens;
+	std::size_t start = 0, end = 0;
+	while ((end = str.find(sep, start)) != std::string::npos) {
+		tokens.push_back(str.substr(start, end - start));
+		start = end + 1;
+	}
+	tokens.push_back(str.substr(start));
+	return tokens;
 }
 
 bool isList(const std::string &s){
@@ -165,7 +180,7 @@ std::vector<std::string> parse(const std::string &input){
         }
     }
     if(open != 0){
-		std::cout << "bad parenthesis" << std::endl;
+		std::cout << "Bad parenthesis" << std::endl;
         // std::string error = "missing '"+std::string(open > 0 ? ")" : "(")+"' parenthesis";
         // printf("splitTokens: syntax error: %s\n", error.c_str());
     }
@@ -186,6 +201,7 @@ struct Item {
 	void *data;
 	unsigned size;
 	unsigned type;
+	std::unordered_map<std::string,std::shared_ptr<Item>> members;
 	Item(){
 		type = ItemTypes::NIL;
 		data = NULL;
@@ -218,7 +234,19 @@ struct Item {
 		return r;
 	}
 
-	virtual std::string str() const {
+	void registerProperty(const std::string &name, const std::shared_ptr<Item> &v){
+		this->members[name] = v;
+	}
+
+	std::shared_ptr<Item> getProperty(const std::string &name){
+		auto it = this->members.find(name);
+		if(it == this->members.end()){
+			return std::make_shared<Item>(Item());
+		}
+		return it->second;
+	}
+
+	virtual std::string str(bool singleLine = false) const {
 		switch(type){
 			case ItemTypes::NUMBER: {
 				std::ostringstream oss;
@@ -239,8 +267,66 @@ struct Item {
 	}	
 };
 
+struct NumberType : Item {
+
+
+	NumberType(){
+		this->type = ItemTypes::NUMBER;
+		this->data = new double(0);
+	}
+
+	~NumberType(){
+		this->clear();
+	}
+
+	void set(int n){
+		double _n = (double)n;
+		memcpy(this->data, &_n, sizeof(_n));
+	}
+
+	void set(float n){
+		double _n = (double)n;
+		memcpy(this->data, &_n, sizeof(_n));
+	}
+
+	void set(double n){
+		double _n = (double)n;
+		memcpy(this->data, &_n, sizeof(_n));
+	}
+
+	double get(){
+		double n;
+		memcpy(&n, this->data, sizeof(n));
+		return n;
+	}
+
+	std::shared_ptr<Item> copy(){
+		auto copy = std::make_shared<NumberType>(NumberType());
+		copy->set(get());
+		return std::static_pointer_cast<Item>(copy);
+	}	
+
+	std::string str(bool singleLine = false) const {
+		switch(type){
+			case ItemTypes::NUMBER: {
+				std::ostringstream oss;
+				oss << std::setprecision(8) << std::noshowpoint << *static_cast<double*>(data);
+				return oss.str();
+			} break;
+			case ItemTypes::NIL: {
+				return "nil";
+			} break;
+			default: 
+				// TODO: HANDLE ERROR
+				std::exit(1);
+		}		
+	}
+
+};
+
 struct StringType : Item {
 	std::string literal;
+	int length;
 	StringType(){
 		this->type = ItemTypes::STRING;
 		this->literal = "";
@@ -250,7 +336,13 @@ struct StringType : Item {
 		copy->literal = this->literal;
 		return std::static_pointer_cast<Item>(copy);
 	}
-	std::string str() const {
+	
+	void set(const std::string &v){
+		this->literal = v;
+		this->length = this->literal.length();
+	}	
+
+	std::string str(bool singleLine = false) const {
 		switch(type){
 			case ItemTypes::STRING: {
 				return "'"+this->literal+"'";
@@ -266,31 +358,35 @@ struct StringType : Item {
 };
 
 struct Context;
+static std::shared_ptr<Item> create(int n);
 static std::shared_ptr<Item> infer(const std::string &input, Context *ctx, Cursor *cursor);
 static std::shared_ptr<Item> eval(const std::string &input, Context *ctx, Cursor *cursor);
 
 struct ListType : Item {
-	int n;
 	std::vector<std::shared_ptr<Item>> list;
 	ListType(){
 		type = ItemTypes::LIST;
-		n = 0;
+		this->registerProperty("length", create(0));
 	}
 	void build(const std::vector<std::shared_ptr<Item>> &objects){
 		this->list = objects;
-		this->n = objects.size();
+		std::static_pointer_cast<NumberType>(this->getProperty("length"))->set((int)this->list.size());
+	}
+	void add(const std::shared_ptr<Item> &item){
+		this->list.push_back(item);
+		std::static_pointer_cast<NumberType>(this->getProperty("length"))->set((int)this->list.size());
 	}
 	std::shared_ptr<Item> copy(){
 		return std::make_shared<Item>(Item());
 	}
-	std::string str() const {
+	std::string str(bool singleLine = false) const {
 		switch(type){
 			case ItemTypes::LIST: {
 				std::string _params;
 				std::string buff = "";
-				for(int i = 0; i < n; ++i){
+				for(int i = 0; i < this->list.size(); ++i){
 					buff += list[i]->str();
-					if(i < n-1){
+					if(i < this->list.size()-1){
 						buff += " ";
 					}                
 				}
@@ -310,10 +406,11 @@ struct FunctionType : Item {
 	std::function<std::shared_ptr<Item>(const std::vector<std::shared_ptr<Item>> &operands, Context *ctx, Cursor *cursor)> lambda;
 	std::vector<std::string> params;
 	std::string body;
+	bool inner;
 	FunctionType(){
 		this->type = ItemTypes::FUNCTION;
 		this->body = "";
-		// this->innerType = true;
+		this->inner = false;
 		this->lambda = [](const std::vector<std::shared_ptr<Item>> &operands, Context *ctx, Cursor *cursor){
 			return std::make_shared<Item>(Item());
 		};  
@@ -323,6 +420,7 @@ struct FunctionType : Item {
 					this->type = ItemTypes::FUNCTION;
 					this->lambda = lambda;
 					this->params = params;
+					this->inner = true;
 				}
 	
 	void set(const std::string &body, const std::vector<std::string> &params = {}){
@@ -330,7 +428,7 @@ struct FunctionType : Item {
 			return eval(body, ctx, cursor);
 		};    
 		this->body = body;
-		// this->innerType = false;
+		this->inner = false;
 		this->params = params;
 	}
 	
@@ -338,9 +436,12 @@ struct FunctionType : Item {
 		return std::make_shared<Item>(Item());
 	}
 
-	std::string str() const {
+	std::string str(bool singleLine = false) const {
 		switch(type){
 			case ItemTypes::FUNCTION: {
+				if(this->inner){
+					return "[COMPILED]";
+				}
 				std::string _params;
 				for(int i = 0; i < params.size(); ++i){
 					_params += params[i];
@@ -348,7 +449,7 @@ struct FunctionType : Item {
 						_params += " ";
 					}
 				}
-				return "["+_params+"]["+body+"]";
+				return "fn ["+_params+"] -> ["+body+"]";
 			} break;
 			case ItemTypes::NIL: {
 				return "nil";
@@ -371,10 +472,10 @@ struct InterruptType : Item {
 
 	InterruptType(int intype = InterruptTypes::STOP, std::shared_ptr<Item> payload = std::make_shared<Item>(Item())){
 		this->type = ItemTypes::INTERRUPT;
-		this->intype = type;
+		this->intype = intype;
 		this->payload = payload;
 	}
-	std::string str() const {
+	std::string str(bool singleLine = false) const {
 		switch(type) {
 			case ItemTypes::INTERRUPT: {
 				switch(intype){
@@ -402,20 +503,24 @@ struct InterruptType : Item {
 };
 
 struct ProtoType : Item {
-	std::unordered_map<std::string, std::shared_ptr<Item>> items;
+
+	ProtoType(){
+		this->type = ItemTypes::PROTO;
+		this->registerProperty("length", create(0));
+	}
 
 	void populate(const std::vector<std::string> &names, const std::vector<std::shared_ptr<Item>> &values, Context *ctx, Cursor *cursor){
 		for(unsigned i = 0; i < names.size(); ++i){
-			this->items[names[i]] = values[i];
+			auto name = names[i];
+			this->registerProperty(names[i], values[i]);
 		}
+		std::static_pointer_cast<NumberType>(this->getProperty("length"))->set((int)members.size()-1);
 	}
 
-	std::shared_ptr<Item> get(const std::string &key){
-		auto it = this->items.find(key);
-		if(it == this->items.end()){
-			return std::shared_ptr<Item>(NULL);
-		}
-		return it->second;
+
+	void add(const std::string &name, std::shared_ptr<Item> &item, Context *ctx, Cursor *cursor){ 
+		this->registerProperty(name, item);
+		std::static_pointer_cast<NumberType>(this->getProperty("length"))->set((int)members.size()-1);
 	}
 
 	// std::shared_ptr<Item> copy(){
@@ -426,7 +531,7 @@ struct ProtoType : Item {
 	// 	return std::static_pointer_cast<Item>(copied);
 	// }
 
-	std::string str() const {
+	std::string str(bool singleLine = false) const {
 		auto addTab = [](unsigned n){
 			std::string tabs;
 			for(unsigned i = 0; i < n; ++i){
@@ -437,16 +542,23 @@ struct ProtoType : Item {
 		unsigned maxWidth = 0;
 		std::vector<std::string> names;
 		std::vector<std::string> values;
-		for(auto &it : this->items){
+		for(auto &it : this->members){
 			maxWidth = std::max((unsigned)it.first.length(), maxWidth);
 			names.push_back(it.first);
-			values.push_back(it.second->str());
+			values.push_back(it.second->str(true));
 		}		
-		std::string out;
+		std::string out = singleLine ? "PROTO " : "PROTO\n";
 		for(unsigned i = 0; i < names.size(); ++i){
-			out += names[i];
-			out += addTab(maxWidth);
-			out += std::string(": ") + values[i]+"\n";
+			if(singleLine){
+				out += names[i]+std::string(": ")+values[i];
+				if(i < names.size()-1){
+					out += ", ";
+				}
+			}else{
+				out += names[i];
+				out += addTab(maxWidth);
+				out += std::string(": ") + values[i]+"\n";
+			}
 		}
 		return out;
 	}
@@ -474,16 +586,17 @@ struct Context {
 		return str();
 	}
 
-	std::string str(bool ignoreInners = false) const {
+	std::string str(bool ignoreInners = true) const {
 		std::string output = "CONTEXT\n";
 
 		int fcol = 5;
 		int scol = 5;
 
 		for(auto &it : items){
-			// if(ignoreInners && it.second->innerType){
-			// 	continue;
-			// }
+			const auto item = it.second;
+			if(ignoreInners && item->type == ItemTypes::FUNCTION && std::static_pointer_cast<FunctionType>(item)->inner){
+				continue;
+			}
 			while(it.first.length() > fcol){
 				fcol += 5;
 			}
@@ -492,9 +605,10 @@ struct Context {
 		// scol = 5;
 
 		for(auto &it : items){
-			// if(ignoreInners && it.second->innerType){
-			// 	continue;
-			// }    
+			const auto item = it.second;
+			if(ignoreInners && item->type == ItemTypes::FUNCTION && std::static_pointer_cast<FunctionType>(item)->inner){
+				continue;
+			} 
 			output += it.first;
 			int toAdd = fcol - it.first.length();
 			for(int i = 0; i < toAdd; ++i){
@@ -504,7 +618,7 @@ struct Context {
 			for(int i = 0; i < scol; ++i){
 				output += " ";
 			}    
-			output += "'"+it.second->str()+"'\n";
+			output += "'"+it.second->str(true)+"'\n";
 		}
 
 		return output;
@@ -512,10 +626,19 @@ struct Context {
 };
 
 
+static std::shared_ptr<Item> create(int n){
+	auto result = std::make_shared<Item>(Item());
+	double v = n;
+	result->write(&v, sizeof(v), ItemTypes::NUMBER);
+	return result;	
+}
+
+
 std::shared_ptr<Item> infer(const std::string &input, Context *ctx, Cursor *cursor){
-	std::cout << "infering \"" << input << "\"" << std::endl;
     // Number
+
     if(isNumber(input) && input.find(' ') == -1){
+
         auto result = std::make_shared<Item>(Item());
         auto v = std::stod(input);
         result->write(&v, sizeof(v), ItemTypes::NUMBER);
@@ -528,6 +651,7 @@ std::shared_ptr<Item> infer(const std::string &input, Context *ctx, Cursor *curs
         return result;        
     }else
 	if(isList(input)){
+
 		auto result = std::make_shared<ListType>(ListType());
 		auto tokens = parse(input);
 		std::vector<std::shared_ptr<Item>> list;
@@ -537,7 +661,7 @@ std::shared_ptr<Item> infer(const std::string &input, Context *ctx, Cursor *curs
 		result->build(list);
 		return result;
 	}else{
-		return ctx->find(input);
+		return eval(input, ctx, cursor);
 	}
 }
 
@@ -550,17 +674,102 @@ static bool isReserved(const std::string &word){
 	return false;
 }
 
+static std::shared_ptr<Item> evalParams(std::vector<std::string> &tokens, int from, Context *ctx, Cursor *cursor){
+	std::string input = "";
+	for(int i = from; i < tokens.size(); ++i){
+		input += tokens[i];
+		if(i < tokens.size()-1){
+			input += " ";
+		}
+	}
+	return eval(input, ctx, cursor);
+}
+
+static std::vector<std::string> compileParams(std::vector<std::string> &tokens, int from){
+	std::vector<std::string> compiled;
+	for(int i = from; i < tokens.size(); ++i){
+		compiled.push_back(tokens[i]);
+	}
+	return compiled;
+}
+
+static std::vector<std::string> getCleanTokens(std::string &input){
+	auto tokens = parse(input);
+
+    if(tokens.size() == 1 && tokens[0][0] == '[' && tokens[0][tokens[0].length()-1] == ']'){
+		auto trimmed = tokens[0].substr(1, tokens[0].length() - 2);
+        return getCleanTokens(trimmed);
+    }	
+
+	return tokens;
+}
+
+static std::shared_ptr<Item> runFunction(std::shared_ptr<Item> &fn, const std::vector<std::string> &tokens, Context *ctx, Cursor *cursor){
+	Context lctx(ctx);
+
+	auto func = static_cast<FunctionType*>(fn.get());
+	bool useParams = func->params.size() > 0;
+
+	if(useParams && func->params.size() != tokens.size()){
+		std::cout << "fn '" << "': expected [" << func->params.size() << "] arguments, received [" << tokens.size() << "]" << std::endl;
+		return std::make_shared<Item>(Item());
+	}
+
+	std::vector<std::shared_ptr<Item>> operands;
+	bool useFuncParams = func->params.size() >= tokens.size();
+	for(int i = 0; i < tokens.size(); ++i){
+		auto ev = infer(tokens[i], &lctx, cursor);
+		// ev->name = std::to_string(i-1);
+		if(useParams){
+			// ev->name = func->params[i-1];
+		}
+		lctx.add(useFuncParams ?  func->params[i] : "__param"+std::to_string(i), ev);
+		operands.push_back(ev);
+	} 
+	return func->lambda(operands, &lctx, cursor); 
+}
+
 static std::shared_ptr<Item> eval(const std::string &input, Context *ctx, Cursor *cursor){
 	auto tokens = parse(input);
 
 
+	// scope modifier
+	std::string scopeMod = "";
+	if(tokens[0].find(':') != -1 && tokens[0][0] != '[' && tokens[0][tokens[0].length()-1] != ']'){
+
+
+
+		int fc = tokens[0].find(':');
+		std::string varname = tokens[0].substr(0, fc);
+		scopeMod = tokens[0].substr(fc+1, tokens[0].length()-fc-1);
+		tokens[0] = varname;
+
+
+	}
+
 	auto imp = tokens[0];
 
-    if(tokens.size() == 1 && tokens[0].length() > 1 && tokens[0][0] == '[' && tokens[0][tokens[0].length()-1] == ']'){
-        imp = tokens[0].substr(1, tokens[0].length() - 2);
-        return eval(imp, ctx, cursor);
-    }
 
+    if(tokens.size() == 1 && tokens[0].length() > 1 && tokens[0][0] == '[' && tokens[0][tokens[0].length()-1] == ']'){
+        imp = tokens[0].substr(1, tokens[0].length() - 2);		
+        auto obj = eval(imp, ctx, cursor);
+		if(scopeMod.size() > 0){
+
+			obj = obj->getProperty(scopeMod);
+
+			if(obj->type == ItemTypes::FUNCTION){
+				auto params = compileParams(tokens, 1);
+				return runFunction(obj, params, ctx, cursor);
+			}else{
+				return obj;
+			}
+		}
+		return obj;
+    }
+	
+
+
+	// Reserved imperative
 	if(isReserved(imp)){
 		// NIL
 		if(imp == "nil"){
@@ -570,6 +779,14 @@ static std::shared_ptr<Item> eval(const std::string &input, Context *ctx, Cursor
 		if(imp == "set"){
 			auto name =  tokens[1];
 			auto val = eval(tokens[2], ctx, cursor);
+			if(val->type == ItemTypes::INTERRUPT){
+				auto interrupt = std::static_pointer_cast<InterruptType>(val);
+				if(interrupt->intype == InterruptTypes::RET){
+					val = interrupt->payload;
+				}else{
+					val = std::make_shared<Item>(Item());
+				}
+			}
 			ctx->add(name, val);
 			return val;
 		}else
@@ -577,16 +794,21 @@ static std::shared_ptr<Item> eval(const std::string &input, Context *ctx, Cursor
 		if(imp == "proto"){
 			auto proto = std::make_shared<ProtoType>(ProtoType());
 
+
+
 			std::vector<std::string> names;
 			std::vector<std::shared_ptr<Item>> values;
 
+
 			for(unsigned i = 1; i < tokens.size(); ++i){
+
 				auto &token = tokens[i];
 
 				auto fc = token.find(":");
 
 				std::string varname = token.substr(0, fc);
 				std::string varvalue = token.substr(fc+1, token.length()-fc-1);
+
 
 				names.push_back(varname);
 				values.push_back(eval(varvalue, ctx, cursor));
@@ -610,24 +832,27 @@ static std::shared_ptr<Item> eval(const std::string &input, Context *ctx, Cursor
 		// RET
 		if(imp == "ret"){
             auto interrupt = std::make_shared<InterruptType>(InterruptType(InterruptTypes::RET));
+			// eval parameters
             if(tokens.size() > 1){
-                interrupt->payload = infer(tokens[1], ctx, cursor);
+                interrupt->payload = evalParams(tokens, 1, ctx, cursor);
             }
             return std::static_pointer_cast<Item>(interrupt);  
 		}else
 		// SKIP (skips current execution ie inside a loop, next iteration [do true [[std:print test][skip]]]))
 		if(imp == "skip"){
             auto interrupt = std::make_shared<InterruptType>(InterruptType(InterruptTypes::SKIP));
+			// eval parameters
             if(tokens.size() > 1){
-                interrupt->payload = infer(tokens[1], ctx, cursor);
+				interrupt->payload = evalParams(tokens, 1, ctx, cursor);
             }
             return std::static_pointer_cast<Item>(interrupt);  
 		}else
 		// STOP (stops current execution [do [cond] [[std:print test][stop]]])
 		if(imp == "stop"){
             auto interrupt = std::make_shared<InterruptType>(InterruptType(InterruptTypes::STOP));
+			// eval parameters
             if(tokens.size() > 1){
-                interrupt->payload = infer(tokens[1], ctx, cursor);
+				interrupt->payload = evalParams(tokens, 1, ctx, cursor);	
             }
             return std::static_pointer_cast<Item>(interrupt);  
 		}else
@@ -645,19 +870,39 @@ static std::shared_ptr<Item> eval(const std::string &input, Context *ctx, Cursor
 				return std::make_shared<Item>(Item());
 			}
 			auto iteratable = eval(tokens[1], ctx, cursor);
-			auto function = eval(tokens[2], ctx, cursor);
+			int readFrom = 2;
+			std::vector<std::string> names; // first is the name that one current item receives. for dictionaries, the second is always the name of the key
+
+			if(tokens[2] == "as"){
+				if(tokens.size() < 4){
+					cursor->setError("iter: invalid number of parameters. Example: iter [1 2 3] as [i] [CODE]\nor iter [1 2 3] as [v, k] [CODE]");
+					return std::make_shared<Item>(Item());					
+				}
+				names = getCleanTokens(tokens[3]);
+				readFrom += 2;
+			}
+
 
 			if(iteratable->type != ItemTypes::LIST && iteratable->type != ItemTypes::PROTO){
-				// TODO: ERROR
+				cursor->setError("iter requires an iterable as first parameter");
 				return std::make_shared<Item>(Item());
 			}
 
-			if(function->type != ItemTypes::FUNCTION){
-				// TODO: ERROR
-				return std::make_shared<Item>(Item());
-			}			
+			std::string varName = names.size() > 0 ? names[0] : "";
+			if(iteratable->type == ItemTypes::LIST && names.size() > 0){
+				if(!isValidVarName(varName)){
+					cursor->setError("iter: invalid name for iteration variable "+varName);
+					return std::make_shared<Item>(Item());					
+				}
+			}
 
-			auto functIter = static_cast<FunctionType*>(function.get());
+			std::string keyName = names.size() > 1 ? names[1] : ""; 
+			if(iteratable->type == ItemTypes::PROTO && names.size() > 1){
+				if(!isValidVarName(keyName)){
+					cursor->setError("iter: invalid name for iteration key "+keyName);
+					return std::make_shared<Item>(Item());					
+				}
+			}			
 
 			switch(iteratable->type){
 				case ItemTypes::PROTO: {
@@ -665,66 +910,64 @@ static std::shared_ptr<Item> eval(const std::string &input, Context *ctx, Cursor
 				} break;
 				case ItemTypes::LIST: {
 					auto list = static_cast<ListType*>(iteratable.get());
-
-					std::shared_ptr<Item> last;
-					for(int i = 0; i < list->n; ++i){
-						
+					std::shared_ptr<ListType> last = std::make_shared<ListType>(ListType());
+					for(int i = 0; i < list->list.size(); ++i){
+						auto current = list->list[i];
 						Context fctx(ctx);
-						
-						auto _it = list->list[i];
-						fctx.add(functIter->params[0], _it);
-						
-					
-						last = functIter->lambda({_it}, &fctx, cursor);
-
-						if(last->type == ItemTypes::INTERRUPT){
-							auto interrupt = std::static_pointer_cast<InterruptType>(last);
-							if(interrupt->intype == InterruptTypes::STOP || interrupt->intype == InterruptTypes::RET){
-								last = interrupt->payload;
-								break;
-							}
-							if(interrupt->intype == InterruptTypes::SKIP){
-								last = interrupt->payload;                        
-								continue;
-							}                                     
+						if(varName.size() > 0){
+							fctx.add(varName, current);
 						}
-
+						auto item = evalParams(tokens, readFrom, &fctx, cursor);
+						if(cursor->error){
+							return std::make_shared<Item>(Item());
+						}
+						if(item->type == ItemTypes::INTERRUPT){
+							auto interrupt = std::static_pointer_cast<InterruptType>(item);
+							if(interrupt->intype == InterruptTypes::RET){
+								last->add(interrupt->payload);
+							}
+						}else
+						if(item->type == ItemTypes::FUNCTION){
+							auto funct = std::static_pointer_cast<FunctionType>(item);
+							std::vector<std::shared_ptr<Item>> params = { current };
+							last->add(funct->lambda(params, &fctx, cursor));
+						}else{
+							last->add(item);
+						}
 					}
-
-
-
 					return last;
-
 				};				
 			}
 
 		}
 	}else{
-		// Is it a variable?
+	// Defined symbol
 		auto var = ctx->find(imp);
+		if(var->type == ItemTypes::NUMBER || var->type == ItemTypes::PROTO || var->type == ItemTypes::LIST || var->type == ItemTypes::STRING){
+			if(scopeMod.length() > 0){
+				auto obj = var->getProperty(scopeMod);
+				if(obj->type == ItemTypes::FUNCTION){
+					auto params = compileParams(tokens, 1);
+					auto result = runFunction(obj, params, ctx, cursor);
+					if(result->type == ItemTypes::INTERRUPT){
+						auto interrupt = std::static_pointer_cast<InterruptType>(result);
+						if(interrupt->intype == InterruptTypes::RET){
+							return interrupt->payload;
+						}
+					}else{
+						return obj;
+					}
+				}else{
+					return obj;
+				}
+			}
+			return var;
+
+		}else
 		if(var->type == ItemTypes::FUNCTION){
 
-			Context lctx(ctx);
-			auto func = static_cast<FunctionType*>(var.get());
-			bool useParams = func->params.size() > 0;
-			if(useParams && func->params.size() != tokens.size()-1){
-				std::cout << "fn '" << imp << "': expected [" << func->params.size() << "] arguments, received [" << tokens.size()-1 << "]" << std::endl;
-				return std::make_shared<Item>(Item());
-			}
-			std::vector<std::shared_ptr<Item>> operands;
-			bool useFuncParams = func->params.size() >= tokens.size()-1;
-			for(int i = 1; i < tokens.size(); ++i){
-				auto ev = infer(tokens[i], &lctx, cursor);
-				// ev->name = std::to_string(i-1);
-				if(useParams){
-					// ev->name = func->params[i-1];
-				}
-				lctx.add(useFuncParams ?  func->params[i-1] : "__param"+std::to_string(i), ev);
-				operands.push_back(ev);
-			} 
-			return func->lambda(operands, &lctx, cursor);  
-
-		// Let infer take care of the rest otherwise
+			auto params = compileParams(tokens, 1);
+			return runFunction(var, params, ctx, cursor);
 		}else{
 			return infer(input, ctx, cursor);
 		}
@@ -765,8 +1008,7 @@ int main(int argc, char* argv[]){
 	// printList(parse("MOCK [ a:4 b:5 c:[fn [][print 'lol']] ]"));
 
 
-	auto sum = std::make_shared<FunctionType>(FunctionType(
-		[](const std::vector<std::shared_ptr<Item>> &operands, Context *ctx, Cursor *cursor){
+	ctx.add("+", std::make_shared<FunctionType>(FunctionType([](const std::vector<std::shared_ptr<Item>> &operands, Context *ctx, Cursor *cursor){
 			auto result = std::make_shared<Item>(Item());
 			double v = 0;
 			for(unsigned i = 0; i < operands.size(); ++i){
@@ -777,21 +1019,55 @@ int main(int argc, char* argv[]){
 			result->write(&v, sizeof(v), ItemTypes::NUMBER);
 			return result;
 		}, {}
-	));
+	))); 
 
-	ctx.add("+", sum); 
+	ctx.add("-", std::make_shared<FunctionType>(FunctionType([](const std::vector<std::shared_ptr<Item>> &operands, Context *ctx, Cursor *cursor){
+			auto result = std::make_shared<Item>(Item());
+			double v = 0;
+			for(unsigned i = 0; i < operands.size(); ++i){
+				if(operands[i]->type == ItemTypes::NUMBER){
+					v -= *static_cast<double*>(operands[i]->data);
+				}
+			}
+			result->write(&v, sizeof(v), ItemTypes::NUMBER);
+			return result;
+		}, {}
+	))); 
+
 	// std::cout << eval("MOCK a:4 b:5", &ctx, &cursor)->str() << std::endl;
 	// std::cout << eval("set a 5", &ctx, &cursor)->str() << std::endl;
 
 
-	while(isRunning){
-		std::cout << std::endl;
-		std::string input;
-		std::cout << "> ";
-		std::getline (std::cin, input);
-		// std::cout << std::endl;
-		std::cout << eval(input, &ctx, &cursor)->str() << std::endl;
-	}
+	// while(isRunning){
+	// 	std::cout << std::endl;
+	// 	std::string input;
+	// 	std::cout << "> ";
+	// 	std::getline (std::cin, input);
+	// 	// std::cout << std::endl;
+		// std::cout << eval("[set a 0]", &ctx, &cursor)->str() << std::endl;
+		
+		// std::cout << eval("[1 2 3 4]", &ctx, &cursor)->str() << std::endl;
+		// if(cursor.error){
+		// 	std::cout << cursor.message << std::endl;
+		// }
+
+		// std::cout << eval("set b [fn [a][ret + a 1]]", &ctx, &cursor)->str() << std::endl;
+		// std::cout << eval("set a [proto a:1 b:2]", &ctx, &cursor)->str() << std::endl;
+		// std::cout << eval("a", &ctx, &cursor)->str() << std::endl;
+		//std::cout <<
+		 eval("set a [proto z:15 b:[fn [a][ret + 25 a]]]", &ctx, &cursor);// << std::endl;
+		std::cout << eval("a:b 1", &ctx, &cursor)->str() << std::endl;
+		// std::cout << eval("a 1", &ctx, &cursor)->str() << std::endl;
+
+
+		// if(cursor.error){
+		// 	std::cout << cursor.message << std::endl;
+		// }
+
+		// std::cout << eval("iter [1 2 3 4 5] [fn [set a [+ a 1]]]", &ctx, &cursor)->str() << std::endl;
+
+		// std::cout << eval("+ 1 1", &ctx, &cursor)->str() << std::endl;
+	// }
 
 	onExit();
 

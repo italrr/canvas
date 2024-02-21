@@ -13,7 +13,7 @@ Short summary:
 - Recursion highly encouraged
 - Prefix Notation
 - No classes
-- Objects are defined by the `proto` procedure. Objects bodies are JSON objects basically, but with the ability to define `cv` expressions
+- Objects are defined by the `proto` imperative.
 - Designed to imitate the functional paradigm but only superficially.  
 - Similarly to LISP, it tries to treat everything as a list.
 - Strings are only formed with double quotes `"EXAMPLE"`
@@ -26,11 +26,11 @@ Short summary:
 [(MODIFIER/CONTEXT-SWITCH:)IMPERATIVE(:MEMBER/TRAIT) ARGUMENTS]
 ```
 
-Every statement must start a IMPERATIVE except in case of lists.
+Every statement must start a IMPERATIVE otherwise the statement is interprete as natural type (List, Number, etc)
 
 # Why?
 
-Because I want to. I don't care if people ever learn it or adopt it, it's not my intention. However, I will be using this language to add scripting/interactibility to my other projects.
+This is rather a toy project, for me to learn. I don't expect it to become anything serious.
 
 # Examples
 
@@ -44,16 +44,16 @@ Because I want to. I don't care if people ever learn it or adopt it, it's not my
 
 // Sum of two variables
 [
-    [def a 5]
-    [def b 5]
+    [set a 5]
+    [set b 5]
     [std:out + a b]
 ]
 >10
 
 // Getting the average of a list
 [
-    [def l [2 5 6]]
-    [def avg [/ [+ l:pop] l:length]]
+    [set l [2 5 6]]
+    [set avg [/ [+ l:pop] l:length]]
 ]
 >4.333...
 /*
@@ -64,28 +64,15 @@ Because I want to. I don't care if people ever learn it or adopt it, it's not my
 ```
 
 ## Some explanation
+
 Colons before an imperative are either modifiers or request a context. A context is pretty much any block code. For example, an expression defined inside of a `proto`, the context is everything inside the `proto` itself.
 Colons after the imperative are either behavioral traits or members of the imperative. Imperatives can be `proto`, constants or functions.
 
 ## Behavioral Traits vs Functions
+
 Behavioral traits are essentially functions, but only act depending on the context (operator/imperative context, not code block "context").
 
-## How to define a library or includable file
 
-```
-[
-    std:module "library-name" [
-        proto [
-            "print": [ fn [input] [std::out input "\n"] ],
-            "uint8": [ trait integer [[traits:numerical_operation self:value] [traits:literal_operation [fn [][return string self:value]]]] [traits:any [integer:min 0] [integer:max 255] integer:signed] ] 
-        ] 
-    ]
-]
-EOF
-```
+## Libraries
 
-This library then can be imported by using the statement `[std:import "library-name"]`. The interpreter will look for a file named `library-name` locally. If not found, then it will check the libraries installed in `/usr/lib/canvas/`. if not found, the
-interpreter will either throw a warning and continue or stop the program's execution (depending if the interpreter was executed with the `--relaxed` argument).
-
-The items defined inside this library are a function called print which basically takes any string and then calls a function called `out` from `std`, and then adds "\n".
-The other item is a trait that tells any other defined with this trait will be an `integer`, whose only working actionable contexts are numerical or literal.
+Libraries can be imported by using the statement `[std:import "library-name"]`. The interpreter will look for a file named `library-name` locally. If not found, then it will check the libraries installed in `/usr/lib/cv/`. if not found, the interpreter will either throw a warning and continue or stop the program's execution (depending if the interpreter was executed with the `--relaxed` argument).
