@@ -65,8 +65,7 @@ This is rather a toy project, for me to learn. I don't expect it to become anyth
 
 ## Some explanation
 
-Colons before an imperative are either modifiers or request a context. A context is pretty much any block code. For example, an expression defined inside of a `proto`, the context is everything inside the `proto` itself.
-Colons after the imperative are either behavioral traits or members of the imperative. Imperatives can be `proto`, constants or functions.
+Colons after an imperative are either modifiers or request a context. A context is pretty much any block code. For example, an expression defined inside of a `proto`, the context is everything inside the `proto` itself. Colons after the imperative are either behavioral traits or members of the imperative. Imperatives can be `proto`, constants or functions.
 
 ## Behavioral Traits vs Functions
 
