@@ -904,6 +904,7 @@ static std::shared_ptr<Item> eval(const std::string &input, std::shared_ptr<Item
 		// ITER goes through a list ([iter [1 2 3 4] [code]...[code]]) ([iter [proto a:1 b:2 c:3] [code]...[code]])
 		if(imp == "iter"){
 			if(tokens.size() < 3){
+				cursor->setError("operator 'iter': expects at least 2 arguments");
 				return std::make_shared<Item>(Item());
 			}
 			auto iteratable = eval(tokens[1], ctx, cursor);
@@ -914,7 +915,7 @@ static std::shared_ptr<Item> eval(const std::string &input, std::shared_ptr<Item
 			int readFrom = 2;
 
 			if(iteratable->type != ItemTypes::LIST && iteratable->type != ItemTypes::PROTO){
-				cursor->setError("iter requires an iterable as first parameter");
+				cursor->setError("operator 'iter': expects an iterable as first arguments");
 				return std::make_shared<Item>(Item());
 			}
 	
@@ -1103,6 +1104,57 @@ static void catchCtrlC(int s){
 	std::cout << "[CTRL+C]" << std::endl;
 	onExit();
 }
+
+static std::shared_ptr<Item> __sum_number(std::shared_ptr<Item> &a, std::shared_ptr<Item> &b, std::string &error){
+	double v =  *static_cast<double*>(std::static_pointer_cast<NumberType>(a)->data) + *static_cast<double*>(std::static_pointer_cast<NumberType>(b)->data);
+	return create(v);
+}
+
+static std::shared_ptr<Item> __rest_number(std::shared_ptr<Item> &a, std::shared_ptr<Item> &b, std::string &error){
+	double v =  *static_cast<double*>(std::static_pointer_cast<NumberType>(a)->data) - *static_cast<double*>(std::static_pointer_cast<NumberType>(b)->data);
+	return create(v);
+}
+
+static std::shared_ptr<Item> __mult_number(std::shared_ptr<Item> &a, std::shared_ptr<Item> &b, std::string &error){
+	double v =  *static_cast<double*>(std::static_pointer_cast<NumberType>(a)->data) * *static_cast<double*>(std::static_pointer_cast<NumberType>(b)->data);
+	return create(v);
+}
+
+static std::shared_ptr<Item> __div_number(std::shared_ptr<Item> &a, std::shared_ptr<Item> &b, std::string &error){
+	double _b = *static_cast<double*>(std::static_pointer_cast<NumberType>(b)->data);
+	if(_b == 0){
+		error = "division by zero";
+		return std::make_shared<Item>(Item());
+	}
+	double v =  *static_cast<double*>(std::static_pointer_cast<NumberType>(a)->data) / _b;
+	return create(v);
+}
+
+static std::shared_ptr<Item> __sum_string(std::shared_ptr<Item> &a, std::shared_ptr<Item> &b, std::string &error){
+	std::string concat = std::static_pointer_cast<StringType>(a)->literal + std::static_pointer_cast<StringType>(b)->literal;
+	auto out = std::make_shared<StringType>(StringType());
+	out->set(concat);
+	return std::static_pointer_cast<Item>(out);
+}
+
+static std::unordered_map<unsigned, std::unordered_map<std::string, std::shared_ptr<Item>(*)(std::shared_ptr<Item> &a, std::shared_ptr<Item> &b, std::string &error)>> binaryOperators = {
+	{ItemTypes::NUMBER,	{
+		{ "+", &__sum_number },
+		{ "-", &__rest_number },
+		{ "*", &__mult_number },
+		{ "/", &__div_number }
+		}
+	},
+	{ItemTypes::STRING,	{
+		{ "+", &__sum_string },
+		}
+	}	
+};
+
+static void registerTypicalOperators(std::shared_ptr<Item> &ctx){
+	
+}
+
 
 int main(int argc, char* argv[]){
 
