@@ -17,27 +17,27 @@
         static void registerLibrary(std::shared_ptr<CV::Item> &ctx){
             auto lib = std::make_shared<CV::ProtoType>(CV::ProtoType());
 
-            lib->registerProperty("window", std::make_shared<CV::FunctionType>(CV::FunctionType([](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
+            lib->registerProperty("window-create", std::make_shared<CV::FunctionType>(CV::FunctionType([](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
                     return CV::create(1);
                 }, {}
             )));
 
-            lib->registerProperty("close", std::make_shared<CV::FunctionType>(CV::FunctionType([](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
+            lib->registerProperty("window-close", std::make_shared<CV::FunctionType>(CV::FunctionType([](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
                     return CV::create(1);
                 }, {}
             )));          
 
-            lib->registerProperty("pixel", std::make_shared<CV::FunctionType>(CV::FunctionType([](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
+            lib->registerProperty("r-pixel", std::make_shared<CV::FunctionType>(CV::FunctionType([](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
                     return CV::create(1);
                 }, {}
             )));
 
-           lib->registerProperty("fillrect", std::make_shared<CV::FunctionType>(CV::FunctionType([](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
+           lib->registerProperty("r-fillrect", std::make_shared<CV::FunctionType>(CV::FunctionType([](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
                     return CV::create(1);
                 }, {}
             )));
 
-           lib->registerProperty("rect", std::make_shared<CV::FunctionType>(CV::FunctionType([](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
+           lib->registerProperty("r-rect", std::make_shared<CV::FunctionType>(CV::FunctionType([](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
                     return CV::create(1);
                 }, {}
             )));      
