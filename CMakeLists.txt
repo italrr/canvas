@@ -13,5 +13,5 @@ set (cv_src
 add_library(cv_bin ${cv_src})
 target_link_libraries(cv_bin -pthread)
 
-add_executable(cv src/repl.cpp)
+add_executable(cv src/interpreter.cpp)
 target_link_libraries(cv cv_bin)

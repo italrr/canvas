@@ -215,5 +215,7 @@
         void registerEmbeddedOperators(std::shared_ptr<CV::Item> &ctx);
     }
 
+    #include "libs/io.hpp"
+
 
 #endif

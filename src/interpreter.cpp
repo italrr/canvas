@@ -43,7 +43,8 @@ std::shared_ptr<ExecArg> getParam(std::vector<std::string> &params, const std::s
 int main(int argc, char* argv[]){
 	// Context with standard operators
 	CV::registerEmbeddedOperators(ctx);
-
+	io::registerLibrary(ctx);
+	
 	std::vector<std::string> params;
 	for(int i = 0; i < argc; ++i){
 		params.push_back(std::string(argv[i]));
@@ -52,6 +53,7 @@ int main(int argc, char* argv[]){
 	auto dashFile = getParam(params, "-f");
 	auto dashRepl = getParam(params, "-r", true);
 	auto dashRelax = getParam(params, "--relaxed", true);
+	std::cout << dashRelax->valid << std::endl;
 
 	if(dashFile.get() && dashFile->valid){
 		std::ifstream file(dashFile->val);
@@ -77,10 +79,12 @@ int main(int argc, char* argv[]){
 			std::getline (std::cin, input);
 
 			if(input.size() > 0){
-				std::cout << eval(input, ctx, &cursor)->str();
+				std::cout << eval(input, ctx, &cursor)->str() << std::endl;
 				if(cursor.error){
 					std::cout <<  cursor.message << std::endl;
-					std::exit(1);
+					if(!dashRelax->valid){
+						std::exit(1);
+					}
 				}
 			}
 		}

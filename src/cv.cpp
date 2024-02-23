@@ -97,10 +97,40 @@ namespace CV {
 				}
 				if(comm){
 					continue;
+				}        
+				// escape characters
+				if(str && c == '\\' && i < input.length()-1){
+					char nc = input[i + 1];
+					// new line
+					if(nc == 'n'){
+						i += 1;
+						hold += "\n";
+						continue;
+					}
+					// tab
+					if(nc == 't'){
+						i += 1;
+						hold += "\t";
+						continue;
+					}	
+					// slash
+					if(nc == '\\'){
+						i += 1;
+						hold += "\\";
+						continue;
+					}
+					// single quote
+					if(nc == '\''){
+						i += 1;
+						hold += "'";
+						continue;
+					}														
 				}
+
 				if(c == '\''){
 					str = !str;
-				}           
+				}   
+
 				hold += c;     
 				
 				mod = !str && open == 0 && c == ']' && i < input.length()-1 && (input[i+1] == '~' || input[i+1] == ':');
@@ -346,7 +376,7 @@ void CV::StringType::set(const std::string &v){
 std::string CV::StringType::str(bool singleLine) const {
 	switch(type){
 		case ItemTypes::STRING: {
-			return "'"+this->literal+"'";
+			return this->literal;
 		} break;
 		case ItemTypes::NIL: {
 			return "nil";
