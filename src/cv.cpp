@@ -71,6 +71,10 @@ namespace Tools {
 		return (s.find_first_not_of( "-.0123456789") == std::string::npos);
 	}
 
+	static double positive(double n){
+		return n < 0 ? n * -1.0 : n;
+	}
+
 	static bool isValidVarName(const std::string &s){
 		return (s.substr(0, 1).find_first_not_of( "-.0123456789" ) != std::string::npos);
 	}
@@ -129,7 +133,7 @@ namespace Tools {
 		return cpy;
 	}
 
-	static std::vector<std::string> parse(const std::string &input){
+	static std::vector<std::string> parse(const std::string &input, std::string &error){
 		auto clean = Tools::removeExtraSpace(input);
 		std::vector<std::string> tokens;
 		int open = 0;
@@ -167,9 +171,8 @@ namespace Tools {
 			}
 		}
 		if(open != 0){
-			std::cout << "Bad parenthesis" << std::endl;
-			// std::string error = "missing '"+std::string(open > 0 ? ")" : "(")+"' parenthesis";
-			// printf("splitTokens: syntax error: %s\n", error.c_str());
+			error = "Bad parenthesis";
+			return {};
 		}
 		return tokens;
 	}
@@ -186,7 +189,7 @@ namespace Tools {
 				break;
 			}else
 			if(c == ':' || c == '~'){
-				mods[std::string()+c] = hold;
+				mods[std::string()+c] = std::string(hold.rbegin(), hold.rend());
 				hold = "";
 				--i;
 				lastFound = i;
@@ -201,12 +204,16 @@ namespace Tools {
 
 	}
 
-	static std::vector<std::string> getCleanTokens(std::string &input){
-		auto tokens = Tools::parse(input);
+	static std::vector<std::string> getCleanTokens(std::string &input, std::string &error){
+		auto tokens = Tools::parse(input, error);
+
+		if(error.size() > 0){
+			return {};
+		}
 
 		if(tokens.size() == 1 && tokens[0][0] == '[' && tokens[0][tokens[0].length()-1] == ']'){
 			auto trimmed = tokens[0].substr(1, tokens[0].length() - 2);
-			return getCleanTokens(trimmed);
+			return getCleanTokens(trimmed, error);
 		}	
 
 		return tokens;
@@ -335,7 +342,7 @@ struct Item {
 	}	
 };
 
-static std::shared_ptr<Item> create(int n);
+static std::shared_ptr<Item> create(double n);
 static std::shared_ptr<Item> infer(const std::string &input, std::shared_ptr<Item> &ctx, Cursor *cursor);
 static std::shared_ptr<Item> eval(const std::string &input, std::shared_ptr<Item> &ctx, Cursor *cursor);
 
@@ -412,6 +419,15 @@ struct StringType : Item {
 		return std::static_pointer_cast<Item>(copy);
 	}
 	
+	std::shared_ptr<Item> get(int index){
+		if(index < 0 || index >= this->literal.size()){
+			return std::make_shared<Item>(Item());
+		}
+		auto result = std::make_shared<StringType>(StringType());	
+		result->set(std::string()+this->literal[index]);
+		return result;
+	}
+
 	void set(const std::string &v){
 		this->literal = v;
 		std::static_pointer_cast<NumberType>(this->getProperty("length"))->set((int)this->literal.size());
@@ -449,6 +465,13 @@ struct ListType : Item {
 		this->list.push_back(item);
 		std::static_pointer_cast<NumberType>(this->getProperty("length"))->set((int)this->list.size());
 	}
+	std::shared_ptr<Item> get(int index){
+		if(index < 0 || index >= this->list.size()){
+			return std::make_shared<Item>(Item());
+		}
+		return this->list[index];
+	}
+
 	std::shared_ptr<Item> copy(){
 		return std::make_shared<Item>(Item());
 	}
@@ -458,7 +481,7 @@ struct ListType : Item {
 				std::string _params;
 				std::string buff = "";
 				for(int i = 0; i < this->list.size(); ++i){
-					buff += list[i]->str();
+					buff += list[i]->str(false);
 					if(i < this->list.size()-1){
 						buff += " ";
 					}                
@@ -596,6 +619,17 @@ struct ProtoType : Item {
 		std::static_pointer_cast<NumberType>(this->getProperty("length"))->set((int)members.size()-1);
 	}
 
+	std::vector<std::string> getKeys(){
+		std::vector<std::string> names;
+		for(auto &it : this->members){
+			if(it.first == "length"){
+				continue;
+			}
+			names.push_back(it.first);
+		}
+		return names;
+	}
+
 	// std::shared_ptr<Item> copy(){
 	// 	auto copied = std::shared_ptr<MOCK>(new MOCK());
 	// 	for(auto &it : this->items){
@@ -639,7 +673,7 @@ struct ProtoType : Item {
 
 };
 
-static std::shared_ptr<Item> create(int n){
+static std::shared_ptr<Item> create(double n){
 	auto result = std::make_shared<Item>(Item());
 	double v = n;
 	result->write(&v, sizeof(v), ItemTypes::NUMBER);
@@ -652,6 +686,21 @@ static std::shared_ptr<Item> createContext(const std::shared_ptr<Item> &head = s
 	result->head = head;
 	return result;	
 }
+
+static std::shared_ptr<ListType> createList(int n){
+	return std::make_shared<ListType>(ListType(n));	
+}
+
+static std::shared_ptr<ProtoType> createProto(){
+	return std::make_shared<ProtoType>(ProtoType());	
+}
+
+static std::shared_ptr<StringType> createString(const std::string &str = ""){
+	auto result = std::make_shared<StringType>(StringType());	
+	result->set(str);
+	return result;
+}
+
 
 
 std::shared_ptr<Item> infer(const std::string &input, std::shared_ptr<Item> &ctx, Cursor *cursor){
@@ -668,17 +717,24 @@ std::shared_ptr<Item> infer(const std::string &input, std::shared_ptr<Item> &ctx
         return result;        
     }else
 	if(Tools::isList(input)){
-		auto result = std::make_shared<ListType>(ListType());
-		auto tokens = Tools::parse(input);
-		std::vector<std::shared_ptr<Item>> list;
-		for(int i = 0; i < tokens.size(); ++i){
+		auto result = createList(0);
+		std::string _input = input;
+		if(_input.length() > 1 && _input[0] == '[' && _input[_input.length()-1] == ']'){
+			_input = _input.substr(1, _input.length() - 2);		
+		}		
+		std::string error;
+		auto tokens = Tools::parse(_input, error);
+		if(error.length() > 0){
+			cursor->setError(error);
+			return std::make_shared<Item>(Item());
+		}
+		for(int i = 0; i < tokens.size(); ++i){			
 			auto item = infer(tokens[i], ctx, cursor);
 			if(cursor->error){
 				return std::make_shared<Item>(Item());
 			}				
-			list.push_back(item);
+			result->add(item);
 		}
-		result->build(list);
 		return result;
 	}else{
 		return std::make_shared<Item>(Item());
@@ -705,10 +761,19 @@ static std::shared_ptr<Item> evalParams(std::vector<std::string> &tokens, int fr
 	return eval(input, ctx, cursor);
 }
 
-static std::vector<std::string> compileParams(std::vector<std::string> &tokens, int from){
+static std::vector<std::string> compileParams(const std::vector<std::string> &tokens, int from){
 	std::vector<std::string> compiled;
 	for(int i = from; i < tokens.size(); ++i){
 		compiled.push_back(tokens[i]);
+	}
+	return compiled;
+}
+
+static std::string compileParams(const std::vector<std::string> &tokens){
+	std::string compiled;
+	for(int i = 0; i < tokens.size(); ++i){
+		compiled += tokens[i];
+		if(i < tokens.size()-1) compiled += " ";
 	}
 	return compiled;
 }
@@ -719,7 +784,7 @@ static std::shared_ptr<Item> runFunction(std::shared_ptr<Item> &fn, const std::v
 	bool useParams = func->params.size() > 0;
 
 	if(useParams && func->params.size() != tokens.size()){
-		std::cout << "fn '" << "': expected [" << func->params.size() << "] arguments, received [" << tokens.size() << "]" << std::endl;
+		std::cout << "fn '" << "': expected [" << func->params.size() << "] operands, received [" << tokens.size() << "]" << std::endl;
 		return std::make_shared<Item>(Item());
 	}
 
@@ -745,7 +810,12 @@ static std::shared_ptr<Item> runFunction(std::shared_ptr<Item> &fn, const std::v
 }
 
 static std::shared_ptr<Item> eval(const std::string &input, std::shared_ptr<Item> &ctx, Cursor *cursor){
-	auto tokens = Tools::parse(input);
+	std::string error;
+	auto tokens = Tools::parse(input, error);
+	if(error.size() > 0){
+		cursor->setError(error);
+		return std::make_shared<Item>(Item());
+	}
 
 	auto imp = tokens[0];
 
@@ -766,15 +836,45 @@ static std::shared_ptr<Item> eval(const std::string &input, std::shared_ptr<Item
 		}		
 	}
 
+	// chained
+	if(tokens.size() > 1 && tokens[0].length() > 1 && tokens[0][0] == '[' && tokens[0][tokens[0].length()-1] == ']'){
+		auto last = std::make_shared<Item>(Item());
+		for(int i = 0; i < tokens.size(); ++i){
+			auto imp = tokens[i];
+        	auto obj = eval(imp, ctx, cursor);
+			if(cursor->error){
+				return std::make_shared<Item>(Item());
+			}				
+			last = obj;
+		}
+		return last;
+	}else
+	// single
     if(tokens.size() == 1 && tokens[0].length() > 1 && tokens[0][0] == '[' && tokens[0][tokens[0].length()-1] == ']'){
         imp = tokens[0].substr(1, tokens[0].length() - 2);		
         auto obj = eval(imp, ctx, cursor);
+		if(namer.size() > 0){
+			obj->name = namer;
+		}			
 		if(cursor->error){
 			return std::make_shared<Item>(Item());
 		}			
-		if(namer.size() > 0){
-			obj->name = namer;
-		}
+		if(obj->type == ItemTypes::LIST && scopeMod.size() > 0 && Tools::isNumber(scopeMod)){
+			auto list = std::static_pointer_cast<ListType>(obj);
+			auto item = list->get(std::stod(scopeMod));
+			if(namer.size() > 0){
+				item->name = namer;
+			}
+			return item;
+		}else
+		if(obj->type == ItemTypes::STRING && scopeMod.size() > 0 && Tools::isNumber(scopeMod)){
+			auto str = std::static_pointer_cast<StringType>(obj);
+			auto item = str->get(std::stod(scopeMod));
+			if(namer.size() > 0){
+				item->name = namer;
+			}					
+			return item;
+		}else
 		if(scopeMod.size() > 0){
 			auto inobj = obj->getProperty(scopeMod);
 			if(inobj->type == ItemTypes::FUNCTION){
@@ -787,6 +887,9 @@ static std::shared_ptr<Item> eval(const std::string &input, std::shared_ptr<Item
 				}					
 				return result;
 			}else{
+				if(namer.size() > 0){
+					inobj->name = namer;
+				}				
 				return inobj;
 			}
 		}
@@ -852,7 +955,12 @@ static std::shared_ptr<Item> eval(const std::string &input, std::shared_ptr<Item
             if(largs.length() > 1 && largs[0] == '[' && largs[largs.length()-1] == ']'){
                 largs = largs.substr(1, largs.length() - 2);
             }
-            auto args = Tools::parse(largs);
+			std::string error;
+            auto args = Tools::parse(largs, error);
+			if(error.size() > 0){
+				cursor->setError(error);
+				return std::make_shared<Item>(Item());
+			}
             auto fn = std::make_shared<FunctionType>(FunctionType());
             fn->set(tokens[2], args);
             return fn;
@@ -895,19 +1003,76 @@ static std::shared_ptr<Item> eval(const std::string &input, std::shared_ptr<Item
 		}else
 		// IF conditional statement ([if [cond] [branch-true][branch-false]])
 		if(imp == "if"){
-
+			if(tokens.size() < 3){
+				cursor->setError("operator 'iter': expects at least 2 operands");
+				return std::make_shared<Item>(Item());
+			}
+			if(tokens.size() > 4){
+				cursor->setError("operator 'iter': no more than 3 operands");
+				return std::make_shared<Item>(Item());
+			}
+			auto cond = eval(tokens[1], ctx, cursor);
+			if(cursor->error){
+				return std::make_shared<Item>(Item());
+			}			
+			bool t = cond->type == ItemTypes::NUMBER && *static_cast<double*>(cond->data) > 0;
+			if(t){
+				auto tctx = createContext(ctx);
+				auto trueBranch = eval(tokens[2], tctx, cursor);
+				if(cursor->error){
+					return std::make_shared<Item>(Item());
+				}
+				return trueBranch->type == ItemTypes::INTERRUPT ? std::static_pointer_cast<InterruptType>(trueBranch)->payload : trueBranch;
+			}else
+			if(tokens.size() > 3){
+				auto tctx = createContext(ctx);
+				auto falseBranch = eval(tokens[3], tctx, cursor);
+				if(cursor->error){
+					return std::make_shared<Item>(Item());
+				}				
+				return falseBranch->type == ItemTypes::INTERRUPT ? std::static_pointer_cast<InterruptType>(falseBranch)->payload : falseBranch;
+			}
 		}else
 		// DO loop procedure ([do [cond] [code]...[code]])
 		if(imp == "do"){
-
+			if(tokens.size() < 3){
+				cursor->setError("operator 'do': expects at least 2 operands");
+				return std::make_shared<Item>(Item());
+			}	
+			bool t = false;
+			auto ctctx = createContext(ctx);
+			auto last = std::make_shared<Item>(Item());;
+			do {
+				auto cond = eval(tokens[1], ctctx, cursor);
+				if(cursor->error){
+					return std::make_shared<Item>(Item());
+				}		
+				t = cond->type == ItemTypes::NUMBER && *static_cast<double*>(cond->data) > 0;
+				if(t){
+					auto tctx = createContext(ctctx);
+					auto ntokens = compileParams(compileParams(tokens, 2));
+					auto run = eval(ntokens, tctx, cursor);
+					last = run;
+					if(cursor->error){
+						return last;
+					}
+					if(run->type == ItemTypes::INTERRUPT){
+						return std::static_pointer_cast<InterruptType>(run)->payload;
+					}
+				}
+			} while(t);
+			return last;
 		}else
 		// ITER goes through a list ([iter [1 2 3 4] [code]...[code]]) ([iter [proto a:1 b:2 c:3] [code]...[code]])
 		if(imp == "iter"){
 			if(tokens.size() < 3){
-				cursor->setError("operator 'iter': expects at least 2 arguments");
+				cursor->setError("operator 'iter': expects at least 2 operands");
 				return std::make_shared<Item>(Item());
 			}
 			auto iteratable = eval(tokens[1], ctx, cursor);
+
+			// std::cout << "XD " << tokens[1] << " " << iteratable->type << " " << iteratable->str() << " '" << iteratable->name << "'" << std::endl;
+
 			if(cursor->error){
 				return std::make_shared<Item>(Item());
 			}
@@ -915,13 +1080,48 @@ static std::shared_ptr<Item> eval(const std::string &input, std::shared_ptr<Item
 			int readFrom = 2;
 
 			if(iteratable->type != ItemTypes::LIST && iteratable->type != ItemTypes::PROTO){
-				cursor->setError("operator 'iter': expects an iterable as first arguments");
+				cursor->setError("operator 'iter': expects an iterable as first operands");
 				return std::make_shared<Item>(Item());
 			}
 	
 			switch(iteratable->type){
 				case ItemTypes::PROTO: {
 					auto proto = static_cast<ProtoType*>(iteratable.get());
+					std::shared_ptr<ListType> last = std::make_shared<ListType>(ListType());
+					auto names = proto->getKeys();
+					for(int i = 0; i < names.size(); ++i){
+						auto current = proto->members[names[i]];
+						auto fctx = createContext(ctx);
+						if(iteratable->name.size() > 0){
+							fctx->registerProperty(iteratable->name, current);
+						}
+						auto item = evalParams(tokens, readFrom, fctx, cursor);
+						if(cursor->error){
+							return std::make_shared<Item>(Item());
+						}
+						if(item->type == ItemTypes::INTERRUPT){
+							auto interrupt = std::static_pointer_cast<InterruptType>(item);
+							if(interrupt->intype == InterruptTypes::RET){
+								last->add(interrupt->payload);
+							}else
+							if(interrupt->intype == InterruptTypes::SKIP){
+								last->add(interrupt->payload);
+								continue;
+							}else
+							if(interrupt->intype == InterruptTypes::STOP){
+								last->add(interrupt->payload);
+								return last;
+							}
+						}else
+						if(item->type == ItemTypes::FUNCTION){
+							auto funct = std::static_pointer_cast<FunctionType>(item);
+							std::vector<std::shared_ptr<Item>> params = { current };
+							last->add(funct->lambda(params, fctx, cursor));
+						}else{
+							last->add(item);
+						}
+					}
+					return last;					
 				} break;
 				case ItemTypes::LIST: {
 					auto list = static_cast<ListType*>(iteratable.get());
@@ -940,6 +1140,14 @@ static std::shared_ptr<Item> eval(const std::string &input, std::shared_ptr<Item
 							auto interrupt = std::static_pointer_cast<InterruptType>(item);
 							if(interrupt->intype == InterruptTypes::RET){
 								last->add(interrupt->payload);
+							}else
+							if(interrupt->intype == InterruptTypes::SKIP){
+								last->add(interrupt->payload);
+								continue;
+							}else
+							if(interrupt->intype == InterruptTypes::STOP){
+								last->add(interrupt->payload);
+								return last;
 							}
 						}else
 						if(item->type == ItemTypes::FUNCTION){
@@ -958,7 +1166,27 @@ static std::shared_ptr<Item> eval(const std::string &input, std::shared_ptr<Item
 	}else{
 	// Defined symbol
 		auto var = ctx->findProperty(imp);	
-		if(var->type == ItemTypes::NUMBER || var->type == ItemTypes::PROTO || var->type == ItemTypes::LIST || var->type == ItemTypes::STRING){
+
+
+
+
+		if(var->type == ItemTypes::LIST && scopeMod.length() > 0 && Tools::isNumber(scopeMod)){
+			auto list = std::static_pointer_cast<ListType>(var);
+			auto item = list->get(std::stod(scopeMod));
+			if(namer.size() > 0){
+				item->name = namer;
+			}					
+			return item;
+		}else
+		if(var->type == ItemTypes::STRING && scopeMod.length() > 0 && Tools::isNumber(scopeMod)){
+			auto str = std::static_pointer_cast<StringType>(var);
+			auto item = str->get(std::stod(scopeMod));
+			if(namer.size() > 0){
+				item->name = namer;
+			}					
+			return item;
+		}else		
+		if(var->type == ItemTypes::NUMBER || var->type == ItemTypes::LIST || var->type == ItemTypes::PROTO || var->type == ItemTypes::STRING){
 			if(scopeMod.length() > 0){
 				auto obj = var->getProperty(scopeMod);
 				if(obj->type == ItemTypes::FUNCTION){
@@ -1000,16 +1228,41 @@ static std::shared_ptr<Item> eval(const std::string &input, std::shared_ptr<Item
 			if(cursor->error){
 				return std::make_shared<Item>(Item());
 			}
+
+			if(namer.size() > 0){
+				result->name = namer;
+			}				
 			return result;			
 		}else{
-			auto v = infer(input, ctx, cursor);
+			auto params = compileParams(tokens);
+			auto v = infer(params, ctx, cursor);
 			if(cursor->error){
 				return std::make_shared<Item>(Item());
+			}else
+			if(v->type == ItemTypes::LIST && scopeMod.length() > 0 && Tools::isNumber(scopeMod)){
+				auto list = std::static_pointer_cast<ListType>(v);
+				auto item = list->get(std::stod(scopeMod));
+				if(namer.size() > 0){
+					item->name = namer;
+				}					
+				return item;
+			}else
+			if(v->type == ItemTypes::STRING && scopeMod.length() > 0 && Tools::isNumber(scopeMod)){
+				auto str = std::static_pointer_cast<StringType>(v);
+				auto item = str->get(std::stod(scopeMod));
+				if(namer.size() > 0){
+					item->name = namer;
+				}					
+				return item;
+			}else{
+				if(cursor->error){
+					return std::make_shared<Item>(Item());
+				}
+				if(namer.size() > 0){
+					v->name = namer;
+				}
+				return v;
 			}
-			if(namer.size() > 0){
-				v->name = namer;
-			}
-			return v;
 		}
 	}
 
@@ -1105,67 +1358,12 @@ static void catchCtrlC(int s){
 	onExit();
 }
 
-static std::shared_ptr<Item> __sum_number(std::shared_ptr<Item> &a, std::shared_ptr<Item> &b, std::string &error){
-	double v =  *static_cast<double*>(std::static_pointer_cast<NumberType>(a)->data) + *static_cast<double*>(std::static_pointer_cast<NumberType>(b)->data);
-	return create(v);
-}
+static void registerEmbeddedOperators(std::shared_ptr<Item> &ctx){
+	/* 
 
-static std::shared_ptr<Item> __rest_number(std::shared_ptr<Item> &a, std::shared_ptr<Item> &b, std::string &error){
-	double v =  *static_cast<double*>(std::static_pointer_cast<NumberType>(a)->data) - *static_cast<double*>(std::static_pointer_cast<NumberType>(b)->data);
-	return create(v);
-}
+		ADDITION
 
-static std::shared_ptr<Item> __mult_number(std::shared_ptr<Item> &a, std::shared_ptr<Item> &b, std::string &error){
-	double v =  *static_cast<double*>(std::static_pointer_cast<NumberType>(a)->data) * *static_cast<double*>(std::static_pointer_cast<NumberType>(b)->data);
-	return create(v);
-}
-
-static std::shared_ptr<Item> __div_number(std::shared_ptr<Item> &a, std::shared_ptr<Item> &b, std::string &error){
-	double _b = *static_cast<double*>(std::static_pointer_cast<NumberType>(b)->data);
-	if(_b == 0){
-		error = "division by zero";
-		return std::make_shared<Item>(Item());
-	}
-	double v =  *static_cast<double*>(std::static_pointer_cast<NumberType>(a)->data) / _b;
-	return create(v);
-}
-
-static std::shared_ptr<Item> __sum_string(std::shared_ptr<Item> &a, std::shared_ptr<Item> &b, std::string &error){
-	std::string concat = std::static_pointer_cast<StringType>(a)->literal + std::static_pointer_cast<StringType>(b)->literal;
-	auto out = std::make_shared<StringType>(StringType());
-	out->set(concat);
-	return std::static_pointer_cast<Item>(out);
-}
-
-static std::unordered_map<unsigned, std::unordered_map<std::string, std::shared_ptr<Item>(*)(std::shared_ptr<Item> &a, std::shared_ptr<Item> &b, std::string &error)>> binaryOperators = {
-	{ItemTypes::NUMBER,	{
-		{ "+", &__sum_number },
-		{ "-", &__rest_number },
-		{ "*", &__mult_number },
-		{ "/", &__div_number }
-		}
-	},
-	{ItemTypes::STRING,	{
-		{ "+", &__sum_string },
-		}
-	}	
-};
-
-static void registerTypicalOperators(std::shared_ptr<Item> &ctx){
-	
-}
-
-
-int main(int argc, char* argv[]){
-
-
-
-
-	signal(SIGINT, catchCtrlC);
-
-	// printList(parse("MOCK [ a:4 b:5 c:[fn [][print 'lol']] ]"));
-
-
+	*/
 	ctx->registerProperty("+", std::make_shared<FunctionType>(FunctionType([](const std::vector<std::shared_ptr<Item>> &operands, std::shared_ptr<Item> &ctx, Cursor *cursor){
 			if(operands.size() < 2){
 				cursor->setError("operator '+': no operands provided");
@@ -1192,13 +1390,13 @@ int main(int argc, char* argv[]){
 			}else
 			if(operands[0]->type == ItemTypes::LIST){
 				if(!doSizesMatch(operands)){
-					cursor->setError("operator '+': summing lists of mismatching sizes");
+					cursor->setError("operator '+': lists of mismatching sizes");
 					return std::make_shared<Item>(Item());						
 				}
 				auto firstItem = std::static_pointer_cast<ListType>(operands[0]);
 
 				if(firstItem->list.size() == 0){
-					cursor->setError("operator '+': summing empty lists");
+					cursor->setError("operator '+': empty lists");
 					return std::make_shared<Item>(Item());						
 				}
 
@@ -1237,6 +1435,775 @@ int main(int argc, char* argv[]){
 		}, {}
 	))); 
 
+	/*
+	
+		SUBSTRACTION
+
+	*/
+	ctx->registerProperty("-", std::make_shared<FunctionType>(FunctionType([](const std::vector<std::shared_ptr<Item>> &operands, std::shared_ptr<Item> &ctx, Cursor *cursor){
+			if(operands.size() < 2){
+				cursor->setError("operator '-': no operands provided");
+				return std::make_shared<Item>(Item());						
+			}
+			int nilInd = isThereNil(operands);
+			if(nilInd != -1){
+				cursor->setError("operator '-': argument("+std::to_string(nilInd+1)+") is nil");
+				return std::make_shared<Item>(Item());				
+			}
+			if(!doTypesMatch(operands)){
+				cursor->setError("operator '-': mismatching types");
+				return std::make_shared<Item>(Item());
+			}
+
+			if(operands[0]->type == ItemTypes::NUMBER){
+				auto result = std::make_shared<Item>(Item());
+				double v = 0;
+				for(unsigned i = 0; i < operands.size(); ++i){
+					v -= *static_cast<double*>(operands[i]->data);
+				}
+				result->write(&v, sizeof(v), ItemTypes::NUMBER);
+				return result;
+			}else
+			if(operands[0]->type == ItemTypes::LIST){
+				if(!doSizesMatch(operands)){
+					cursor->setError("operator '-': lists of mismatching sizes");
+					return std::make_shared<Item>(Item());						
+				}
+				auto firstItem = std::static_pointer_cast<ListType>(operands[0]);
+
+				if(firstItem->list.size() == 0){
+					cursor->setError("operator '-': empty lists");
+					return std::make_shared<Item>(Item());						
+				}
+
+				auto result = std::make_shared<ListType>(ListType( firstItem->list.size() ));
+				for(unsigned i = 0; i < operands.size(); ++i){
+					auto list = std::static_pointer_cast<ListType>(operands[i]);
+					for(unsigned j = 0; j < list->list.size(); ++j){
+						auto from = list->list[j];
+						auto to = result->list[j];
+						double v = *static_cast<double*>(from->data) - *static_cast<double*>(to->data);
+						to->write(&v, sizeof(v), ItemTypes::NUMBER);
+					}
+				}
+				return std::static_pointer_cast<Item>(result);
+			}else{
+				cursor->setError("operator '-': invalid type");
+				return std::make_shared<Item>(Item());				
+			}		
+			
+			return std::make_shared<Item>(Item());				
+		}, {}
+	))); 	
+
+	/*
+	
+		MULTIPLICATION
+
+	*/
+	ctx->registerProperty("*", std::make_shared<FunctionType>(FunctionType([](const std::vector<std::shared_ptr<Item>> &operands, std::shared_ptr<Item> &ctx, Cursor *cursor){
+			if(operands.size() < 2){
+				cursor->setError("operator '*': no operands provided");
+				return std::make_shared<Item>(Item());						
+			}
+			int nilInd = isThereNil(operands);
+			if(nilInd != -1){
+				cursor->setError("operator '*': argument("+std::to_string(nilInd+1)+") is nil");
+				return std::make_shared<Item>(Item());				
+			}
+			if(!doTypesMatch(operands)){
+				cursor->setError("operator '*': mismatching types");
+				return std::make_shared<Item>(Item());
+			}
+
+			if(operands[0]->type == ItemTypes::NUMBER){
+				auto result = std::make_shared<Item>(Item());
+				double v = *static_cast<double*>(operands[0]->data);
+				for(unsigned i = 1; i < operands.size(); ++i){
+					v *= *static_cast<double*>(operands[i]->data);
+				}
+				result->write(&v, sizeof(v), ItemTypes::NUMBER);
+				return result;
+			}else
+			if(operands[0]->type == ItemTypes::LIST){
+				if(!doSizesMatch(operands)){
+					cursor->setError("operator '*': lists of mismatching sizes");
+					return std::make_shared<Item>(Item());						
+				}
+				auto firstItem = std::static_pointer_cast<ListType>(operands[0]);
+
+				if(firstItem->list.size() == 0){
+					cursor->setError("operator '*': empty lists");
+					return std::make_shared<Item>(Item());						
+				}
+
+				auto result = std::make_shared<ListType>(ListType( firstItem->list.size() ));
+				for(unsigned j = 0; j < firstItem->list.size(); ++j){
+					double v = *static_cast<double*>(firstItem->list[j]->data);
+					auto to = result->list[j];
+					to->write(&v, sizeof(v), ItemTypes::NUMBER);
+				}
+
+				for(unsigned i = 1; i < operands.size(); ++i){
+					auto list = std::static_pointer_cast<ListType>(operands[i]);
+					for(unsigned j = 0; j < list->list.size(); ++j){
+						auto from = list->list[j];
+						auto to = result->list[j];
+						double v = *static_cast<double*>(from->data) * *static_cast<double*>(to->data);
+						to->write(&v, sizeof(v), ItemTypes::NUMBER);
+					}
+				}
+				return std::static_pointer_cast<Item>(result);
+			}else{
+				cursor->setError("operator '*': invalid type");
+				return std::make_shared<Item>(Item());				
+			}		
+			
+			return std::make_shared<Item>(Item());				
+		}, {}
+	))); 
+
+	/*
+	
+		DIVISION
+
+	*/
+	ctx->registerProperty("/", std::make_shared<FunctionType>(FunctionType([](const std::vector<std::shared_ptr<Item>> &operands, std::shared_ptr<Item> &ctx, Cursor *cursor){
+			if(operands.size() < 2){
+				cursor->setError("operator '/': no operands provided");
+				return std::make_shared<Item>(Item());						
+			}
+			int nilInd = isThereNil(operands);
+			if(nilInd != -1){
+				cursor->setError("operator '/': argument("+std::to_string(nilInd+1)+") is nil");
+				return std::make_shared<Item>(Item());				
+			}
+			if(!doTypesMatch(operands)){
+				cursor->setError("operator '/': mismatching types");
+				return std::make_shared<Item>(Item());
+			}
+
+			if(operands[0]->type == ItemTypes::NUMBER){
+				auto result = std::make_shared<Item>(Item());
+				double v = *static_cast<double*>(operands[0]->data);
+				for(unsigned i = 1; i < operands.size(); ++i){
+					v /= *static_cast<double*>(operands[i]->data);
+				}
+				result->write(&v, sizeof(v), ItemTypes::NUMBER);
+				return result;
+			}else
+			if(operands[0]->type == ItemTypes::LIST){
+				if(!doSizesMatch(operands)){
+					cursor->setError("operator '/': lists of mismatching sizes");
+					return std::make_shared<Item>(Item());						
+				}
+				auto firstItem = std::static_pointer_cast<ListType>(operands[0]);
+
+				auto result = std::make_shared<ListType>(ListType( firstItem->list.size() ));
+				for(unsigned j = 0; j < firstItem->list.size(); ++j){
+					double v = *static_cast<double*>(firstItem->list[j]->data);
+					auto to = result->list[j];
+					to->write(&v, sizeof(v), ItemTypes::NUMBER);
+				}
+
+				for(unsigned i = 1; i < operands.size(); ++i){
+					auto list = std::static_pointer_cast<ListType>(operands[i]);
+					for(unsigned j = 0; j < list->list.size(); ++j){
+						auto from = list->list[j];
+						auto to = result->list[j];
+						double v = *static_cast<double*>(from->data) / *static_cast<double*>(to->data);
+						to->write(&v, sizeof(v), ItemTypes::NUMBER);
+					}
+				}
+				return std::static_pointer_cast<Item>(result);
+			}else{
+				cursor->setError("operator '/': invalid type");
+				return std::make_shared<Item>(Item());				
+			}		
+			
+			return std::make_shared<Item>(Item());				
+		}, {}
+	))); 	
+
+	/*
+	
+		eq (==)
+
+	*/
+	ctx->registerProperty("eq", std::make_shared<FunctionType>(FunctionType([](const std::vector<std::shared_ptr<Item>> &operands, std::shared_ptr<Item> &ctx, Cursor *cursor){
+			if(operands.size() < 2){
+				cursor->setError("operator 'eq': expects at least 2 operands");
+				return std::make_shared<Item>(Item());						
+			}
+
+			if(!doTypesMatch(operands)){
+				cursor->setError("operator 'eq': mismatching types");
+				return std::make_shared<Item>(Item());
+			}
+
+			if(operands[0]->type == ItemTypes::LIST || operands[0]->type == ItemTypes::PROTO){
+				cursor->setError("operator 'eq': can't compare LIST or PROTOTYPE");
+				return std::make_shared<Item>(Item());
+			}else
+			if(operands[0]->type == ItemTypes::NUMBER){
+				double last = *static_cast<double*>(operands[0]->data);
+				for(int i = 1; i < operands.size(); ++i){
+					if(last !=  *static_cast<double*>(operands[i]->data)){
+						return create(0);
+					}
+				}				
+				return create(1);
+			}else
+			if(operands[0]->type == ItemTypes::STRING){
+				std::string last = static_cast<StringType*>(operands[0].get())->literal;
+				for(int i = 1; i < operands.size(); ++i){
+					if(last != static_cast<StringType*>(operands[i].get())->literal){
+						return create(0);
+					}
+				}				
+				return create(1);
+			}else{
+				cursor->setError("operator 'eq': unsupported operand type");
+				return std::make_shared<Item>(Item());				
+			}
+			
+			return std::make_shared<Item>(Item());				
+		}, {}
+	)));	
+
+	/*
+	
+		neq (==)
+
+	*/
+	ctx->registerProperty("neq", std::make_shared<FunctionType>(FunctionType([](const std::vector<std::shared_ptr<Item>> &operands, std::shared_ptr<Item> &ctx, Cursor *cursor){
+			if(operands.size() < 2){
+				cursor->setError("operator 'neq': expects at least 2 operands");
+				return std::make_shared<Item>(Item());						
+			}
+
+			if(!doTypesMatch(operands)){
+				cursor->setError("operator 'neq': mismatching types");
+				return std::make_shared<Item>(Item());
+			}
+
+			if(operands[0]->type == ItemTypes::LIST || operands[0]->type == ItemTypes::PROTO){
+				cursor->setError("operator 'neq': can't compare LIST or PROTOTYPE");
+				return std::make_shared<Item>(Item());
+			}else
+			if(operands[0]->type == ItemTypes::NUMBER){
+				double last = *static_cast<double*>(operands[0]->data);
+				for(int i = 1; i < operands.size(); ++i){
+					if(last !=  *static_cast<double*>(operands[i]->data)){
+						return create(1);
+					}
+				}				
+				return create(0);
+			}else
+			if(operands[0]->type == ItemTypes::STRING){
+				std::string last = static_cast<StringType*>(operands[0].get())->literal;
+				for(int i = 1; i < operands.size(); ++i){
+					if(last != static_cast<StringType*>(operands[i].get())->literal){
+						return create(1);
+					}
+				}				
+				return create(0);
+			}else{
+				cursor->setError("operator 'neq': unsupported operand type");
+				return std::make_shared<Item>(Item());				
+			}
+			
+			return std::make_shared<Item>(Item());				
+		}, {}
+	)));	
+
+	/*
+	
+		gt (>)
+
+	*/
+	ctx->registerProperty("gt", std::make_shared<FunctionType>(FunctionType([](const std::vector<std::shared_ptr<Item>> &operands, std::shared_ptr<Item> &ctx, Cursor *cursor){
+			if(operands.size() < 2){
+				cursor->setError("operator 'gt': expects at least 2 operands");
+				return std::make_shared<Item>(Item());						
+			}
+
+			if(!doTypesMatch(operands)){
+				cursor->setError("operator 'gt': mismatching types");
+				return std::make_shared<Item>(Item());
+			}
+
+			if(operands[0]->type == ItemTypes::LIST || operands[0]->type == ItemTypes::PROTO){
+				int last = *static_cast<double*>(operands[0]->getProperty("length")->data);
+				for(int i = 1; i < operands.size(); ++i){
+					if(last <= *static_cast<double*>(operands[i]->getProperty("length")->data)){
+						return create(0);
+					}
+					last = *static_cast<double*>(operands[i]->getProperty("length")->data);
+				}				
+				return create(1);
+			}else		
+			if(operands[0]->type == ItemTypes::NUMBER){
+				double last = *static_cast<double*>(operands[0]->data);
+				for(int i = 1; i < operands.size(); ++i){
+					if(last <=  *static_cast<double*>(operands[i]->data)){
+						return create(0);
+					}
+					last = *static_cast<double*>(operands[i]->data);
+				}				
+				return create(1);
+			}else
+			if(operands[0]->type == ItemTypes::STRING){
+				std::string last = static_cast<StringType*>(operands[0].get())->literal;
+				for(int i = 1; i < operands.size(); ++i){
+					if(last.size() <= static_cast<StringType*>(operands[i].get())->literal.size()){
+						return create(0);
+					}
+					last = static_cast<StringType*>(operands[i].get())->literal;
+				}				
+				return create(1);
+			}else{
+				cursor->setError("operator 'gt': unsupported operand type");
+				return std::make_shared<Item>(Item());				
+			}
+			
+			return std::make_shared<Item>(Item());				
+		}, {}
+	)));		
+
+	/*
+	
+		gte (>=)
+
+	*/
+	ctx->registerProperty("gte", std::make_shared<FunctionType>(FunctionType([](const std::vector<std::shared_ptr<Item>> &operands, std::shared_ptr<Item> &ctx, Cursor *cursor){
+			if(operands.size() < 2){
+				cursor->setError("operator 'gte': expects at least 2 operands");
+				return std::make_shared<Item>(Item());						
+			}
+
+			if(!doTypesMatch(operands)){
+				cursor->setError("operator 'gte': mismatching types");
+				return std::make_shared<Item>(Item());
+			}
+
+			if(operands[0]->type == ItemTypes::LIST || operands[0]->type == ItemTypes::PROTO){
+				int last = *static_cast<double*>(operands[0]->getProperty("length")->data);
+				for(int i = 1; i < operands.size(); ++i){
+					if(last < *static_cast<double*>(operands[i]->getProperty("length")->data)){
+						return create(0);
+					}
+					last = *static_cast<double*>(operands[i]->getProperty("length")->data);
+				}				
+				return create(1);
+			}else		
+			if(operands[0]->type == ItemTypes::NUMBER){
+				double last = *static_cast<double*>(operands[0]->data);
+				for(int i = 1; i < operands.size(); ++i){
+					if(last <  *static_cast<double*>(operands[i]->data)){
+						return create(0);
+					}
+					last = *static_cast<double*>(operands[i]->data);
+				}				
+				return create(1);
+			}else
+			if(operands[0]->type == ItemTypes::STRING){
+				std::string last = static_cast<StringType*>(operands[0].get())->literal;
+				for(int i = 1; i < operands.size(); ++i){
+					if(last.size() < static_cast<StringType*>(operands[i].get())->literal.size()){
+						return create(0);
+					}
+					last = static_cast<StringType*>(operands[i].get())->literal;
+				}				
+				return create(1);
+			}else{
+				cursor->setError("operator 'gte': unsupported operand type");
+				return std::make_shared<Item>(Item());				
+			}
+			
+			return std::make_shared<Item>(Item());				
+		}, {}
+	)));	
+
+	/*
+	
+		lt (<)
+
+	*/
+	ctx->registerProperty("lt", std::make_shared<FunctionType>(FunctionType([](const std::vector<std::shared_ptr<Item>> &operands, std::shared_ptr<Item> &ctx, Cursor *cursor){
+			if(operands.size() < 2){
+				cursor->setError("operator 'lt': expects at least 2 operands");
+				return std::make_shared<Item>(Item());						
+			}
+
+			if(!doTypesMatch(operands)){
+				cursor->setError("operator 'lt': mismatching types");
+				return std::make_shared<Item>(Item());
+			}
+
+			if(operands[0]->type == ItemTypes::LIST || operands[0]->type == ItemTypes::PROTO){
+				int last = *static_cast<double*>(operands[0]->getProperty("length")->data);
+				for(int i = 1; i < operands.size(); ++i){
+					if(last >= *static_cast<double*>(operands[i]->getProperty("length")->data)){
+						return create(0);
+					}
+					last = *static_cast<double*>(operands[i]->getProperty("length")->data);
+				}				
+				return create(1);
+			}else		
+			if(operands[0]->type == ItemTypes::NUMBER){
+				double last = *static_cast<double*>(operands[0]->data);
+				for(int i = 1; i < operands.size(); ++i){
+					if(last >=  *static_cast<double*>(operands[i]->data)){
+						return create(0);
+					}
+					last = *static_cast<double*>(operands[i]->data);
+				}				
+				return create(1);
+			}else
+			if(operands[0]->type == ItemTypes::STRING){
+				std::string last = static_cast<StringType*>(operands[0].get())->literal;
+				for(int i = 1; i < operands.size(); ++i){
+					if(last.size() >= static_cast<StringType*>(operands[i].get())->literal.size()){
+						return create(0);
+					}
+					last = static_cast<StringType*>(operands[i].get())->literal;
+				}				
+				return create(1);
+			}else{
+				cursor->setError("operator 'lt': unsupported operand type");
+				return std::make_shared<Item>(Item());				
+			}
+			
+			return std::make_shared<Item>(Item());				
+		}, {}
+	)));		
+
+	/*
+	
+		lte (<=)
+
+	*/
+	ctx->registerProperty("lte", std::make_shared<FunctionType>(FunctionType([](const std::vector<std::shared_ptr<Item>> &operands, std::shared_ptr<Item> &ctx, Cursor *cursor){
+			if(operands.size() < 2){
+				cursor->setError("operator 'lte': expects at least 2 operands");
+				return std::make_shared<Item>(Item());						
+			}
+
+			if(!doTypesMatch(operands)){
+				cursor->setError("operator 'lte': mismatching types");
+				return std::make_shared<Item>(Item());
+			}
+
+			if(operands[0]->type == ItemTypes::LIST || operands[0]->type == ItemTypes::PROTO){
+				int last = *static_cast<double*>(operands[0]->getProperty("length")->data);
+				for(int i = 1; i < operands.size(); ++i){
+					if(last > *static_cast<double*>(operands[i]->getProperty("length")->data)){
+						return create(0);
+					}
+					last = *static_cast<double*>(operands[i]->getProperty("length")->data);
+				}				
+				return create(1);
+			}else		
+			if(operands[0]->type == ItemTypes::NUMBER){
+				double last = *static_cast<double*>(operands[0]->data);
+				for(int i = 1; i < operands.size(); ++i){
+					if(last >  *static_cast<double*>(operands[i]->data)){
+						return create(0);
+					}
+					last = *static_cast<double*>(operands[i]->data);
+				}				
+				return create(1);
+			}else
+			if(operands[0]->type == ItemTypes::STRING){
+				std::string last = static_cast<StringType*>(operands[0].get())->literal;
+				for(int i = 1; i < operands.size(); ++i){
+					if(last.size() > static_cast<StringType*>(operands[i].get())->literal.size()){
+						return create(0);
+					}
+					last = static_cast<StringType*>(operands[i].get())->literal;
+				}				
+				return create(1);
+			}else{
+				cursor->setError("operator 'lte': unsupported operand type");
+				return std::make_shared<Item>(Item());				
+			}
+			
+			return std::make_shared<Item>(Item());				
+		}, {}
+	)));	
+
+	/*
+	
+		..
+
+	*/
+	ctx->registerProperty("..", std::make_shared<FunctionType>(FunctionType([](const std::vector<std::shared_ptr<Item>> &operands, std::shared_ptr<Item> &ctx, Cursor *cursor){
+			if(operands.size() < 2){
+				cursor->setError("operator '..': expects at least 2 operands");
+				return std::make_shared<Item>(Item());						
+			}
+
+			if(operands.size() > 3){
+				cursor->setError("operator '..': expects no more than 3 operands");
+				return std::make_shared<Item>(Item());						
+			}			
+
+			// 
+
+			if(!doTypesMatch(operands)){
+				cursor->setError("operator '..': mismatching types");
+				return std::make_shared<Item>(Item());
+			}
+
+			if(operands[0]->type == ItemTypes::NUMBER){
+				double s = *static_cast<double*>(operands[0]->data);
+				double e = *static_cast<double*>(operands[1]->data);
+				auto result = createList(0);
+				if(s == e){
+				    return std::static_pointer_cast<Item>(result);
+				}
+				bool inc = e > s;
+				double step = Tools::positive(operands.size() == 3 ? *static_cast<double*>(operands[2]->data) : 1);
+
+				for(double i = s; (inc ? i <= e : i >= e); i += (inc ? step : -step)){
+					result->add(create(i));
+				}
+
+				return std::static_pointer_cast<Item>(result);
+			}else{
+				cursor->setError("operator '..': unsupported operand type");
+				return std::make_shared<Item>(Item());				
+			}
+			
+			return std::make_shared<Item>(Item());				
+		}, {}
+	)));	
+
+	/*
+	
+		splice
+
+	*/
+	ctx->registerProperty("splice", std::make_shared<FunctionType>(FunctionType([](const std::vector<std::shared_ptr<Item>> &operands, std::shared_ptr<Item> &ctx, Cursor *cursor){
+			
+			if(operands.size() < 2){
+				cursor->setError("operator 'splice': expects at least 2 operands");
+				return std::make_shared<Item>(Item());						
+			}			
+
+			if(!doTypesMatch(operands)){
+				cursor->setError("operator 'splice': mismatching types");
+				return std::make_shared<Item>(Item());
+			}		
+
+			if(operands[0]->type == ItemTypes::LIST){
+				auto list = createList(0);
+				for(int i = 0; i < operands.size(); ++i){
+					auto operand = std::static_pointer_cast<ListType>(operands[i]);
+					for(int j = 0; j < operand->list.size(); ++j){
+						list->add(operand->list[j]);
+					}
+				}
+				return std::static_pointer_cast<Item>(list);
+			}else
+			if(operands[0]->type == ItemTypes::PROTO){
+				auto proto = createProto();
+				for(int i = 0; i < operands.size(); ++i){
+					auto operand = std::static_pointer_cast<ProtoType>(operands[i]);
+					for(auto &it : operand->members){
+						std::string name = it.first;
+						proto->add(name, it.second, ctx, cursor);
+					}
+				}
+				return std::static_pointer_cast<Item>(proto);
+			}else{
+				cursor->setError("operator 'splice': unsupported operand type");
+				return std::make_shared<Item>(Item());					
+			}
+
+		}, {}
+
+	)));	
+
+	/*
+	
+		l-flatten
+
+	*/
+	ctx->registerProperty("l-flatten", std::make_shared<FunctionType>(FunctionType([](const std::vector<std::shared_ptr<Item>> &operands, std::shared_ptr<Item> &ctx, Cursor *cursor){
+			
+			if(operands.size() < 1){
+				cursor->setError("operator 'l-flatten': expects at least 1 operand");
+				return std::make_shared<Item>(Item());						
+			}			
+
+			if(!doTypesMatch(operands)){
+				cursor->setError("operator 'l-flatten': mismatching types");
+				return std::make_shared<Item>(Item());
+			}
+
+			if(operands[0]->type != ItemTypes::LIST){
+				cursor->setError("operator 'l-flatten': expects only lists");
+				return std::make_shared<Item>(Item());
+			}
+
+			auto out = createList(0);
+
+
+			std::function<void(const std::shared_ptr<Item> &obj)> recursive = [&](const std::shared_ptr<Item> &obj){
+				if(obj->type == ItemTypes::LIST){
+					auto list = std::static_pointer_cast<ListType>(obj);
+					for(int i = 0; i < list->list.size(); ++i){
+						recursive(list->list[i]);
+					}
+				}else{
+					out->add(obj);
+				}
+			};
+
+			for(int i = 0; i < operands.size(); ++i){
+				recursive(operands[i]);
+			}
+
+
+			return std::static_pointer_cast<Item>(out);
+
+
+		}, {}
+
+	)));
+
+	/*
+	
+		++
+
+	*/
+	ctx->registerProperty("++", std::make_shared<FunctionType>(FunctionType([](const std::vector<std::shared_ptr<Item>> &operands, std::shared_ptr<Item> &ctx, Cursor *cursor){
+			
+			if(operands.size() < 1){
+				cursor->setError("operator '++': expects at least 1 operand");
+				return std::make_shared<Item>(Item());						
+			}			
+
+			if(!doTypesMatch(operands)){
+				cursor->setError("operator '++': mismatching types");
+				return std::make_shared<Item>(Item());
+			}
+
+			if(operands[0]->type != ItemTypes::NUMBER){
+				cursor->setError("operator '++': expects only lists");
+				return std::make_shared<Item>(Item());
+			}
+
+			for(int i = 0; i < operands.size(); ++i){
+				auto item = operands[i];
+				double v = *static_cast<double*>(item->data);
+				v += 1;
+				item->write(&v, sizeof(v), ItemTypes::NUMBER);
+			}
+
+			return operands[0];
+		}, {}
+	)));	
+
+	/*
+	
+		--
+
+	*/
+	ctx->registerProperty("--", std::make_shared<FunctionType>(FunctionType([](const std::vector<std::shared_ptr<Item>> &operands, std::shared_ptr<Item> &ctx, Cursor *cursor){
+			
+			if(operands.size() < 1){
+				cursor->setError("operator '--': expects at least 1 operand");
+				return std::make_shared<Item>(Item());						
+			}			
+
+			if(!doTypesMatch(operands)){
+				cursor->setError("operator '--': mismatching types");
+				return std::make_shared<Item>(Item());
+			}
+
+			if(operands[0]->type != ItemTypes::NUMBER){
+				cursor->setError("operator '--': expects only lists");
+				return std::make_shared<Item>(Item());
+			}
+
+			for(int i = 0; i < operands.size(); ++i){
+				auto item = operands[i];
+				double v = *static_cast<double*>(item->data);
+				v -= 1;
+				item->write(&v, sizeof(v), ItemTypes::NUMBER);
+			}
+
+			return operands[0];
+		}, {}
+	)));
+
+	/*
+	
+		noop
+
+	*/
+	ctx->registerProperty("noop", std::make_shared<FunctionType>(FunctionType([](const std::vector<std::shared_ptr<Item>> &operands, std::shared_ptr<Item> &ctx, Cursor *cursor){
+			
+			return std::make_shared<Item>(Item());
+
+		}, {}
+	)));		
+
+	/*
+
+		eq-ref
+	
+	*/
+	ctx->registerProperty("eq-ref", std::make_shared<FunctionType>(FunctionType([](const std::vector<std::shared_ptr<Item>> &operands, std::shared_ptr<Item> &ctx, Cursor *cursor){
+			if(operands.size() < 2){
+				cursor->setError("operator 'eq-ref': expects at least 2 operands");
+				return std::make_shared<Item>(Item());						
+			}
+
+			void *last = operands[0].get();
+			for(int i = 1; i < operands.size(); ++i){
+				if(static_cast<Item*>(last)->type != operands[i]->type || operands[i].get() != last){
+					return create(0);
+				}
+			}
+
+			return create(1);
+			
+		}, {}
+	)));	
+
+
+	/*
+
+		quit
+	
+	*/
+	ctx->registerProperty("quit", std::make_shared<FunctionType>(FunctionType([](const std::vector<std::shared_ptr<Item>> &operands, std::shared_ptr<Item> &ctx, Cursor *cursor){
+			std::exit(0);
+			return std::make_shared<Item>(Item());				
+		}, {}
+	)));		
+
+}
+
+
+int main(int argc, char* argv[]){
+
+
+
+
+	signal(SIGINT, catchCtrlC);
+
+	registerEmbeddedOperators(ctx);
+
+	// printList(parse("MOCK [ a:4 b:5 c:[fn [][print 'lol']] ]"));
+
+
+
+
 
 
 	// std::cout << eval("MOCK a:4 b:5", &ctx, &cursor)->str() << std::endl;
@@ -1248,20 +2215,28 @@ int main(int argc, char* argv[]){
 	// 	std::string input;
 	// 	std::cout << "> ";
 	// 	std::getline (std::cin, input);
-	// 	// std::cout << std::endl;
-	// 	std::cout << eval(input, &ctx, &cursor)->str() << std::endl;
+	// 	std::cout << std::endl;
 		
-		// std::cout << eval("set a [proto a:1 b:2]", &ctx, &cursor)->str() << std::endl;
-		// std::cout << eval("a", &ctx, &cursor)->str() << std::endl;		
+	// 	std::cout << eval(input, ctx, &cursor)->str() << std::endl;
+	// 	if(cursor.error){
+	// 		std::cout <<  cursor.message << std::endl;
+	// 	}
+
+	// }
+		
+		// std::cout << eval("[set a 5][++ a]", ctx, &cursor)->str() << std::endl;
+
+		std::cout << eval("set a 5", ctx, &cursor)->str() << std::endl;
+		std::cout << eval("do [lt a 100] [++ a]", ctx, &cursor)->str() << std::endl;
 
 		// eval("set a 25", ctx, &cursor);
 		// std::cout << eval("a:z", &ctx, &cursor)->str() << std::endl;
 
 		// eval("set j [1]", ctx, &cursor)->str();
-		std::cout << eval("+ 2 2", ctx, &cursor)->str() << std::endl;
-		if(cursor.error){
-			std::cout << cursor.message << std::endl;
-		}
+		// std::cout << eval("eq 1 2", ctx, &cursor)->str() << std::endl;
+		// if(cursor.error){
+		// 	std::cout << cursor.message << std::endl;
+		// }
 
 		// if(cursor.error){
 		// 	std::cout << cursor.message << std::endl;
