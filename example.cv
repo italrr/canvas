@@ -1,10 +1,13 @@
 set width 200
 set height 100
-cv:window-create 'Game' width height 4 4
+
 
 set area [math:sqrt [+ [math:pow width 2] [math:pow height 2]]]
 set mod [* area 0.1]
 
+[mut mod 10]
+
+cv:window-create 'Game' width height 4 4
 do [cv:running] [
     [cv:step]
     [cv:clear]
