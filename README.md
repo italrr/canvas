@@ -4,8 +4,6 @@
 
 `cv` is an esoteric dynamic/pseudo-functional programming language designed with simplicity and hackability in mind. It's heavily inspired by C++ and Javascript, with a very small touch of LISP.
 
-The interpreter is intended to be a single file, easy to include and integrate with other projects. The intepreter is written in C++.
-
 Short summary:
 
 - Code only supports ASCII (no unicode or emojis)
@@ -27,11 +25,12 @@ Every statement must start an operator otherwise the statement is interpreted as
 
 # Why?
 
-This is rather a toy project, for me to learn. I don't expect it to become anything serious. However I'm considering it using as en extension interface for other projects.
+This is rather a toy project, for me to learn. I don't expect it to become anything serious. However I'm considering using as en extension interface for other projects.
 
 # Examples
 
-## Using standard drawing library `brush`
+- Using standard drawing library `brush`
+
 Drawing a red circle
 <img src="./docs/images/circle.png" style="display: block; margin: 0 auto" />
 
