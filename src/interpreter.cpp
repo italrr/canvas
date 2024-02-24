@@ -43,6 +43,10 @@ std::shared_ptr<ExecArg> getParam(std::vector<std::string> &params, const std::s
 	return v;
 }
 
+static void printCVEntry(){
+	printf("CANVAS v%.0f.%.0f.%.0f %s [%s] \n", CANVAS_LANG_VERSION[0], CANVAS_LANG_VERSION[1], CANVAS_LANG_VERSION[2], CV::SupportedArchitecture::name(CV::ARCH).c_str(), CV::SupportedPlatform::name(CV::PLATFORM).c_str());	
+}
+
 int main(int argc, char* argv[]){
 	// Context with standard operators
 	CV::registerEmbeddedOperators(ctx);
@@ -58,6 +62,13 @@ int main(int argc, char* argv[]){
 	auto dashFile = getParam(params, "-f");
 	auto dashRepl = getParam(params, "-r", true);
 	auto dashRelax = getParam(params, "--relaxed", true);
+	auto dashV = getParam(params, "-v", true);
+	auto dashVersion = getParam(params, "--version", true);
+
+	if(dashV->valid || dashVersion->valid){
+		printCVEntry();
+		return 0;
+	}
 
 	if(dashFile.get() && dashFile->valid){
 		std::ifstream file(dashFile->val);
@@ -88,6 +99,7 @@ int main(int argc, char* argv[]){
 		std::exit(0);
 	}else
 	if(dashRepl.get() && dashRepl->valid){
+		printCVEntry();
 		while(true){
 			std::cout << std::endl;
 			std::string input;
