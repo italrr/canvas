@@ -155,6 +155,7 @@
                     double _x = *static_cast<double*>(operands[0]->data);
                     double _y = *static_cast<double*>(operands[1]->data);
                     std::shared_ptr<CV::ListType> color = std::static_pointer_cast<CV::ListType>(operands[2]);
+
                     double rgba[4] = {
                         *static_cast<double*>(color->list[0]->data),
                         *static_cast<double*>(color->list[1]->data),

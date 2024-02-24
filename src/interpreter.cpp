@@ -26,18 +26,21 @@ struct ExecArg {
 };
 
 std::shared_ptr<ExecArg> getParam(std::vector<std::string> &params, const std::string &name, bool single = false){
+	auto v = std::make_shared<ExecArg>(name);
+
 	for(int i = 0; i < params.size(); ++i){
 		if(params[i] == name){
 			if(i < params.size()-1 && !single){
-				return std::make_shared<ExecArg>(ExecArg(params[i], params[i + 1]));
+				v->val = params[i + 1];
+				v->valid = true;
 			}else{
-				auto v = std::make_shared<ExecArg>(ExecArg(params[i]));
 				v->valid = single;
-				return v;
 			}
+			return v;
 		}
 	}
-	return std::shared_ptr<ExecArg>(NULL);
+	
+	return v;
 }
 
 int main(int argc, char* argv[]){
@@ -69,7 +72,9 @@ int main(int argc, char* argv[]){
 					CV::eval(buffer, ctx, &cursor);
 					if(cursor.error){
 						std::cout << "Line #" << cursor.line << ": " << cursor.message << std::endl;
-						std::exit(1);
+						if(!dashRelax->valid){
+							std::exit(1);
+						}
 					}
 					buffer = "";
 				}

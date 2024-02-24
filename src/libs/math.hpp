@@ -317,7 +317,7 @@
                         cursor->setError("operator '"+LIBNAME+":clamp': argument(1) must be a NUMBER");
                         return std::make_shared<CV::Item>(CV::Item());	                        
                     }    
-                    if(operands[3]->type != CV::ItemTypes::NUMBER){
+                    if(operands[2]->type != CV::ItemTypes::NUMBER){
                         cursor->setError("operator '"+LIBNAME+":clamp': argument(2) must be a NUMBER");
                         return std::make_shared<CV::Item>(CV::Item());	                        
                     }                                      

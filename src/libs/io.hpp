@@ -28,6 +28,7 @@
             auto lib = std::make_shared<CV::ProtoType>(CV::ProtoType());
 
             lib->registerProperty("out", std::make_shared<CV::FunctionType>(CV::FunctionType([](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
+                    
                     if(operands.size() < 1){
                         cursor->setError("operator '"+LIBNAME+":out': expects at least 1 operand");
                         return std::make_shared<CV::Item>(CV::Item());						
@@ -36,6 +37,7 @@
                     for(int i = 0; i < operands.size(); ++i){
                         ___WRITE_STDOUT(operands[i]->str());
                     }
+
 
                     return CV::create(1);
                 }, {}

@@ -37,11 +37,11 @@ Drawing a red circle
 ```
 set width 200
 set height 100
-cv:window-create 'Game' width height 4 4
 
-set area [math:sqrt [+ [math:pow width 2] [math:pow height 2]]]
-set mod [* area 0.1]
+set mod [math:sqrt [+ [math:pow width 2] [math:pow height 2]]]
+rset mod [* mod 0.1]
 
+cv:window-create 'Red Circle' width height 4 4
 do [cv:running] [
     [cv:step]
     [cv:clear]
@@ -50,6 +50,30 @@ do [cv:running] [
             [set x [+ [* mod [math:sin an]] [* width 0.5]]]
             [set y [+ [* mod [math:cos an]] [* height 0.5]]]
             [cv:d-pixel x y [1 0 0 1]]
+        ]
+    ]
+    [cv:draw]
+]
+```
+
+Nice looking gradient
+<img src="./docs/images/gradient.png" style="display: block; margin: 0 auto" />
+
+```
+set width 200
+set height 100
+
+cv:window-create 'Color Gradient' width height 4 4
+do [cv:running] [
+    [cv:step]
+    [cv:clear]
+    [
+        iter [.. 0 [- width 1] 1]~x [
+            iter [.. 0 [- height 1] 1]~y [
+                [set r [/ [+ x 1] width]]
+                [set g [/ [+ y 1] height]]
+                [cv:d-pixel x y [[- 1 r] [- 1 g] [math:clamp [+ r g] 0 1] 1]]
+            ]
         ]
     ]
     [cv:draw]

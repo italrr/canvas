@@ -677,7 +677,7 @@ std::shared_ptr<CV::Item> CV::infer(const std::string &input, std::shared_ptr<CV
 			return std::make_shared<Item>(Item());
 		}
 		for(int i = 0; i < tokens.size(); ++i){			
-			auto item = infer(tokens[i], ctx, cursor);
+			auto item = eval(tokens[i], ctx, cursor);
 			if(cursor->error){
 				return std::make_shared<Item>(Item());
 			}				
@@ -733,7 +733,9 @@ static std::shared_ptr<CV::Item> runFunction(std::shared_ptr<CV::Item> &fn, cons
 
 	bool useFuncParams = func->params.size() >= tokens.size();
 	for(int i = 0; i < tokens.size(); ++i){
+
 		auto ev = eval(tokens[i], ctx, cursor);
+
 		if(cursor->error){
 			return std::make_shared<CV::Item>(CV::Item());
 		}	
@@ -784,14 +786,15 @@ std::shared_ptr<CV::Item> CV::eval(const std::string &input, std::shared_ptr<CV:
 
 	// chained
 	if(tokens.size() > 1 && tokens[0].length() > 1 && tokens[0][0] == '[' && tokens[0][tokens[0].length()-1] == ']'){
-		auto last = std::make_shared<Item>(Item());
+		auto last = CV::createList(0);
+		// chained are evaluated and results compiled into a single list
 		for(int i = 0; i < tokens.size(); ++i){
 			auto imp = tokens[i];
 			auto obj = eval(imp, ctx, cursor);
+			last->add(obj);
 			if(cursor->error){
 				return std::make_shared<Item>(Item());
 			}				
-			last = obj;
 		}
 		return last;
 	}else
@@ -1153,10 +1156,6 @@ std::shared_ptr<CV::Item> CV::eval(const std::string &input, std::shared_ptr<CV:
 	}else{
 	// Defined symbol
 		auto var = ctx->findProperty(imp);	
-
-
-
-
 		if(var->type == ItemTypes::LIST && scopeMod.length() > 0 && Tools::isNumber(scopeMod)){
 			auto list = std::static_pointer_cast<ListType>(var);
 			auto item = list->get(std::stod(scopeMod));
@@ -1174,6 +1173,14 @@ std::shared_ptr<CV::Item> CV::eval(const std::string &input, std::shared_ptr<CV:
 			return item;
 		}else		
 		if(var->type == ItemTypes::NUMBER || var->type == ItemTypes::LIST || var->type == ItemTypes::PROTO || var->type == ItemTypes::STRING){
+			if(scopeMod.length() == 0 && tokens.size() > 1){ // perhaps this is part of a list
+				auto params = compileParams(tokens);
+				auto v = infer(params, ctx, cursor);
+				if(cursor->error){
+					return std::make_shared<Item>(Item());
+				}
+				return v;
+			}
 			if(scopeMod.length() > 0){
 				auto obj = var->getProperty(scopeMod);
 				if(obj->type == ItemTypes::FUNCTION){
@@ -1357,8 +1364,8 @@ void CV::registerEmbeddedOperators(std::shared_ptr<CV::Item> &ctx){
 
 			if(operands[0]->type == ItemTypes::NUMBER){
 				auto result = std::make_shared<Item>(Item());
-				double v = 0;
-				for(unsigned i = 0; i < operands.size(); ++i){
+				double v = *static_cast<double*>(operands[0]->data);
+				for(unsigned i = 1; i < operands.size(); ++i){
 					v += *static_cast<double*>(operands[i]->data);
 				}
 				result->write(&v, sizeof(v), ItemTypes::NUMBER);
@@ -1433,8 +1440,8 @@ void CV::registerEmbeddedOperators(std::shared_ptr<CV::Item> &ctx){
 
 			if(operands[0]->type == ItemTypes::NUMBER){
 				auto result = std::make_shared<Item>(Item());
-				double v = 0;
-				for(unsigned i = 0; i < operands.size(); ++i){
+				double v = *static_cast<double*>(operands[0]->data);
+				for(unsigned i = 1; i < operands.size(); ++i){
 					v -= *static_cast<double*>(operands[i]->data);
 				}
 				result->write(&v, sizeof(v), ItemTypes::NUMBER);
@@ -2055,27 +2062,29 @@ void CV::registerEmbeddedOperators(std::shared_ptr<CV::Item> &ctx){
 
 	/*
 	
-		mut
+		rset
 
 	*/
-	ctx->registerProperty("mut", std::make_shared<FunctionType>(FunctionType([](const std::vector<std::shared_ptr<Item>> &operands, std::shared_ptr<Item> &ctx, Cursor *cursor){
-			
+	ctx->registerProperty("rset", std::make_shared<FunctionType>(FunctionType([](const std::vector<std::shared_ptr<Item>> &operands, std::shared_ptr<Item> &ctx, Cursor *cursor){
+
 			if(operands.size() < 2){
-				cursor->setError("operator 'mut': expects 2 operand");
+				cursor->setError("operator 'rset': expects 2 operand");
 				return std::make_shared<Item>(Item());						
 			}			
 
 			if(operands.size() > 2){
-				cursor->setError("operator 'mut': expects no more than 2 operand");
+				cursor->setError("operator 'rset': expects no more than 2 operand");
 				return std::make_shared<Item>(Item());						
 			}	
 
 			if(operands[0]->name.size() == 0){
-				cursor->setError("operator 'mut': the provided variable doesn't have a name");
+				cursor->setError("operator 'rset': the provided variable doesn't have a name");
 				return std::make_shared<Item>(Item());					
 			}
 
 			auto mutated = ctx->findAndSetProperty(operands[0]->name, operands[1]);
+
+
 			if(mutated->type != ItemTypes::NIL){
 				return mutated;				
 			}else{
