@@ -59,6 +59,7 @@
             bool isList(const std::string &s);
             std::string removeExtraSpace(const std::string &in);
             std::vector<std::string> parse(const std::string &input, std::string &error);
+            bool isLineComplete(const std::string &input);
             int getModifiers(const std::string &input, std::unordered_map<std::string, std::string> &mods);
             std::vector<std::string> getCleanTokens(std::string &input, std::string &error);
         }
@@ -216,6 +217,8 @@
     }
 
     #include "libs/io.hpp"
+    #include "libs/brush.hpp"
+    #include "libs/math.hpp"
 
 
 #endif

@@ -10,8 +10,20 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/builds/cmake)
 set (cv_src 
            src/cv.cpp)
 
+if(UNIX AND NOT APPLE)
+    set(LINUX TRUE)
+endif()
+
 add_library(cv_bin ${cv_src})
-target_link_libraries(cv_bin -pthread)
+
+IF(LINUX)
+	target_link_libraries(cv_bin -pthread  -m64  -lSDL2 -lSDL2main -lopengl32 )
+ENDIF(LINUX)
+
+IF(MINGW)
+	target_link_libraries(cv_bin -m64 -lSDL2 -lSDL2main -lopengl32 -lws2_32)
+ENDIF(MINGW)
+
 
 add_executable(cv src/interpreter.cpp)
 target_link_libraries(cv cv_bin)

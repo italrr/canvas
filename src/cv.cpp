@@ -78,6 +78,31 @@ namespace CV {
 			return cpy;
 		}
 
+		bool isLineComplete(const std::string &input){
+			auto clean = Tools::removeExtraSpace(input);
+			std::vector<std::string> tokens;
+			int open = 0;
+			bool comm = false;
+			bool str = false;
+			for(int i = 0; i < input.length(); ++i){
+				char c = input[i];
+				// ++c;
+				if(c == '[' && !str) ++open;
+				if(c == ']' && !str) --open;
+				if(c == '#' && !str){
+					comm = !comm;
+					continue;
+				}
+				if(comm){
+					continue;
+				}     
+				if(c == '\''){
+					str = !str;
+				}   				
+			}	
+			return open == 0;		
+		}
+
 		std::vector<std::string> parse(const std::string &input, std::string &error){
 			auto clean = Tools::removeExtraSpace(input);
 			std::vector<std::string> tokens;
@@ -89,9 +114,9 @@ namespace CV {
 			for(int i = 0; i < input.length(); ++i){
 				char c = input[i];
 				// ++c;
-				if(c == '[') ++open;
-				if(c == ']') --open;
-				if(c == '#'){
+				if(c == '[' && !str) ++open;
+				if(c == ']' && !str) --open;
+				if(c == '#' && !str){
 					comm = !comm;
 					continue;
 				}

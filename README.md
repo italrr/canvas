@@ -9,67 +9,59 @@ The interpreter is intended to be a single file, easy to include and integrate w
 Short summary:
 
 - Code only supports ASCII (no unicode or emojis)
-- Garbage collected
-- Recursion highly encouraged
+- Garbage collected through reference counting (Using C++'s std::memory for now)
 - Prefix Notation
 - No classes
-- Objects are defined by the `proto` imperative.
-- Designed to imitate the functional paradigm but only superficially.  
+- Objects are defined by the `proto` operator.
 - Similarly to LISP, it tries to treat everything as a list.
-- Strings are only formed with double quotes `"EXAMPLE"`
+- Strings are only formed with single quotes `'EXAMPLE'`
 - It's primarily intepreted, but later on it will feature a way to compile into binary (cv code -> C code -> [COMPILER] -> Binary)
-- Most of the `std` is defined in the language itself.
-- Parallelism and asynchronism are very fundamental features of the language (no need for libraries).
+- Objects are contexts themselves
 
 `cv` expression structure
 ```
-[(MODIFIER/CONTEXT-SWITCH:)IMPERATIVE(:MEMBER/TRAIT) ARGUMENTS]
+[OPERATOR(:~|)MEMBER/MODIFIER ARGUMENTS]
 ```
 
-Every statement must start a IMPERATIVE otherwise the statement is interprete as natural type (List, Number, etc)
+Every statement must start an operator otherwise the statement is interpreted as natural type (List, Number, etc)
 
 # Why?
 
-This is rather a toy project, for me to learn. I don't expect it to become anything serious.
+This is rather a toy project, for me to learn. I don't expect it to become anything serious. However I'm considering it using as en extension interface for other projects.
 
 # Examples
 
-```
-
-// C style comments
-
-// Simple sum
-> [+ 2 2]
-> 10
-
-// Sum of two variables
-[
-    [set a 5]
-    [set b 5]
-    [std:out + a b]
-]
->10
-
-// Getting the average of a list
-[
-    [set l [2 5 6]]
-    [set avg [/ [+ l:pop] l:length]]
-]
->4.333...
-/*
-    `:pop` is a behavioral trait of lists that basically expands its contents to turn each item in the list to an argument. Then `+` sums each argument. 
-    `:length` is a static property of lists that stores the number of items in a list.
-*/
+## Using standard drawing library `brush`
+Drawing a red circle
+<img src="./docs/images/circle.png" style="display: block; margin: 0 auto" />
 
 ```
+set width 200
+set height 100
+cv:window-create 'Game' width height 4 4
 
-## Some explanation
+set area [math:sqrt [+ [math:pow width 2] [math:pow height 2]]]
+set mod [* area 0.1]
 
-Colons after an imperative are either modifiers or request a context. A context is pretty much any block code. For example, an expression defined inside of a `proto`, the context is everything inside the `proto` itself. Colons after the imperative are either behavioral traits or members of the imperative. Imperatives can be `proto`, constants or functions.
+do [cv:running] [
+    [cv:step]
+    [cv:clear]
+    [
+        iter [.. 0 360 1]~an [
+            [set x [+ [* mod [math:sin an]] [* width 0.5]]]
+            [set y [+ [* mod [math:cos an]] [* height 0.5]]]
+            [cv:d-pixel x y [1 0 0 1]]
+        ]
+    ]
+    [cv:draw]
+]
+```
 
-## Behavioral Traits vs Functions
-
-Behavioral traits are essentially functions, but only act depending on the context (operator/imperative context, not code block "context").
+# MEMBER/MODIFIERS
+canvas offers a way to access or modify operators/imperatives/references through the following tokens:
+- `:`: It's the access modifier. It allows to access members such as functions or variables within an object
+- `~`: It's called the namer modifier. It allows to rename an object on the fly and usually temporarily
+- `|`: It's called the parralel linker modifier. It allows to link two contexts concurrently but in sequence. It's useful for threaded code
 
 
 ## Libraries

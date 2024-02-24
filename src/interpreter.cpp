@@ -44,6 +44,8 @@ int main(int argc, char* argv[]){
 	// Context with standard operators
 	CV::registerEmbeddedOperators(ctx);
 	io::registerLibrary(ctx);
+	brush::registerLibrary(ctx);
+	math::registerLibrary(ctx);
 	
 	std::vector<std::string> params;
 	for(int i = 0; i < argc; ++i){
@@ -53,21 +55,30 @@ int main(int argc, char* argv[]){
 	auto dashFile = getParam(params, "-f");
 	auto dashRepl = getParam(params, "-r", true);
 	auto dashRelax = getParam(params, "--relaxed", true);
-	std::cout << dashRelax->valid << std::endl;
 
 	if(dashFile.get() && dashFile->valid){
 		std::ifstream file(dashFile->val);
 		std::string line;
 		int n = 1;
-		for( std::string line; std::getline(file, line );){
+		std::string buffer = "";
+		for(std::string line; std::getline(file, line);){
 			cursor.line = n;
 			if(line.size() > 0){
-				std::cout << CV::eval(line, ctx, &cursor)->str() << std::endl;
-				if(cursor.error){
-					std::cout << "Line #" << cursor.line << ": " << cursor.message << std::endl;
+				buffer += line;
+				if(CV::Tools::isLineComplete(buffer)){
+					CV::eval(buffer, ctx, &cursor);
+					if(cursor.error){
+						std::cout << "Line #" << cursor.line << ": " << cursor.message << std::endl;
+						std::exit(1);
+					}
+					buffer = "";
 				}
 			}
 			++n;
+		}
+		if(buffer.size() > 0 && !CV::Tools::isLineComplete(buffer)){
+			std::cout << "Line #" << cursor.line << ": Block wasn't properly closed"  << std::endl;
+			std::exit(1);			
 		}
 		std::exit(0);
 	}else

@@ -22,12 +22,14 @@
 
     namespace io {
 
+        static std::string LIBNAME = "io";
+
         static void registerLibrary(std::shared_ptr<CV::Item> &ctx){
             auto lib = std::make_shared<CV::ProtoType>(CV::ProtoType());
 
             lib->registerProperty("out", std::make_shared<CV::FunctionType>(CV::FunctionType([](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
                     if(operands.size() < 1){
-                        cursor->setError("operator 'io:out': expects at least 1 operand");
+                        cursor->setError("operator '"+LIBNAME+":out': expects at least 1 operand");
                         return std::make_shared<CV::Item>(CV::Item());						
                     }
 
@@ -39,7 +41,7 @@
                 }, {}
             )));	
 
-            ctx->registerProperty("io", std::static_pointer_cast<CV::Item>(lib));
+            ctx->registerProperty(LIBNAME, std::static_pointer_cast<CV::Item>(lib));
         }   
 
     }
