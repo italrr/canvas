@@ -6,12 +6,8 @@ do [cv:running] [
     [cv:step]
     [cv:clear]
     [
-        iter [.. 0 [- width 1] 1]~x [
-            iter [.. 0 [- height 1] 1]~y [
-                [set r [/ [+ x 1] width]]
-                [set g [/ [+ y 1] height]]
-                [cv:d-pixel x y [[- 1 r] [- 1 g] [math:clamp [+ r g] 0 1] 1]]
-            ]
+        if [cv:kb-press-once cv:key-A] [
+            cv::d-fillrect 1 1 5 5 [1 0 0 1]
         ]
     ]
     [cv:draw]
