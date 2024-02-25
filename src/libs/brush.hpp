@@ -56,6 +56,83 @@
         static bool KeysStateReleased [keysn];
         static bool isKeysStateReleased [keysn];        
 
+        static void drawPixel(double _x, double _y, double xScale, double yScale, double color[4]){
+            int x = _x * xScale;
+            int y = _y * yScale;
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+            glBindTexture(GL_TEXTURE_2D, Sample2DPixel);
+            
+            glColor4f(color[0], color[1], color[2], color[3]);            
+            glBegin(GL_QUADS);
+                glTexCoord2f(0, 0);
+                glVertex2f(x, y);
+                glTexCoord2f(1, 0);
+                glVertex2f(x + xScale, y);
+                glTexCoord2f( 1, 1 );
+                glVertex2f(x + xScale, y + yScale);
+                glTexCoord2f( 0, 1 );
+                glVertex2f( x, y + yScale);
+            glEnd();
+
+        }
+
+        static void drawLine(double x1, double y1, double x2, double y2, double xScale, double yScale, double color[4]){
+            int x, y, dx, dy, dx1, dy1, px, py, xe, ye, i;
+            dx = x2 - x1; dy = y2 - y1;
+            dx1 = std::abs(dx); dy1 = std::abs(dy);
+            px = 2 * dy1 - dx1;	py = 2 * dx1 - dy1;
+            if (dy1 <= dx1){
+                if (dx >= 0){ 
+                    x = x1;
+                    y = y1;
+                    xe = x2; 
+                }else{
+                    x = x2;
+                    y = y2;
+                    xe = x1;
+                }
+                drawPixel(x, y, xScale, yScale, color);
+                for (i = 0; x<xe; i++){
+                    x = x + 1;
+                    if (px<0){
+                        px = px + 2 * dy1;
+                    }else{
+                        if ((dx<0 && dy<0) || (dx>0 && dy>0)) y = y + 1; else y = y - 1;
+                        px = px + 2 * (dy1 - dx1);
+                    }
+                    drawPixel(x, y, xScale, yScale, color);
+                }
+            }else{
+                if (dy >= 0){
+                    x = x1;
+                    y = y1;
+                    ye = y2; 
+                }else{
+                    x = x2;
+                    y = y2;
+                    ye = y1; 
+                }
+                drawPixel(x, y, xScale, yScale, color);
+                for (i = 0; y<ye; i++){
+                    y = y + 1;
+                    if (py <= 0){
+                        py = py + 2 * dx1;
+                    }else{
+                        if ((dx<0 && dy<0) || (dx>0 && dy>0)){
+                            x = x + 1;
+                        }else{
+                            x = x - 1;
+                        }
+                        py = py + 2 * (dx1 - dy1);
+                    }
+                    // Draw(x, y, c, col);
+                    drawPixel(x, y, xScale, yScale, color);
+                }
+            }
+        }               
+
         static void registerLibrary(std::shared_ptr<CV::Item> &ctx){
             auto lib = std::make_shared<CV::ProtoType>(CV::ProtoType());
 
@@ -64,7 +141,7 @@
             lib->registerProperty("height", CV::create(0));
             lib->registerProperty("x-scale", CV::create(0));
             lib->registerProperty("y-scale", CV::create(0));            
-            lib->registerProperty("running", CV::create(0));
+            lib->registerProperty("running", CV::create(0));            
 
             lib->registerProperty("window-create", std::make_shared<CV::FunctionType>(CV::FunctionType([lib](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
 
@@ -101,7 +178,7 @@
 
 
                     if(SDL_Init(SDL_INIT_VIDEO) < 0){
-                        cursor->setError("operator brush:window-creator: Failed to start SDL2");
+                        cursor->setError("operator "+LIBNAME+":window-creator: Failed to start SDL2");
                         return CV::create(0);
                     }
 
@@ -114,7 +191,7 @@
                     );                    
 
                     if(window == NULL){
-                        cursor->setError("operator brush:window-creator: SDL2 Failed to create Window "+std::string()+SDL_GetError());
+                        cursor->setError("operator "+LIBNAME+":window-creator: SDL2 Failed to create Window "+std::string()+SDL_GetError());
                         return CV::create(0);
                     }
 
@@ -158,52 +235,52 @@
                 }, {}
             )));
 
+            static double addG = 0.0;
 
             lib->registerProperty("d-rectangle", std::make_shared<CV::FunctionType>(CV::FunctionType([lib](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
-                    if(operands.size() < 6){
-                        cursor->setError("operator brush:d-rect: expects 6 arguments (NUMBER NUMBER NUMBER NUMBER NUMBER LIST)");
+                    if(operands.size() < 5){
+                        cursor->setError("operator "+LIBNAME+":d-rectangle: expects 6 arguments (NUMBER NUMBER NUMBER NUMBER LIST)");
                         return CV::create(0);
                     }
 
                     if(operands[0]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator brush:d-rect: argument(1) must be a NUMBER");
+                        cursor->setError("operator "+LIBNAME+":d-rectangle: argument(1) must be a NUMBER");
                         return CV::create(0);
 
                     }
 
                     if(operands[1]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator brush:d-rect: argument(2) must be a NUMBER");
+                        cursor->setError("operator "+LIBNAME+":d-rectangle: argument(2) must be a NUMBER");
                         return CV::create(0);
                     }
 
                     if(operands[2]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator brush:d-rect: argument(3) must be a NUMBER");
+                        cursor->setError("operator "+LIBNAME+":d-rectangle: argument(3) must be a NUMBER");
                         return CV::create(0);
 
                     }
 
                     if(operands[3]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator brush:d-rect: argument(4) must be a NUMBER");
+                        cursor->setError("operator "+LIBNAME+":d-rectangle: argument(4) must be a NUMBER");
                         return CV::create(0);
-                    }            
+                    }         
 
                     if(operands[4]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator brush:d-rect: argument(5) must be a NUMBER");
+                        cursor->setError("operator "+LIBNAME+":d-rectangle: argument(5) must be a NUMBER");
                         return CV::create(0);
-                    }                    
+                    }                                 
 
 
                     if(operands[5]->type != CV::ItemTypes::LIST && std::static_pointer_cast<CV::ListType>(operands[5])->list.size() < 4){
-                        cursor->setError("operator brush:d-rect: argument(6) must be a LIST with 4 componenets (R G B A)");
+                        cursor->setError("operator "+LIBNAME+":d-rectangle: argument(6) must be a LIST with 4 componenets (R G B A)");
                         return CV::create(0);
 
                     }                    
 
-
-                    double _x = *static_cast<double*>(operands[0]->data);
-                    double _y = *static_cast<double*>(operands[1]->data);
-                    double _w = *static_cast<double*>(operands[2]->data);
-                    double _h = *static_cast<double*>(operands[3]->data);
+                    double x = *static_cast<double*>(operands[0]->data);
+                    double y = *static_cast<double*>(operands[1]->data);
+                    double w = *static_cast<double*>(operands[2]->data);
+                    double h = *static_cast<double*>(operands[3]->data);
                     int fill = (int)*static_cast<double*>(operands[4]->data);
 
                     std::shared_ptr<CV::ListType> color = std::static_pointer_cast<CV::ListType>(operands[5]);
@@ -221,60 +298,150 @@
                     int xScale = *static_cast<double*>(lib->getProperty("x-scale")->data);
                     int yScale = *static_cast<double*>(lib->getProperty("y-scale")->data);                    
 
-                    glEnable(GL_BLEND);
-                    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-                    glBindTexture(GL_TEXTURE_2D, Sample2DPixel);
-                    
-                    glColor4f(rgba[0], rgba[1], rgba[2], rgba[3]);
-
-                    int x = _x * xScale;
-                    int y = _y * yScale;
-
-                    int w = _w * xScale;
-                    int h = _h * yScale;
-
                     if(!fill){
-                        glLineWidth(4);
-                    }
-                    glBegin(fill ? GL_QUADS : GL_LINE_LOOP);
-                        glTexCoord2f(0, 0);
-                        glVertex2f(x, y);
-                        glTexCoord2f(1, 0);
-                        glVertex2f(x + w, y);
-                        glTexCoord2f( 1, 1 );
-                        glVertex2f(x + w, y + h);
-                        glTexCoord2f( 0, 1 );
-                        glVertex2f( x, y + h);
-                    glEnd();
+                        // render outline using lines
+                        double offset[2] = {
+                            -w * 0.5,
+                            -h * 0.5,
+                        };
+                        double coors[4][4] = {
+                            {0, 0,  w-1,   0},
+                            {w-1, 0,  w-1,   h-1},
+                            {w-1, h-1,  0,   h-1},
+                            {0, h-1,  0,   0}
+                        };
+                        int lineN = 4;
+                        double mod, angle;
+                        double nangle = 0;
+                        for(int i = 0; i < lineN; ++i){
+                            double p1[2] = {coors[i][0] + offset[0], coors[i][1] + offset[1]};
+                            double p2[2] = {coors[i][2] + offset[0], coors[i][3] + offset[1]};
 
+                            mod = std::sqrt( std::pow(p1[0], 2) +  std::pow(p1[1], 2));
+                            angle = std::atan2(p1[1], p1[0]);    
+
+                            coors[i][0] = std::cos(angle + nangle) * mod - offset[0];
+                            coors[i][1] = std::sin(angle + nangle) * mod - offset[1];
+
+                            mod = std::sqrt( std::pow(p2[0], 2) +  std::pow(p2[1], 2));
+                            angle = std::atan2(p2[1], p2[0]);                          
+
+                            coors[i][2] = std::cos(angle + nangle) * mod - offset[0];
+                            coors[i][3] = std::sin(angle + nangle) * mod - offset[1];  
+                        }
+                        for(int i = 0; i < lineN; ++i){
+                            drawLine(x + coors[i][0], y + coors[i][1], x + coors[i][2], y + coors[i][3], xScale, yScale, rgba);
+                        }
+                    }else{
+                        // render fill using OpengL
+                        int _x = x * xScale;
+                        int _y = y * yScale;
+                        int _w = w * xScale;
+                        int _h = h * yScale;                        
+                        glEnable(GL_BLEND);
+                        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                        glBindTexture(GL_TEXTURE_2D, Sample2DPixel);
+                        glColor4f(rgba[0], rgba[1], rgba[2], rgba[3]);            
+                        glBegin(GL_QUADS);
+                            glTexCoord2f(0, 0);
+                            glVertex2f(_x, _y);
+                            glTexCoord2f(1, 0);
+                            glVertex2f(_x + _w, _y);
+                            glTexCoord2f( 1, 1 );
+                            glVertex2f(_x + _w, _y + _h);
+                            glTexCoord2f( 0, 1 );
+                            glVertex2f( _x, _y + _h);
+                        glEnd();
+                    }
 
                     return CV::create(1);
                 }, {}
-            )));
+            )));    
 
 
-            lib->registerProperty("d-pixel", std::make_shared<CV::FunctionType>(CV::FunctionType([lib](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
-
-                    if(operands.size() < 3){
-                        cursor->setError("operator brush:window-creator: expects 3 arguments (NUMBER NUMBER LIST)");
+            lib->registerProperty("d-line", std::make_shared<CV::FunctionType>(CV::FunctionType([lib](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
+                    if(operands.size() < 5){
+                        cursor->setError("operator "+LIBNAME+":d-line: expects 6 arguments (NUMBER NUMBER NUMBER NUMBER LIST)");
                         return CV::create(0);
                     }
 
                     if(operands[0]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator brush:window-creator: argument(1) must be a NUMBER");
+                        cursor->setError("operator "+LIBNAME+":d-line: argument(1) must be a NUMBER");
                         return CV::create(0);
 
                     }
 
                     if(operands[1]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator brush:window-creator: argument(2) must be a NUMBER");
+                        cursor->setError("operator "+LIBNAME+":d-line: argument(2) must be a NUMBER");
+                        return CV::create(0);
+                    }
+
+                    if(operands[2]->type != CV::ItemTypes::NUMBER){
+                        cursor->setError("operator "+LIBNAME+":d-line: argument(3) must be a NUMBER");
+                        return CV::create(0);
+
+                    }
+
+                    if(operands[3]->type != CV::ItemTypes::NUMBER){
+                        cursor->setError("operator "+LIBNAME+":d-line: argument(4) must be a NUMBER");
+                        return CV::create(0);
+                    }            
+
+
+                    if(operands[4]->type != CV::ItemTypes::LIST && std::static_pointer_cast<CV::ListType>(operands[4])->list.size() < 4){
+                        cursor->setError("operator "+LIBNAME+":d-line: argument(5) must be a LIST with 4 componenets (R G B A)");
+                        return CV::create(0);
+
+                    }                    
+
+                    double _x1 = *static_cast<double*>(operands[0]->data);
+                    double _y1 = *static_cast<double*>(operands[1]->data);
+                    double _x2 = *static_cast<double*>(operands[2]->data);
+                    double _y2 = *static_cast<double*>(operands[3]->data);
+
+                    std::shared_ptr<CV::ListType> color = std::static_pointer_cast<CV::ListType>(operands[4]);
+
+                    double rgba[4] = {
+                        *static_cast<double*>(color->list[0]->data),
+                        *static_cast<double*>(color->list[1]->data),
+                        *static_cast<double*>(color->list[2]->data),
+                        *static_cast<double*>(color->list[3]->data)
+                    };
+
+
+                    int width = *static_cast<double*>(lib->getProperty("width")->data);
+                    int height = *static_cast<double*>(lib->getProperty("height")->data);
+                    int xScale = *static_cast<double*>(lib->getProperty("x-scale")->data);
+                    int yScale = *static_cast<double*>(lib->getProperty("y-scale")->data);                    
+
+
+                    drawLine(_x1, _y1, _x2, _y2, xScale, yScale, rgba);
+
+                    return CV::create(1);
+                }, {}
+            )));            
+     
+            lib->registerProperty("d-pixel", std::make_shared<CV::FunctionType>(CV::FunctionType([lib](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
+
+                    if(operands.size() < 3){
+                        cursor->setError("operator "+LIBNAME+":window-creator: expects 3 arguments (NUMBER NUMBER LIST)");
+                        return CV::create(0);
+                    }
+
+                    if(operands[0]->type != CV::ItemTypes::NUMBER){
+                        cursor->setError("operator "+LIBNAME+":window-creator: argument(1) must be a NUMBER");
+                        return CV::create(0);
+
+                    }
+
+                    if(operands[1]->type != CV::ItemTypes::NUMBER){
+                        cursor->setError("operator "+LIBNAME+":window-creator: argument(2) must be a NUMBER");
                         return CV::create(0);
 
                     }
 
                     if(operands[2]->type != CV::ItemTypes::LIST && std::static_pointer_cast<CV::ListType>(operands[2])->list.size() < 4){
-                        cursor->setError("operator brush:window-creator: argument(2) must be a LIST with 4 componenets (R G B A)");
+                        cursor->setError("operator "+LIBNAME+":window-creator: argument(2) must be a LIST with 4 componenets (R G B A)");
                         return CV::create(0);
 
                     }                    
@@ -297,33 +464,12 @@
                     int xScale = *static_cast<double*>(lib->getProperty("x-scale")->data);
                     int yScale = *static_cast<double*>(lib->getProperty("y-scale")->data);                    
 
-                    glEnable(GL_BLEND);
-                    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-                    glBindTexture(GL_TEXTURE_2D, Sample2DPixel);
-                    
-                    glColor4f(rgba[0], rgba[1], rgba[2], rgba[3]);
 
                     if(_x < 0 || _y < 0 || _x > width || _y > height){
                         return CV::create(0);
                     }
 
-                    int x = _x * xScale;
-                    int y = _y * yScale;
-
-
-
-                    glBegin(GL_QUADS);
-                        glTexCoord2f(0, 0);
-                        glVertex2f(x, y);
-                        glTexCoord2f(1, 0);
-                        glVertex2f(x + xScale, y);
-                        glTexCoord2f( 1, 1 );
-                        glVertex2f(x + xScale, y + yScale);
-                        glTexCoord2f( 0, 1 );
-                        glVertex2f( x, y + yScale);
-                    glEnd();
-
+                    drawPixel(_x, _y, xScale, yScale, rgba);
 
                     return CV::create(1);
                 }, {}
@@ -413,7 +559,7 @@
 
                     
                     if(operands[0]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator brush:window-creator: argument(1) must be a NUMBER");
+                        cursor->setError("operator "+LIBNAME+":window-creator: argument(1) must be a NUMBER");
                         return CV::create(0);
                     }                    
 
