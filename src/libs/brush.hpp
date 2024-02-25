@@ -235,10 +235,8 @@
                 }, {}
             )));
 
-            static double addG = 0.0;
-
             lib->registerProperty("d-rectangle", std::make_shared<CV::FunctionType>(CV::FunctionType([lib](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
-                    if(operands.size() < 5){
+                    if(operands.size() < 6){
                         cursor->setError("operator "+LIBNAME+":d-rectangle: expects 6 arguments (NUMBER NUMBER NUMBER NUMBER LIST)");
                         return CV::create(0);
                     }
