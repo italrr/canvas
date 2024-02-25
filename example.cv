@@ -6,7 +6,9 @@ do [cv:running] [
     [cv:step]
     [cv:clear]
     [
-        [cv:d-circle 35 35 15 0 [1 0 0 1]]
+
+        [cv:d-rectangle 20 20 15 15 0 [1 0 0 1]]
+        
     ]
     [cv:draw]
 ]
