@@ -159,36 +159,42 @@
             )));
 
 
-            lib->registerProperty("d-fillrect", std::make_shared<CV::FunctionType>(CV::FunctionType([lib](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
-                    if(operands.size() < 5){
-                        cursor->setError("operator brush:d-fillrect: expects 5 arguments (NUMBER NUMBER NUMBER NUMBER LIST)");
+            lib->registerProperty("d-rectangle", std::make_shared<CV::FunctionType>(CV::FunctionType([lib](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
+                    if(operands.size() < 6){
+                        cursor->setError("operator brush:d-rect: expects 6 arguments (NUMBER NUMBER NUMBER NUMBER NUMBER LIST)");
                         return CV::create(0);
                     }
 
                     if(operands[0]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator brush:d-fillrect: argument(1) must be a NUMBER");
+                        cursor->setError("operator brush:d-rect: argument(1) must be a NUMBER");
                         return CV::create(0);
 
                     }
 
                     if(operands[1]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator brush:d-fillrect: argument(2) must be a NUMBER");
+                        cursor->setError("operator brush:d-rect: argument(2) must be a NUMBER");
                         return CV::create(0);
                     }
 
                     if(operands[2]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator brush:d-fillrect: argument(3) must be a NUMBER");
+                        cursor->setError("operator brush:d-rect: argument(3) must be a NUMBER");
                         return CV::create(0);
 
                     }
 
                     if(operands[3]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator brush:d-fillrect: argument(4) must be a NUMBER");
+                        cursor->setError("operator brush:d-rect: argument(4) must be a NUMBER");
+                        return CV::create(0);
+                    }            
+
+                    if(operands[4]->type != CV::ItemTypes::NUMBER){
+                        cursor->setError("operator brush:d-rect: argument(5) must be a NUMBER");
                         return CV::create(0);
                     }                    
 
-                    if(operands[4]->type != CV::ItemTypes::LIST && std::static_pointer_cast<CV::ListType>(operands[4])->list.size() < 4){
-                        cursor->setError("operator brush:d-fillrect: argument(5) must be a LIST with 4 componenets (R G B A)");
+
+                    if(operands[5]->type != CV::ItemTypes::LIST && std::static_pointer_cast<CV::ListType>(operands[5])->list.size() < 4){
+                        cursor->setError("operator brush:d-rect: argument(6) must be a LIST with 4 componenets (R G B A)");
                         return CV::create(0);
 
                     }                    
@@ -198,8 +204,9 @@
                     double _y = *static_cast<double*>(operands[1]->data);
                     double _w = *static_cast<double*>(operands[2]->data);
                     double _h = *static_cast<double*>(operands[3]->data);
+                    int fill = (int)*static_cast<double*>(operands[4]->data);
 
-                    std::shared_ptr<CV::ListType> color = std::static_pointer_cast<CV::ListType>(operands[4]);
+                    std::shared_ptr<CV::ListType> color = std::static_pointer_cast<CV::ListType>(operands[5]);
 
                     double rgba[4] = {
                         *static_cast<double*>(color->list[0]->data),
@@ -227,15 +234,18 @@
                     int w = _w * xScale;
                     int h = _h * yScale;
 
-                    glBegin(GL_QUADS);
+                    if(!fill){
+                        glLineWidth(4);
+                    }
+                    glBegin(fill ? GL_QUADS : GL_LINE_LOOP);
                         glTexCoord2f(0, 0);
                         glVertex2f(x, y);
                         glTexCoord2f(1, 0);
-                        glVertex2f(x + _w, y);
+                        glVertex2f(x + w, y);
                         glTexCoord2f( 1, 1 );
-                        glVertex2f(x + _w, y + _h);
+                        glVertex2f(x + w, y + h);
                         glTexCoord2f( 0, 1 );
-                        glVertex2f( x, y + _h);
+                        glVertex2f( x, y + h);
                     glEnd();
 
 

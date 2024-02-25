@@ -6,9 +6,8 @@ do [cv:running] [
     [cv:step]
     [cv:clear]
     [
-        if [cv:kb-press-once cv:key-A] [
-            cv::d-fillrect 1 1 5 5 [1 0 0 1]
-        ]
+        [cv:d-rectangle 1 1 5 5 0 [1 0 0 1]]
+        [cv:d-pixel 1 1 [1 0 0 1]]
     ]
     [cv:draw]
 ]
