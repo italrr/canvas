@@ -21,11 +21,11 @@ Short summary:
 
 Every statement must start an operator otherwise the statement is interpreted as natural type (List, Number, etc)
 
-# Why?
+## Why?
 
 This is rather a toy project, for me to learn. I don't expect it to become anything serious. However I'm considering using as en extension interface for other projects.
 
-# Examples
+## Examples
 
 - Using standard drawing library `brush`
 
@@ -78,7 +78,7 @@ do [cv:running] [
 ]
 ```
 
-# Modifiers
+## Modifiers
 canvas offers a way to access or modify operators/imperatives/references through the following tokens:
 - `:`: It's the access modifier. It allows to access members such as functions or variables within an object
 - `~`: It's called the namer modifier. It allows to rename an object on the fly and usually temporarily
