@@ -23,7 +23,7 @@ Every statement must start an operator otherwise the statement is interpreted as
 
 ## Why?
 
-This is rather a toy project, for me to learn. I don't expect it to become anything serious. However I'm considering using as en extension interface for other projects.
+This is rather a toy project for me to learn. I don't expect it to become anything serious. However I'm considering using it as en extension interface for other projects.
 
 ## Examples
 
@@ -79,7 +79,7 @@ do [cv:running] [
 ```
 
 ## Modifiers
-canvas offers a way to access or modify operators/imperatives/references through the following tokens:
+canvas offers a way to access or modify operators/imperatives through the following tokens:
 - `:`: It's the access modifier. It allows to access members such as functions or variables within an object
 - `~`: It's called the namer modifier. It allows to rename an object on the fly and usually temporarily
 - `|`: It's called the parralel linker modifier. It allows to link two contexts concurrently but in sequence. It's useful for threaded code
@@ -87,4 +87,4 @@ canvas offers a way to access or modify operators/imperatives/references through
 
 ## Libraries
 
-Libraries can be imported by using the statement `[std:import "library-name"]`. The interpreter will look for a file named `library-name` locally. If not found, then it will check the libraries installed in `/usr/lib/cv/`. if not found, the interpreter will either throw a warning and continue or stop the program's execution (depending if the interpreter was executed with the `--relaxed` argument).
+Libraries can be imported by using the statement `[import "library-name"]`. The interpreter will look for a file named `library-name` locally. If not found, then it will check the libraries installed in `/usr/lib/cv/`. if not found, the interpreter will either throw a warning and continue or stop the program's execution (depending whether the interpreter was executed with the `--relaxed` argument).
