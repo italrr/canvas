@@ -11,7 +11,7 @@ CV::Cursor cursor;
 std::shared_ptr<CV::Item> ctx = CV::createContext();
 
 static void onExit(){
-	std::cout << CV::printContext(ctx) << std::endl;
+	std::cout << CV::printContext(ctx.get()) << std::endl;
 }
 
 struct ExecArg {
@@ -92,6 +92,7 @@ int main(int argc, char* argv[]){
 			}
 			++n;
 		}
+
 		if(buffer.size() > 0 && !CV::Tools::isLineComplete(buffer)){
 			std::cout << "Line #" << cursor.line << ": Block wasn't properly closed"  << std::endl;
 			std::exit(1);			

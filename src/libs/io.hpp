@@ -35,7 +35,7 @@
                     }
 
                     for(int i = 0; i < operands.size(); ++i){
-                        ___WRITE_STDOUT(operands[i]->str());
+                        ___WRITE_STDOUT(operands[i]->str(false));
                     }
 
 

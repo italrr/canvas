@@ -1,14 +1,97 @@
-set width 200
-set height 100
+set g-width 200
+set g-height 100
 
-cv:window-create 'Color Gradient' width height 4 4
+set p-width 10
+set p-height [* g-height 0.25]
+
+set b-width 4
+set b-height 4
+
+set c-player [fn [pcolor][
+    proto
+    x:0
+    y:0
+    score:0
+    color:pcolor
+    move:[fn [y][
+        [if [gte [+ y _:y p-height] g-height][
+            [rset _:y [- g-height p-height 1]]
+            [ret]
+        ]]
+        [if [lte [- _:y y] 0][
+            [rset _:y 1]
+            [ret]
+        ]]        
+        [rset _:y [+ y _:y]]
+    ]]
+    set:[fn [x y][
+        [rset _:x x]
+        [rset _:y y]
+    ]]
+    draw:[fn [][
+        [cv:d-rectangle _:x _:y p-width p-height 1 _:color]
+    ]]
+]]
+
+
+set c-ball [fn [][
+    proto
+    x:0
+    y:0
+    dir:0
+    speed:0
+    move:[fn [][
+        [set xdiff [+ _:x [* [math:cos _:dir] _:speed cv:ticks]]]
+        [set ydiff [+ _:y [* [math:sin _:dir] _:speed cv:ticks]]]
+        
+        [if [gte [+ _:y xdiff] g-height][
+            [rset ]
+        ]]
+
+        [rset _:x xdiff]
+        [rset _:y ydiff]
+    ]]
+    throw:[fn [][
+        [set ang [/ [math:rand-int 1 20] 60]]
+        [rset _:dir [* ang math:pi]]
+        [rset _:speed [math:rand-int 90 150]]
+    ]]
+    set:[fn [x y][
+        [rset _:x x]
+        [rset _:y y]        
+        [rset _:speed 0]
+    ]]
+    draw:[fn [][
+        [cv:d-rectangle [- _:x [* b-width 0.5]] [- _:y [* b-height 0.5]] [b-width] [b-height] 1 [0 0 1 1]]
+    ]]    
+]]
+
+
+set p1 [c-player [1 0 0 1]]
+set p2 [c-player [0 1 0 1]]
+set ball [c-ball]
+
+p1:set 0 [- [/ g-height 2] [/ p-height 2]]
+p2:set [- g-width p-width] [- [/ g-height 2] [/ p-height 2]]
+ball:set [* g-width 0.5] [* g-height 0.5]
+
+ball:throw
+
+cv:window-create 'PONG' g-width g-height 4 4
 do [cv:running] [
     [cv:step]
     [cv:clear]
-    [
-
-        [cv:d-rectangle 20 20 15 15 0 [1 0 0 1]]
-        
+    [   
+        [ball:move]
+        [if [cv:kb-check cv:key-W] [
+            [p1:move [* cv:ticks -100]]
+        ]]
+        [if [cv:kb-check cv:key-S] [
+            [p1:move [* cv:ticks 100]]
+        ]]        
+        [p1:draw]
+        [p2:draw]
+        [ball:draw]
     ]
     [cv:draw]
 ]

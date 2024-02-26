@@ -83,7 +83,7 @@
             "nil", "set", "proto", "fn",
             "ret", "skip", "stop",
             "if", "do", "iter",
-            "for", "mut"
+            "for", "rset"
         };
 
         static bool isReserved(const std::string &word){
@@ -118,6 +118,7 @@
             unsigned genItemCountId();
             bool isNumber(const std::string &s);
             double positive(double n);
+            std::string filterEscapeChars(const std::string &input, bool remove = false);
             bool isValidVarName(const std::string &s);
             bool isString(const std::string &s);
             std::vector<std::string> split(const std::string &str, const char sep);
@@ -173,7 +174,7 @@
             std::shared_ptr<Item> findProperty(const std::string &name);
             Item *findContext(const std::string &name);
 
-            std::shared_ptr<Item> findAndSetProperty(const std::string &name, const std::shared_ptr<Item> &v);
+            std::shared_ptr<CV::Item> findAndSetProperty(const std::string &name, const std::shared_ptr<CV::Item> &v);
             std::shared_ptr<Item> getProperty(const std::string &name);
             virtual std::string str(bool singleLine = false) const;
 
@@ -276,7 +277,7 @@
         std::shared_ptr<Item> infer(const std::string &input, std::shared_ptr<Item> &ctx, Cursor *cursor);
         std::shared_ptr<Item> eval(const std::string &input, std::shared_ptr<Item> &ctx, Cursor *cursor);
 
-        std::string printContext(std::shared_ptr<CV::Item> &ctx, bool ignoreInners = true);
+        std::string printContext(CV::Item *ctx, bool ignoreInners = true);
 
         void registerEmbeddedOperators(std::shared_ptr<CV::Item> &ctx);
     }

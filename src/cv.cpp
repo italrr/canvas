@@ -20,6 +20,19 @@ namespace CV {
 			return n < 0 ? n * -1.0 : n;
 		}
 
+		std::string filterEscapeChars(const std::string &input, bool remove){
+			std::string out;
+
+			for(int i = 0; i < input.size(); ++i){
+				char c = input[i];
+				if(c == '\n') { if(!remove){out += "\\n";} continue;} 
+				if(c == '\t') { if(!remove){out += "\\t";} continue;} 
+				out += input[i];
+			}
+
+			return out;
+		}
+
 		bool isValidVarName(const std::string &s){
 			return (s.substr(0, 1).find_first_not_of( "-.0123456789" ) != std::string::npos);
 		}
@@ -77,6 +90,7 @@ namespace CV {
 			}
 			return cpy;
 		}
+
 
 		bool isLineComplete(const std::string &input){
 			auto clean = Tools::removeExtraSpace(input);
@@ -283,11 +297,11 @@ CV::Item *CV::Item::findContext(const std::string &name){
 
 std::shared_ptr<CV::Item> CV::Item::findAndSetProperty(const std::string &name, const std::shared_ptr<CV::Item> &v){
 	auto ctx = this->findContext(name);
-	if(ctx == this || ctx == NULL) return std::make_shared<CV::Item>(CV::Item());
+	if(ctx == NULL) return std::make_shared<CV::Item>(CV::Item());
 	ctx->members[name] = v;
 	v->name = name;
 	return ctx->members[name];	
-}		
+}
 
 std::shared_ptr<CV::Item> CV::Item::getProperty(const std::string &name){
 	auto it = this->members.find(name);
@@ -302,7 +316,7 @@ std::string CV::Item::str(bool singleLine) const {
 		case ItemTypes::NUMBER: {
 			std::ostringstream oss;
 			oss << std::setprecision(8) << std::noshowpoint << *static_cast<double*>(data);
-			return oss.str();
+			return singleLine ? CV::Tools::filterEscapeChars(oss.str()) : oss.str();
 		} break;
 		case ItemTypes::NIL: {
 			return "nil";
@@ -401,7 +415,7 @@ void CV::StringType::set(const std::string &v){
 std::string CV::StringType::str(bool singleLine) const {
 	switch(type){
 		case ItemTypes::STRING: {
-			return this->literal;
+			return singleLine ? CV::Tools::filterEscapeChars(this->literal) : this->literal;
 		} break;
 		case ItemTypes::NIL: {
 			return "nil";
@@ -444,12 +458,12 @@ std::string CV::ListType::str(bool singleLine) const {
 			std::string _params;
 			std::string buff = "";
 			for(int i = 0; i < this->list.size(); ++i){
-				buff += list[i]->str(false);
+				buff += list[i]->str(singleLine);
 				if(i < this->list.size()-1){
 					buff += " ";
 				}                
 			}
-			return "["+buff+"]";
+			return singleLine ? CV::Tools::filterEscapeChars("["+buff+"]") : "["+buff+"]";
 		} break;
 		case ItemTypes::NIL: {
 			return "nil";
@@ -494,7 +508,7 @@ std::string CV::FunctionType::str(bool singleLine) const {
 	switch(type){
 		case ItemTypes::FUNCTION: {
 			if(this->inner){
-				return "[COMPILED]";
+				return "[BINARY]";
 			}
 			std::string _params;
 			for(int i = 0; i < params.size(); ++i){
@@ -503,7 +517,7 @@ std::string CV::FunctionType::str(bool singleLine) const {
 					_params += " ";
 				}
 			}
-			return "fn ["+_params+"] -> ["+body+"]";
+			return singleLine ? CV::Tools::filterEscapeChars("fn ["+_params+"] -> ["+body+"]") : "fn ["+_params+"] -> ["+body+"]";
 		} break;
 		case ItemTypes::NIL: {
 			return "nil";
@@ -598,22 +612,24 @@ std::string CV::ProtoType::str(bool singleLine) const {
 	unsigned maxWidth = 0;
 	std::vector<std::string> names;
 	std::vector<std::string> values;
+	std::vector<int> ids;
 	for(auto &it : this->members){
 		maxWidth = std::max((unsigned)it.first.length(), maxWidth);
 		names.push_back(it.first);
 		values.push_back(it.second->str(true));
+		ids.push_back(it.second->id);
 	}		
 	std::string out = singleLine ? "PROTO " : "PROTO\n";
 	for(unsigned i = 0; i < names.size(); ++i){
 		if(singleLine){
-			out += names[i]+std::string(": ")+values[i];
+			out += names[i]+std::string(std::string()+": ")+values[i];
 			if(i < names.size()-1){
 				out += ", ";
 			}
 		}else{
 			out += names[i];
 			out += addTab(maxWidth);
-			out += std::string(": ") + values[i]+"\n";
+			out += std::string(": ") + CV::Tools::filterEscapeChars(values[i])+"\n";
 		}
 	}
 	return out;
@@ -652,6 +668,9 @@ std::shared_ptr<CV::StringType> CV::createString(const std::string &str){
 
 
 std::shared_ptr<CV::Item> CV::infer(const std::string &input, std::shared_ptr<CV::Item> &ctx, Cursor *cursor){
+	if(cursor->error){
+		return std::make_shared<Item>(Item());
+	}	
 	if(Tools::isNumber(input) && input.find(' ') == -1){
 		auto result = std::make_shared<Item>(Item());
 		auto v = std::stod(input);
@@ -739,6 +758,17 @@ static std::shared_ptr<CV::Item> runFunction(std::shared_ptr<CV::Item> &fn, cons
 		if(cursor->error){
 			return std::make_shared<CV::Item>(CV::Item());
 		}	
+
+		if(ev->type == CV::ItemTypes::INTERRUPT){
+			auto interrupt = std::static_pointer_cast<CV::InterruptType>(ev);
+			if(interrupt->intype == CV::InterruptTypes::RET){
+				ev = interrupt->payload;
+			}else{
+				ev = std::make_shared<CV::Item>(CV::Item());
+			}
+			return ev;
+		}
+
 		if(useParams){
 			// ev->name = func->params[i-1];
 		}
@@ -754,6 +784,11 @@ static std::shared_ptr<CV::Item> runFunction(std::shared_ptr<CV::Item> &fn, cons
 
 
 std::shared_ptr<CV::Item> CV::eval(const std::string &input, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
+
+	if(cursor->error){
+		return std::make_shared<Item>(Item());
+	}	
+
 	if(input.length() == 0){
 		cursor->setError("There's nothing here...");
 		return std::make_shared<CV::Item>(Item()); 
@@ -791,11 +826,20 @@ std::shared_ptr<CV::Item> CV::eval(const std::string &input, std::shared_ptr<CV:
 		for(int i = 0; i < tokens.size(); ++i){
 			auto imp = tokens[i];
 			auto obj = eval(imp, ctx, cursor);
+			if(obj->type == ItemTypes::INTERRUPT){
+				auto interrupt = std::static_pointer_cast<InterruptType>(obj);
+				if(interrupt->intype == InterruptTypes::RET && interrupt->payload->type != ItemTypes::NIL){
+					return interrupt->payload;
+				}else{
+					return interrupt;
+				}
+			}			
 			last->add(obj);
 			if(cursor->error){
 				return std::make_shared<Item>(Item());
 			}				
 		}
+
 		return last;
 	}else
 	// single
@@ -845,6 +889,7 @@ std::shared_ptr<CV::Item> CV::eval(const std::string &input, std::shared_ptr<CV:
 		return obj;
 	}
 
+
 	// Reserved imperative
 	if(isReserved(imp)){
 		// NIL
@@ -870,6 +915,39 @@ std::shared_ptr<CV::Item> CV::eval(const std::string &input, std::shared_ptr<CV:
 			ctx->registerProperty(name, val);
 			return val;
 		}else
+		if(imp == "rset"){
+			// this is a dirty hack to allow modifying items within _.
+			// the solution is probably to redesign Item to be multi-type
+			// that would require fully dropping STL
+			std::string scopeMod;
+			std::string imp = tokens[1];
+			if(tokens[1].rfind(":") != -1 || tokens[1].rfind("~") != -1){
+				std::unordered_map<std::string, std::string> mods;
+				int cutOff = Tools::getModifiers(imp, mods);
+				imp = imp.substr(0, cutOff+1);
+				if(mods.count(":") > 0){
+					scopeMod = mods[":"];
+				}		
+			}	
+			auto ownerCtx = ctx;
+			auto who = eval(imp, ownerCtx, cursor);
+			if(cursor->error){
+				return std::make_shared<Item>(Item());
+			}			
+			if(scopeMod.size() > 0 && who->getProperty(scopeMod)->type != ItemTypes::NIL){
+				imp = scopeMod;
+				ownerCtx = who;
+			}
+
+			auto to = eval(tokens[2], ctx, cursor);
+			if(cursor->error){
+				return std::make_shared<Item>(Item());
+			}			
+
+			auto mutated = ownerCtx->findAndSetProperty(imp, to);
+	
+			return mutated;
+		}else
 		// PROTO builds a prototype item: the other first class citizen of canvas (other one being list)
 		if(imp == "proto"){
 			auto proto = std::make_shared<ProtoType>(ProtoType());
@@ -889,6 +967,7 @@ std::shared_ptr<CV::Item> CV::eval(const std::string &input, std::shared_ptr<CV:
 
 				names.push_back(varname);
 				auto result = eval(varvalue, ctx, cursor);
+				result->registerProperty("_", proto);
 				if(cursor->error){
 					return std::make_shared<Item>(Item());
 				}					
@@ -954,11 +1033,11 @@ std::shared_ptr<CV::Item> CV::eval(const std::string &input, std::shared_ptr<CV:
 		// IF conditional statement ([if [cond] [branch-true][branch-false]])
 		if(imp == "if"){
 			if(tokens.size() < 3){
-				cursor->setError("operator 'iter': expects at least 2 operands");
+				cursor->setError("operator 'if': expects at least 2 operands");
 				return std::make_shared<Item>(Item());
 			}
 			if(tokens.size() > 4){
-				cursor->setError("operator 'iter': no more than 3 operands");
+				cursor->setError("operator 'if': no more than 3 operands");
 				return std::make_shared<Item>(Item());
 			}
 			auto cond = eval(tokens[1], ctx, cursor);
@@ -972,7 +1051,7 @@ std::shared_ptr<CV::Item> CV::eval(const std::string &input, std::shared_ptr<CV:
 				if(cursor->error){
 					return std::make_shared<Item>(Item());
 				}
-				return trueBranch->type == ItemTypes::INTERRUPT ? std::static_pointer_cast<InterruptType>(trueBranch)->payload : trueBranch;
+				return trueBranch;
 			}else
 			if(tokens.size() > 3){
 				auto tctx = createContext(ctx);
@@ -980,7 +1059,7 @@ std::shared_ptr<CV::Item> CV::eval(const std::string &input, std::shared_ptr<CV:
 				if(cursor->error){
 					return std::make_shared<Item>(Item());
 				}				
-				return falseBranch->type == ItemTypes::INTERRUPT ? std::static_pointer_cast<InterruptType>(falseBranch)->payload : falseBranch;
+				return falseBranch;
 			}
 		}else
 		// for loop procedure ([for [start][cond][modifier] [code]...[code]])
@@ -1061,7 +1140,6 @@ std::shared_ptr<CV::Item> CV::eval(const std::string &input, std::shared_ptr<CV:
 			}
 			auto iteratable = eval(tokens[1], ctx, cursor);
 
-			// std::cout << "XD " << tokens[1] << " " << iteratable->type << " " << iteratable->str() << " '" << iteratable->name << "'" << std::endl;
 
 			if(cursor->error){
 				return std::make_shared<Item>(Item());
@@ -1186,7 +1264,9 @@ std::shared_ptr<CV::Item> CV::eval(const std::string &input, std::shared_ptr<CV:
 				if(obj->type == ItemTypes::FUNCTION){
 					auto params = compileParams(tokens, 1);
 					auto tctx = createContext(ctx);
-					tctx->registerProperty("_", var);
+					if(obj->getProperty("_")->type != ItemTypes::NIL){
+						tctx->registerProperty("_", var);
+					}
 					auto result = runFunction(obj, params, tctx, cursor);
 					if(cursor->error){
 						return std::make_shared<Item>(Item());
@@ -1196,13 +1276,19 @@ std::shared_ptr<CV::Item> CV::eval(const std::string &input, std::shared_ptr<CV:
 						if(interrupt->intype == InterruptTypes::RET){
 							return interrupt->payload;
 						}
-					}else{	
+					}else{						
+						if(scopeMod.size() > 0){
+							obj->name = scopeMod;
+						}							
 						if(namer.size() > 0){
 							obj->name = namer;
 						}										
 						return result;
 					}
-				}else{
+				}else{		
+					if(scopeMod.size() > 0){
+						obj->name = scopeMod;
+					}							
 					if(namer.size() > 0){
 						obj->name = namer;
 					}							
@@ -1303,8 +1389,8 @@ static int isThereNil(const std::vector<std::shared_ptr<CV::Item>> &items){
 	return -1;
 }
 
-std::string CV::printContext(std::shared_ptr<CV::Item> &ctx, bool ignoreInners){
-	std::string output = "CONTEXT\n";
+std::string CV::printContext(CV::Item *ctx, bool ignoreInners){
+	std::string output = "CONTEXT["+std::to_string(ctx->id)+"]\n";
 
 	int fcol = 5;
 	int scol = 5;
@@ -1324,7 +1410,7 @@ std::string CV::printContext(std::shared_ptr<CV::Item> &ctx, bool ignoreInners){
 		if(ignoreInners && item->type == CV::ItemTypes::FUNCTION && std::static_pointer_cast<CV::FunctionType>(item)->inner){
 			continue;
 		} 
-		output += it.first;
+		output += it.first+"["+std::to_string(it.second->id)+"]";
 		int toAdd = fcol - it.first.length();
 		for(int i = 0; i < toAdd; ++i){
 			output += " ";
@@ -1336,12 +1422,114 @@ std::string CV::printContext(std::shared_ptr<CV::Item> &ctx, bool ignoreInners){
 		output += it.second->type == CV::ItemTypes::STRING ?  it.second->str(true)+"\n" : "'"+it.second->str(true)+"'\n";
 	}
 
+	if(ctx->head.get()){
+		output += std::string()+"\n\n"+printContext(ctx->head.get(), ignoreInners);
+	}
+
 	return output;
 }
 
 
 
 void CV::registerEmbeddedOperators(std::shared_ptr<CV::Item> &ctx){
+
+	/* 
+
+		OR
+
+	*/
+	ctx->registerProperty("or", std::make_shared<FunctionType>(FunctionType([](const std::vector<std::shared_ptr<Item>> &operands, std::shared_ptr<Item> &ctx, Cursor *cursor){
+			if(operands.size() < 2){
+				cursor->setError("operator 'or': expects at least 2 operand");
+				return std::make_shared<Item>(Item());						
+			}
+
+
+			for(int i = 0; i < operands.size(); ++i){			
+				if(operands[i]->type == ItemTypes::NUMBER && *static_cast<double*>(operands[i]->data) > 0){
+					return CV::create(1);		
+				}
+			}		
+			
+			return CV::create(0);
+			
+			return std::make_shared<Item>(Item());				
+		}, {}
+	))); 
+
+	/* 
+
+		NOR
+
+	*/
+	ctx->registerProperty("nor", std::make_shared<FunctionType>(FunctionType([](const std::vector<std::shared_ptr<Item>> &operands, std::shared_ptr<Item> &ctx, Cursor *cursor){
+			if(operands.size() < 2){
+				cursor->setError("operator 'nor': expects at least 2 operand");
+				return std::make_shared<Item>(Item());						
+			}
+
+
+			for(int i = 0; i < operands.size(); ++i){			
+				if(operands[i]->type == ItemTypes::NUMBER && *static_cast<double*>(operands[i]->data) > 0){
+					return CV::create(0);		
+				}
+			}		
+			
+			return CV::create(1);
+			
+			return std::make_shared<Item>(Item());				
+		}, {}
+	))); 
+
+
+
+	/* 
+
+		AND
+
+	*/
+	ctx->registerProperty("and", std::make_shared<FunctionType>(FunctionType([](const std::vector<std::shared_ptr<Item>> &operands, std::shared_ptr<Item> &ctx, Cursor *cursor){
+			if(operands.size() < 2){
+				cursor->setError("operator 'and': expects at least 2 operand");
+				return std::make_shared<Item>(Item());						
+			}
+
+			for(int i = 0; i < operands.size(); ++i){			
+				if(operands[i]->type != ItemTypes::NUMBER || *static_cast<double*>(operands[i]->data) <= 0){
+					return CV::create(0);		
+				}
+			}		
+			
+			return CV::create(1);
+			
+			return std::make_shared<Item>(Item());				
+		}, {}
+	))); 
+
+
+	/* 
+
+		NAND
+
+	*/
+	ctx->registerProperty("nand", std::make_shared<FunctionType>(FunctionType([](const std::vector<std::shared_ptr<Item>> &operands, std::shared_ptr<Item> &ctx, Cursor *cursor){
+			if(operands.size() < 2){
+				cursor->setError("operator 'nand': expects at least 2 operand");
+				return std::make_shared<Item>(Item());						
+			}
+
+			for(int i = 0; i < operands.size(); ++i){			
+				if(operands[i]->type != ItemTypes::NUMBER || *static_cast<double*>(operands[i]->data) <= 0){
+					return CV::create(1);		
+				}
+			}		
+			
+			return CV::create(0);
+			
+			return std::make_shared<Item>(Item());				
+		}, {}
+	))); 	
+
 	/* 
 
 		ADDITION
@@ -2057,42 +2245,6 @@ void CV::registerEmbeddedOperators(std::shared_ptr<CV::Item> &ctx){
 
 	)));
 
-
-
-
-	/*
-	
-		rset
-
-	*/
-	ctx->registerProperty("rset", std::make_shared<FunctionType>(FunctionType([](const std::vector<std::shared_ptr<Item>> &operands, std::shared_ptr<Item> &ctx, Cursor *cursor){
-
-			if(operands.size() < 2){
-				cursor->setError("operator 'rset': expects 2 operand");
-				return std::make_shared<Item>(Item());						
-			}			
-
-			if(operands.size() > 2){
-				cursor->setError("operator 'rset': expects no more than 2 operand");
-				return std::make_shared<Item>(Item());						
-			}	
-
-			if(operands[0]->name.size() == 0){
-				cursor->setError("operator 'rset': the provided variable doesn't have a name");
-				return std::make_shared<Item>(Item());					
-			}
-
-			auto mutated = ctx->findAndSetProperty(operands[0]->name, operands[1]);
-
-
-			if(mutated->type != ItemTypes::NIL){
-				return mutated;				
-			}else{
-				return std::make_shared<Item>(Item());					
-			}
-
-		}, {}
-	)));
 
 
 	/*

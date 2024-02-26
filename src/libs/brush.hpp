@@ -54,7 +54,10 @@
         static bool KeysStatePressed [keysn];
         static bool isKeysStatePressed [keysn];
         static bool KeysStateReleased [keysn];
-        static bool isKeysStateReleased [keysn];        
+        static bool isKeysStateReleased [keysn];      
+
+        static auto deltaTimeStart = std::chrono::system_clock::now();
+        static double deltaElapsedTime;          
 
         static void drawPixel(double _x, double _y, double xScale, double yScale, double color[4]){
             int x = _x * xScale;
@@ -219,6 +222,12 @@
                     double r = 1;
                     lib->getProperty("running")->write(&r, sizeof(r), true);
                     isRunning = true;
+
+
+                    for (unsigned i=0; i<keysn; i++){
+                        SDLKeys[keys[i]] = i;
+                    }
+
 
                     return CV::create(1);
                 }, {}
@@ -473,16 +482,6 @@
                 }, {}
             )));
 
-           lib->registerProperty("d-fillrect", std::make_shared<CV::FunctionType>(CV::FunctionType([lib](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
-                    return CV::create(1);
-                }, {}
-            )));
-
-           lib->registerProperty("d-rect", std::make_shared<CV::FunctionType>(CV::FunctionType([lib](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
-                    return CV::create(1);
-                }, {}
-            )));     
-
            lib->registerProperty("clear", std::make_shared<CV::FunctionType>(CV::FunctionType([lib](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
                     int xScale = *static_cast<double*>(lib->getProperty("x-scale")->data);
                     int yScale = *static_cast<double*>(lib->getProperty("y-scale")->data);                  
@@ -506,15 +505,16 @@
 
                     SDL_Event event;
                     unsigned key;
-                    for(unsigned i=0; i< keysn; i++){
-                        KeysCheck[i] = 0;
-                        isKeysStatePressed[i] = 0;
-                        isKeysStateReleased[i] = 0;
-                    }
+                    // for(unsigned i=0; i< keysn; i++){
+                    //     KeysCheck[i] = 0;
+                    //     isKeysStatePressed[i] = 0;
+                    //     isKeysStateReleased[i] = 0;
+                    // }
 
                     while (SDL_PollEvent(&event)){
                         switch(event.type){
                             case SDL_KEYUP:
+                                KeysCheck[getKey(event.key.keysym.sym)] = 0;
                                 KeysState[getKey(event.key.keysym.sym)] = 0;
                             break;
                             case SDL_KEYDOWN:
@@ -536,6 +536,15 @@
 
                     }
 
+	                auto ctime = std::chrono::system_clock::now();
+	                std::chrono::duration<float> elapse = ctime - deltaTimeStart;
+	                deltaTimeStart = std::chrono::system_clock::now();
+	                deltaElapsedTime = elapse.count();
+
+
+                    lib->getProperty("ticks")->write(&deltaElapsedTime, sizeof(deltaElapsedTime), CV::ItemTypes::NUMBER);
+
+
                     return CV::create(1);
                 }, {}
             )));    
@@ -547,6 +556,28 @@
                     return CV::create(1);
                 }, {}
             )));     
+
+            lib->registerProperty("set-title", std::make_shared<CV::FunctionType>(CV::FunctionType([lib](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
+
+                    if(operands.size() < 1){
+                        cursor->setError("operator "+LIBNAME+":set-title: expects 1 arguments (STRING)");
+                        return CV::create(0);
+                    }
+
+                    if(operands[0]->type != CV::ItemTypes::STRING){
+                        cursor->setError("operator "+LIBNAME+":window-creator: argument(1) must be a string");
+                        return CV::create(0);
+                    }                
+
+                    std::string ntitle = std::static_pointer_cast<CV::StringType>(operands[0])->literal;
+
+                    std::static_pointer_cast<CV::StringType>(lib->getProperty("title"))->set(ntitle);
+                    SDL_SetWindowTitle(window, ntitle.c_str());
+
+                    return CV::create(1);
+                }, {}
+            )));   
+
 
             lib->registerProperty("kb-check", std::make_shared<CV::FunctionType>(CV::FunctionType([lib](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
 
@@ -562,6 +593,7 @@
                     }                    
 
                     int key = (int)*static_cast<double*>(operands[0]->data); // cast it to int
+
 
                     return CV::create((key >= keysn-1 ? 0 : KeysCheck[key]));
                 }, {}
@@ -684,8 +716,9 @@
                 "key-F13", "key-F14", "key-F15", "key-PAUSE"                
             };
             for(int i = 0; i < defaultKeys.size(); ++i){
-                lib->registerProperty(defaultKeys[i], CV::create(i));    
+                lib->registerProperty(defaultKeys[i], CV::create((double)i));    
             }
+            lib->registerProperty("ticks", CV::create(0));    
 
             ctx->registerProperty(LIBNAME, std::static_pointer_cast<CV::Item>(lib));
         }   
