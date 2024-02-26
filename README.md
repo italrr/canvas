@@ -1,8 +1,6 @@
 # canvas
 
-# What is it?
-
-`cv` is an esoteric dynamic/pseudo-functional programming language designed with simplicity and hackability in mind. It's heavily inspired by C++ and Javascript, with a very small touch of LISP.
+`cv` is an esoteric dynamic, pseudo-functional, programming language designed with expressiveness and hackability in mind. It's heavily inspired by JavaScript, LISP with a little bit of Python.
 
 Short summary:
 
@@ -80,7 +78,7 @@ do [cv:running] [
 ]
 ```
 
-# MEMBER/MODIFIERS
+# Modifiers
 canvas offers a way to access or modify operators/imperatives/references through the following tokens:
 - `:`: It's the access modifier. It allows to access members such as functions or variables within an object
 - `~`: It's called the namer modifier. It allows to rename an object on the fly and usually temporarily

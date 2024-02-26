@@ -45,7 +45,7 @@ set c-ball [fn [][
         [set ydiff [+ _:y [* [math:sin _:dir] _:speed cv:ticks]]]
         
         [if [gte [+ _:y xdiff] g-height][
-            [rset ]
+            [ret]
         ]]
 
         [rset _:x xdiff]
