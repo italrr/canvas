@@ -12,7 +12,7 @@
 - `if`: If the provided statement is 1 or more or not `nil`, it executes the first block, if not(and it provided), it executes the second block.
 - `do`: It will loop the second block as long as the first block returns 1 or more, or not `nil`.
 - `iter`: It goes through an iterable, which are Lists and Protos. With the usage of the `~` Namer modifier, you may refer and utilize every item of the iteration. Example `iter [.. 1 5]~i [ret + i i]` returns `[2 4 6 8 10]`.
-- `for`: Provided an "start" block, a "conditional" block, and a "modifier" block, it will loop the 4th and subsequent blocks until the "conditional" block is no longer true. Example: `for [set i 0][lt i 10][++ i][io:out i '\n']` prints `0123456789`.
+- `for`: Provided an "start" block, a "conditional" block, and a "modifier" block, it will loop the 4th and subsequent blocks until the "conditional" block is no longer 1. Example: `for [set i 0][lt i 10][++ i][io:out i '\n']` prints `0123456789`.
 - `or`: It returns 1 if one of the provided items is 1 or more, or not `nil`.
 - `and`: It returns 1 if all the provided items are 1 or more, or not `nil`.
 - `nand`: The opposite of and.
@@ -20,9 +20,9 @@
 - `eq`: It returns 1 if all items are "equal". It works with numbers and strings.
 - `neq`: The opposite of eq.
 - `gt`: It returns 1 if all the items value are in descending order (15 5 1). It works with numbers.
-- `gte`: It returns 1 if all the items value are in descending order OR are equal to the first (15 15 1). It works with numbers.
+- `gte`: It returns 1 if all the items value are in descending order OR are equal to the last in order (15 15 1). It works with numbers.
 - `lt`: It returns 1 if all the items value are in ascending order (1 5 15). It works with numbers.
-- `lte`: It returns 1 if all the items value are in ascending order OR are equal to the first (1 5 5). It works with numbers.
+- `lte`: It returns 1 if all the items value are in ascending order OR are equal to the last in order (1 5 5). It works with numbers.
 
 ### Standard Operators
 
