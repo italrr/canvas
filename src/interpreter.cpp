@@ -8,7 +8,7 @@
 
 
 CV::Cursor cursor;
-std::shared_ptr<CV::Item> ctx = CV::createContext();
+std::shared_ptr<CV::Item> ctx = CV::createContext(std::shared_ptr<CV::Item>(NULL), false);
 
 static void onExit(){
 	std::cout << CV::printContext(ctx.get()) << std::endl;
@@ -53,6 +53,7 @@ int main(int argc, char* argv[]){
 	io::registerLibrary(ctx);
 	brush::registerLibrary(ctx);
 	math::registerLibrary(ctx);
+	timelib::registerLibrary(ctx);
 	
 	std::vector<std::string> params;
 	for(int i = 0; i < argc; ++i){

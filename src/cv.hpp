@@ -160,6 +160,7 @@
             void *data;
             unsigned size;
             unsigned type;
+            bool temporary;
             std::unordered_map<std::string,std::shared_ptr<Item>> members;
             std::shared_ptr<Item> head;
             Item();
@@ -167,12 +168,13 @@
             void write(void *data, size_t size, int type);
             virtual std::shared_ptr<Item> copy();
 
-            void registerProperty(const std::string &name, const std::shared_ptr<Item> &v);
+            void registerProperty(const std::string &name, const std::shared_ptr<Item> &v, bool onRealContext = false);
 
             void deregisterProperty(const std::string &name);
 
             std::shared_ptr<Item> findProperty(const std::string &name);
             Item *findContext(const std::string &name);
+            Item *findRealContext();
 
             std::shared_ptr<CV::Item> findAndSetProperty(const std::string &name, const std::shared_ptr<CV::Item> &v);
             std::shared_ptr<Item> getProperty(const std::string &name);
@@ -268,7 +270,7 @@
         };
 
         std::shared_ptr<CV::Item> create(double n);
-        std::shared_ptr<CV::Item> createContext(const std::shared_ptr<CV::Item> &head = std::shared_ptr<CV::Item>(NULL));
+        std::shared_ptr<CV::Item> createContext(const std::shared_ptr<CV::Item> &head, bool temporary);
         std::shared_ptr<CV::ListType> createList(int n);
         std::shared_ptr<CV::ProtoType> createProto();
         std::shared_ptr<CV::StringType> createString(const std::string &str = "");
@@ -285,6 +287,7 @@
     #include "libs/io.hpp"
     #include "libs/brush.hpp"
     #include "libs/math.hpp"
+    #include "libs/time.hpp"
 
 
 #endif

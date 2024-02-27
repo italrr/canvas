@@ -7,6 +7,24 @@ set p-height [* g-height 0.25]
 set b-width 4
 set b-height 4
 
+set state 1
+set last-state time:epoch
+
+set check-collision [fn [p bx by][
+    [set hb-w [/ b-width 2]]
+    [set hb-h [/ b-height 2]]  
+
+    [if
+            [or
+                [and [gte [+ bx hb-w] p:x] [gte [+ by hb-h] p:y] [lt [- bx hb-w] [+ p:x p-width]] [lt [- by hb-h] [+ p:y p-height]]]
+                [and [lte [- bx hb-w] [+ p:x p-width]] [lte [- by hb-h] [+ p:y p-height]] [gt [- bx hb-w] p:x] [gt [- by hb-h] p:y]]
+            ]
+        [
+        ret 1
+    ]]
+    [ret 0]
+]]
+
 set c-player [fn [pcolor][
     proto
     x:0
@@ -21,8 +39,33 @@ set c-player [fn [pcolor][
         [if [lte [- _:y y] 0][
             [rset _:y 1]
             [ret]
-        ]]        
+        ]]
         [rset _:y [+ y _:y]]
+        [if [check-collision _ ball:x ball:y][
+            [if [lt y 0][
+                [if [lt [+ ball:y y] 0][
+                    [rset ball:y [/ b-height 2]]
+                    [rset _:y b-height]
+                ][
+                    [rset ball:y [+ ball:y y]]
+                ]]
+            ]]
+            [if [gt y 0][
+                [if [gt [+ ball:y y] g-height][
+                    [rset ball:y [- g-height [/ b-height 2]]]
+                    [rset _:y [- g-height p-height b-height]]
+                ][
+                    [rset ball:y [+ ball:y y]]
+                ]]                
+            ]] 
+            [if [lt _:x ball:x][
+                [rset ball:xspeed [math:rand-int 150 250]]
+            ]]
+            [if [gt _:x ball:x][
+                [rset ball:xspeed [math:rand-int -250 -150]]
+            ]]            
+            [rset ball:yspeed [+ ball:yspeed [* y 100]]]
+        ]]
     ]]
     set:[fn [x y][
         [rset _:x x]
@@ -33,62 +76,122 @@ set c-player [fn [pcolor][
     ]]
 ]]
 
-
 set c-ball [fn [][
     proto
     x:0
     y:0
-    dir:0
-    speed:0
+    xspeed:0
+    yspeed:0
     move:[fn [][
-        [set xdiff [+ _:x [* [math:cos _:dir] _:speed cv:ticks]]]
-        [set ydiff [+ _:y [* [math:sin _:dir] _:speed cv:ticks]]]
-        
-        [if [gte [+ _:y xdiff] g-height][
-            [ret]
+        [set xdiff [+ _:x [* _:xspeed cv:ticks]]]
+        [set ydiff [+ _:y [* _:yspeed cv:ticks]]] 
+
+        [if [or [gte [+ ydiff [/ b-height 2]] g-height] [or [check-collision p1 _:x ydiff] [check-collision p2 _:x ydiff]]~pc][
+            [rset ydiff _:y]
+            [rset _:yspeed [* _:yspeed -1]]
         ]]
+
+        [if [or [lte [- ydiff [/ b-height 2]] 0] [or [check-collision p1 _:x ydiff] [check-collision p2 _:x ydiff]]~pc][
+            [rset ydiff _:y]
+            [rset _:yspeed [* _:yspeed -1]] 
+        ]] 
+
+        [if [or [gte [+ xdiff [/ b-width 2]] g-width] [or [check-collision p1 xdiff _:y] [check-collision p2 xdiff _:y]]~pc][
+            [rset xdiff _:x]
+            [rset _:xspeed [* _:xspeed -1]]    
+            [if [eq pc 0][
+                [set-goal 1]
+            ]]                 
+        ]]
+
+        [if [or [lte [- xdiff [/ b-width 2]] 0] [or [check-collision p1 xdiff _:y] [check-collision p2 xdiff _:y]]~pc][
+            [rset xdiff _:x]
+            [rset _:xspeed [* _:xspeed -1]]
+            [if [eq pc 0][
+                [set-goal -1]
+            ]]             
+        ]]                 
 
         [rset _:x xdiff]
         [rset _:y ydiff]
     ]]
     throw:[fn [][
-        [set ang [/ [math:rand-int 1 20] 60]]
-        [rset _:dir [* ang math:pi]]
-        [rset _:speed [math:rand-int 90 150]]
+        [set dir [if [gt [math:rand-int 0 1] 0][ret -1][ret 1]]]
+        [rset _:xspeed [* 150 dir]]
+        [rset _:yspeed [math:rand-int -35 35]]
     ]]
     set:[fn [x y][
         [rset _:x x]
         [rset _:y y]        
-        [rset _:speed 0]
+        [rset _:xspeed 0]
+        [rset _:yspeed 0]
     ]]
     draw:[fn [][
         [cv:d-rectangle [- _:x [* b-width 0.5]] [- _:y [* b-height 0.5]] [b-width] [b-height] 1 [0 0 1 1]]
     ]]    
 ]]
 
-
 set p1 [c-player [1 0 0 1]]
 set p2 [c-player [0 1 0 1]]
 set ball [c-ball]
 
-p1:set 0 [- [/ g-height 2] [/ p-height 2]]
-p2:set [- g-width p-width] [- [/ g-height 2] [/ p-height 2]]
-ball:set [* g-width 0.5] [* g-height 0.5]
+set set-state [fn [v][
+    [rset state v]
+    [rset last-state tm:epoch]
+]]
 
-ball:throw
+set set-goal [fn [v][
+    [if [eq v -1][
+        [++ p2:score]
+    ]]
+    [if [eq v 1][
+        [++ p1:score]
+    ]]
+    [set-state 0]   
+]]
+
+set-state 0
+
+set check-state [fn [][
+    [if [eq state 0][
+        [p1:set 0 [- [/ g-height 2] [/ p-height 2]]]
+        [p2:set [- g-width p-width] [- [/ g-height 2] [/ p-height 2]]]
+        [ball:set [* g-width 0.5] [* g-height 0.5]]
+        [cv:set-title [s-join 'P1 Score ' p1:score ' | P2 Score ' p2:score]]        
+        [set-state 1]
+    ]]
+
+    [if [and [eq state 1] [gt [- tm:epoch last-state] 1]][
+        [set-state 2]
+    ]]    
+
+    [if [and [eq state 2] [gt [- tm:epoch last-state] 1]][
+        [ball:throw]
+        [set-state 3]
+    ]]    
+]]
 
 cv:window-create 'PONG' g-width g-height 4 4
 do [cv:running] [
     [cv:step]
     [cv:clear]
     [   
-        [ball:move]
-        [if [cv:kb-check cv:key-W] [
-            [p1:move [* cv:ticks -100]]
+        [check-state]
+        [if [eq state 3][
+            [ball:move]
+            [if [cv:kb-check cv:key-W][
+                [p1:move [* cv:ticks -100]]
+            ]]
+            [if [cv:kb-check cv:key-S][
+                [p1:move [* cv:ticks 100]]
+            ]]  
+            [if [lt [+ p2:y [/ p-height 2]] ball:y][
+                [p2:move [* cv:ticks 100]]
+            ]]
+            [if [gt p2:y ball:y][
+                [p2:move [* cv:ticks -100]]
+            ]]
         ]]
-        [if [cv:kb-check cv:key-S] [
-            [p1:move [* cv:ticks 100]]
-        ]]        
         [p1:draw]
         [p2:draw]
         [ball:draw]

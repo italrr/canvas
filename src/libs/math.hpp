@@ -6,7 +6,7 @@
     /*
         STANDARD LIBRARY `math`
         
-        math includes buffer manipulation such as files, stdout, stdin, and stderr
+        math includes typical math functions such as sin, cos, atan, etc.
     
     */
 
@@ -331,19 +331,19 @@
 
             lib->registerProperty("rand-int", std::make_shared<CV::FunctionType>(CV::FunctionType([](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
                     if(operands.size() < 2){
-                        cursor->setError("operator '"+LIBNAME+":max': expects at least 2 operand");
+                        cursor->setError("operator '"+LIBNAME+":rand-int': expects at least 2 operand");
                         return std::make_shared<CV::Item>(CV::Item());						
                     }
                     if(operands.size() > 2){
-                        cursor->setError("operator '"+LIBNAME+":max': expects no more than 2 operand");
+                        cursor->setError("operator '"+LIBNAME+":rand-int': expects no more than 2 operand");
                         return std::make_shared<CV::Item>(CV::Item());						
                     }
                     if(operands[0]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator '"+LIBNAME+":max': argument(0) must be a NUMBER");
+                        cursor->setError("operator '"+LIBNAME+":rand-int': argument(0) must be a NUMBER");
                         return std::make_shared<CV::Item>(CV::Item());	                        
                     }
                     if(operands[1]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator '"+LIBNAME+":max': argument(1) must be a NUMBER");
+                        cursor->setError("operator '"+LIBNAME+":rand-int': argument(1) must be a NUMBER");
                         return std::make_shared<CV::Item>(CV::Item());	                        
                     }                    
 

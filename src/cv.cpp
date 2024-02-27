@@ -241,6 +241,7 @@ CV::Item::Item(){
 	size = 0;
 	id = Tools::genItemCountId();	
 	name = ""; // anonymous	
+	temporary = false;
 }
 
 void CV::Item::clear(){	
@@ -271,8 +272,15 @@ std::shared_ptr<CV::Item> CV::Item::copy(){
 	return r;
 }
 
-void CV::Item::registerProperty(const std::string &name, const std::shared_ptr<Item> &v){
-	this->members[name] = v;
+void CV::Item::registerProperty(const std::string &name, const std::shared_ptr<Item> &v, bool onRealContext){
+	if(onRealContext){
+		auto ctx = this->findRealContext();
+		if(ctx != NULL){
+			ctx->members[name] = v;
+		}
+	}else{
+		this->members[name] = v;
+	}
 }
 
 void CV::Item::deregisterProperty(const std::string &name){
@@ -286,6 +294,13 @@ std::shared_ptr<CV::Item> CV::Item::findProperty(const std::string &name){
 	}
 	return it->second;		
 }	
+
+CV::Item *CV::Item::findRealContext(){
+	if(this->temporary){
+		return this->head.get() == NULL ? NULL : this->head->findRealContext();
+	}
+	return this;
+}
 
 CV::Item *CV::Item::findContext(const std::string &name){
 	auto it = this->members.find(name);
@@ -643,10 +658,11 @@ std::shared_ptr<CV::Item> CV::create(double n){
 	return result;	
 }
 
-std::shared_ptr<CV::Item> CV::createContext(const std::shared_ptr<CV::Item> &head){
+std::shared_ptr<CV::Item> CV::createContext(const std::shared_ptr<CV::Item> &head, bool temporary){
 	auto result = std::make_shared<CV::Item>(CV::Item());
 	result->type = CV::ItemTypes::CONTEXT;
 	result->head = head;
+	result->temporary = temporary;
 	return result;	
 }
 
@@ -826,6 +842,10 @@ std::shared_ptr<CV::Item> CV::eval(const std::string &input, std::shared_ptr<CV:
 		for(int i = 0; i < tokens.size(); ++i){
 			auto imp = tokens[i];
 			auto obj = eval(imp, ctx, cursor);
+			if(namer.size() > 0){
+				ctx->registerProperty(namer, obj, true);
+				obj->name = namer;
+			}				
 			if(obj->type == ItemTypes::INTERRUPT){
 				auto interrupt = std::static_pointer_cast<InterruptType>(obj);
 				if(interrupt->intype == InterruptTypes::RET && interrupt->payload->type != ItemTypes::NIL){
@@ -846,7 +866,9 @@ std::shared_ptr<CV::Item> CV::eval(const std::string &input, std::shared_ptr<CV:
 	if(tokens.size() == 1 && tokens[0].length() > 1 && tokens[0][0] == '[' && tokens[0][tokens[0].length()-1] == ']'){
 		imp = tokens[0].substr(1, tokens[0].length() - 2);		
 		auto obj = eval(imp, ctx, cursor);
+
 		if(namer.size() > 0){
+			ctx->registerProperty(namer, obj, true);
 			obj->name = namer;
 		}			
 		if(cursor->error){
@@ -856,6 +878,7 @@ std::shared_ptr<CV::Item> CV::eval(const std::string &input, std::shared_ptr<CV:
 			auto list = std::static_pointer_cast<ListType>(obj);
 			auto item = list->get(std::stod(scopeMod));
 			if(namer.size() > 0){
+				ctx->registerProperty(namer, item, true);
 				item->name = namer;
 			}
 			return item;
@@ -864,6 +887,7 @@ std::shared_ptr<CV::Item> CV::eval(const std::string &input, std::shared_ptr<CV:
 			auto str = std::static_pointer_cast<StringType>(obj);
 			auto item = str->get(std::stod(scopeMod));
 			if(namer.size() > 0){
+				ctx->registerProperty(namer, item, true);
 				item->name = namer;
 			}					
 			return item;
@@ -872,15 +896,20 @@ std::shared_ptr<CV::Item> CV::eval(const std::string &input, std::shared_ptr<CV:
 			auto inobj = obj->getProperty(scopeMod);
 			if(inobj->type == ItemTypes::FUNCTION){
 				auto params = compileParams(tokens, 1);
-				auto tctx = createContext(ctx);
+				auto tctx = createContext(ctx, true);
 				tctx->registerProperty("_", obj);
 				auto result = runFunction(obj, params, tctx, cursor);
 				if(cursor->error){
 					return std::make_shared<Item>(Item());
-				}					
+				}			
+				if(namer.size() > 0){
+					tctx->registerProperty(namer, result, true);
+					inobj->name = namer;
+				}							
 				return result;
 			}else{
 				if(namer.size() > 0){
+					ctx->registerProperty(namer, inobj, true);
 					inobj->name = namer;
 				}				
 				return inobj;
@@ -888,7 +917,6 @@ std::shared_ptr<CV::Item> CV::eval(const std::string &input, std::shared_ptr<CV:
 		}
 		return obj;
 	}
-
 
 	// Reserved imperative
 	if(isReserved(imp)){
@@ -1046,7 +1074,7 @@ std::shared_ptr<CV::Item> CV::eval(const std::string &input, std::shared_ptr<CV:
 			}			
 			bool t = cond->type == ItemTypes::NUMBER && *static_cast<double*>(cond->data) > 0;
 			if(t){
-				auto tctx = createContext(ctx);
+				auto tctx = createContext(ctx, true);
 				auto trueBranch = eval(tokens[2], tctx, cursor);
 				if(cursor->error){
 					return std::make_shared<Item>(Item());
@@ -1054,7 +1082,7 @@ std::shared_ptr<CV::Item> CV::eval(const std::string &input, std::shared_ptr<CV:
 				return trueBranch;
 			}else
 			if(tokens.size() > 3){
-				auto tctx = createContext(ctx);
+				auto tctx = createContext(ctx, true);
 				auto falseBranch = eval(tokens[3], tctx, cursor);
 				if(cursor->error){
 					return std::make_shared<Item>(Item());
@@ -1069,7 +1097,7 @@ std::shared_ptr<CV::Item> CV::eval(const std::string &input, std::shared_ptr<CV:
 				return std::make_shared<Item>(Item());
 			}	
 			bool t = false;
-			auto ctctx = createContext(ctx);
+			auto ctctx = createContext(ctx, true);
 			auto last = std::make_shared<Item>(Item());;
 
 			// start
@@ -1109,7 +1137,7 @@ std::shared_ptr<CV::Item> CV::eval(const std::string &input, std::shared_ptr<CV:
 				return std::make_shared<Item>(Item());
 			}	
 			bool t = false;
-			auto ctctx = createContext(ctx);
+			auto ctctx = createContext(ctx, true);
 			auto last = std::make_shared<Item>(Item());;
 			do {
 				auto cond = eval(tokens[1], ctctx, cursor);
@@ -1118,7 +1146,7 @@ std::shared_ptr<CV::Item> CV::eval(const std::string &input, std::shared_ptr<CV:
 				}		
 				t = cond->type == ItemTypes::NUMBER && *static_cast<double*>(cond->data) > 0;
 				if(t){
-					auto tctx = createContext(ctctx);
+					auto tctx = createContext(ctctx, true);
 					auto ntokens = compileParams(compileParams(tokens, 2));
 					auto run = eval(ntokens, tctx, cursor);
 					last = run;
@@ -1159,7 +1187,7 @@ std::shared_ptr<CV::Item> CV::eval(const std::string &input, std::shared_ptr<CV:
 					auto names = proto->getKeys();
 					for(int i = 0; i < names.size(); ++i){
 						auto current = proto->members[names[i]];
-						auto fctx = createContext(ctx);
+						auto fctx = createContext(ctx, false);
 						if(iteratable->name.size() > 0){
 							fctx->registerProperty(iteratable->name, current);
 						}
@@ -1196,7 +1224,7 @@ std::shared_ptr<CV::Item> CV::eval(const std::string &input, std::shared_ptr<CV:
 					std::shared_ptr<ListType> last = std::make_shared<ListType>(ListType());
 					for(int i = 0; i < list->list.size(); ++i){
 						auto current = list->list[i];
-						auto fctx = createContext(ctx);
+						auto fctx = createContext(ctx, true);
 						if(iteratable->name.size() > 0){
 							fctx->registerProperty(iteratable->name, current);
 						}
@@ -1238,6 +1266,7 @@ std::shared_ptr<CV::Item> CV::eval(const std::string &input, std::shared_ptr<CV:
 			auto list = std::static_pointer_cast<ListType>(var);
 			auto item = list->get(std::stod(scopeMod));
 			if(namer.size() > 0){
+				ctx->registerProperty(namer, item, true);
 				item->name = namer;
 			}					
 			return item;
@@ -1246,6 +1275,7 @@ std::shared_ptr<CV::Item> CV::eval(const std::string &input, std::shared_ptr<CV:
 			auto str = std::static_pointer_cast<StringType>(var);
 			auto item = str->get(std::stod(scopeMod));
 			if(namer.size() > 0){
+				ctx->registerProperty(namer, item, true);
 				item->name = namer;
 			}					
 			return item;
@@ -1257,13 +1287,17 @@ std::shared_ptr<CV::Item> CV::eval(const std::string &input, std::shared_ptr<CV:
 				if(cursor->error){
 					return std::make_shared<Item>(Item());
 				}
+				if(namer.size() > 0){
+					ctx->registerProperty(namer, v, true);
+					v->name = namer;
+				}						
 				return v;
 			}
 			if(scopeMod.length() > 0){
 				auto obj = var->getProperty(scopeMod);
 				if(obj->type == ItemTypes::FUNCTION){
 					auto params = compileParams(tokens, 1);
-					auto tctx = createContext(ctx);
+					auto tctx = createContext(ctx, true);
 					if(obj->getProperty("_")->type != ItemTypes::NIL){
 						tctx->registerProperty("_", var);
 					}
@@ -1281,6 +1315,7 @@ std::shared_ptr<CV::Item> CV::eval(const std::string &input, std::shared_ptr<CV:
 							obj->name = scopeMod;
 						}							
 						if(namer.size() > 0){
+							tctx->registerProperty(namer, obj, true);
 							obj->name = namer;
 						}										
 						return result;
@@ -1290,12 +1325,14 @@ std::shared_ptr<CV::Item> CV::eval(const std::string &input, std::shared_ptr<CV:
 						obj->name = scopeMod;
 					}							
 					if(namer.size() > 0){
+						ctx->registerProperty(namer, obj, true);
 						obj->name = namer;
 					}							
 					return obj;
 				}
 			}
 			if(namer.size() > 0){
+				ctx->registerProperty(namer, var, true);
 				var->name = namer;
 			}				
 			return var;
@@ -1303,43 +1340,42 @@ std::shared_ptr<CV::Item> CV::eval(const std::string &input, std::shared_ptr<CV:
 		}else
 		if(var->type == ItemTypes::FUNCTION){
 			auto params = compileParams(tokens, 1);
-			auto tctx = createContext(ctx);
+			auto tctx = createContext(ctx, true);
 			auto result = runFunction(var, params, tctx, cursor);
 			if(cursor->error){
 				return std::make_shared<Item>(Item());
 			}
 
 			if(namer.size() > 0){
+				tctx->registerProperty(namer, result, true);
 				result->name = namer;
 			}				
 			return result;			
 		}else{
 			auto params = compileParams(tokens);
 			auto v = infer(params, ctx, cursor);
+
 			if(cursor->error){
 				return std::make_shared<Item>(Item());
-			}else
+			}
+
+			if(namer.size() > 0){
+				ctx->registerProperty(namer, v, true);
+				v->name = namer;
+			}	
+
 			if(v->type == ItemTypes::LIST && scopeMod.length() > 0 && Tools::isNumber(scopeMod)){
 				auto list = std::static_pointer_cast<ListType>(v);
-				auto item = list->get(std::stod(scopeMod));
-				if(namer.size() > 0){
-					item->name = namer;
-				}					
+				auto item = list->get(std::stod(scopeMod));					
 				return item;
 			}else
 			if(v->type == ItemTypes::STRING && scopeMod.length() > 0 && Tools::isNumber(scopeMod)){
 				auto str = std::static_pointer_cast<StringType>(v);
-				auto item = str->get(std::stod(scopeMod));
-				if(namer.size() > 0){
-					item->name = namer;
-				}					
+				auto item = str->get(std::stod(scopeMod));				
 				return item;
 			}else{
 				if(cursor->error){
 					return std::make_shared<Item>(Item());
-				}
-				if(namer.size() > 0){
-					v->name = namer;
 				}
 				return v;
 			}
@@ -2324,6 +2360,29 @@ void CV::registerEmbeddedOperators(std::shared_ptr<CV::Item> &ctx){
 
 		}, {}
 	)));		
+
+	/*
+
+		join
+	
+	*/
+	ctx->registerProperty("s-join", std::make_shared<FunctionType>(FunctionType([](const std::vector<std::shared_ptr<Item>> &operands, std::shared_ptr<Item> &ctx, Cursor *cursor){
+			if(operands.size() < 2){
+				cursor->setError("operator 'join': expects at least 2 operands");
+				return std::make_shared<Item>(Item());						
+			}
+
+			std::string output;
+			for(int i = 0; i < operands.size(); ++i){
+				output += operands[i]->str(false);
+			}
+
+			return std::static_pointer_cast<Item>(CV::createString(output));
+			
+		}, {}
+	)));	
+
+
 
 	/*
 

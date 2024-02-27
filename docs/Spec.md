@@ -1,7 +1,16 @@
-Canvas Standard
----------------
+# Canvas Spec
 
-Version 0.1 - Feb 2020
+## Version 1.0.0 - Feb 2024
 
+### Integrated Operators
 
-TODO
+- `set`: Allows to define an object with a name into a context
+- `rset`: Allows to rename an existing object with a name.
+- `splice`: It allows to
+
+### io
+- `out`: Outputs STRING into stdout.
+
+### math
+
+### brush/cv

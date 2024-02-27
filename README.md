@@ -80,8 +80,8 @@ do [cv:running] [
 
 ## Modifiers
 canvas offers a way to access or modify operators/imperatives through the following tokens:
-- `:`: It's the access modifier. It allows to access members such as functions or variables within an object
-- `~`: It's called the namer modifier. It allows to rename an object on the fly and usually temporarily
+- `:`: It's the access modifier. It allows to access members such as functions or variables within an object.
+- `~`: It's called the namer modifier. It allows to rename an object on the fly and usually temporarily. The namer modifier talks to the nearest non-temporary context (root, within a proto or non-anymous functions) and makes it available through the given name. The namer can even be used to declare variables instead of `set`.
 - `|`: It's called the parralel linker modifier. It allows to link two contexts concurrently but in sequence. It's useful for threaded code
 
 
