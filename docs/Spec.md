@@ -9,24 +9,24 @@
 - Function: `fn [ARGUMENTS][BODY]`
 
 ### Conditionals and loops
-- `if`: If the provided statement is true, it executes the first block, if not(and it provided), it executes the second block.
-- `do`: It will return the second block as long as the first block returns 1 or more, or not `nil`.
-- `iter`: It goes through an iterable, which are Lists and Protos. With the usage of the `~` Namer modifier, you may refer and utilize every item of the iteration. Example `iter [.. 1 5]~i [io:out i]` returns `12345`.
-- `for`: Provided an "start" block, a "conditional" block, and a "modifier" block, it will return the 4th and subsequent blocks until the "conditional" block is no longer true. Example: `for [set i 0][lt i 10][++ i][io:out i '\n']` returns `0123456789`.
+- `if`: If the provided statement is 1 or more or not `nil`, it executes the first block, if not(and it provided), it executes the second block.
+- `do`: It will loop the second block as long as the first block returns 1 or more, or not `nil`.
+- `iter`: It goes through an iterable, which are Lists and Protos. With the usage of the `~` Namer modifier, you may refer and utilize every item of the iteration. Example `iter [.. 1 5]~i [ret + i i]` returns `[2 4 6 8 10]`.
+- `for`: Provided an "start" block, a "conditional" block, and a "modifier" block, it will loop the 4th and subsequent blocks until the "conditional" block is no longer true. Example: `for [set i 0][lt i 10][++ i][io:out i '\n']` prints `0123456789`.
 - `or`: It returns 1 if one of the provided items is 1 or more, or not `nil`.
 - `and`: It returns 1 if all the provided items are 1 or more, or not `nil`.
 - `nand`: The opposite of and.
 - `nor`: The opposite of or.
-- `eq`: It returns true if all items are 1 or not `nil`.
-- `neq`: It returns true if all items are 0 or `nil`.
-- `gt`: It returns true if all the items value are in descending order (15 5 1).
-- `gte`: It returns true if all the items value are in descending order OR are equal to the first (15 15 1).
-- `lt`: It returns true if all the items value are in ascending order (1 5 15).
-- `lte`: It returns true if all the items value are in ascending order OR are equal to the first (1 5 5).
+- `eq`: It returns 1 if all items are "equal". It works with numbers and strings.
+- `neq`: The opposite of eq.
+- `gt`: It returns 1 if all the items value are in descending order (15 5 1). It works with numbers.
+- `gte`: It returns 1 if all the items value are in descending order OR are equal to the first (15 15 1). It works with numbers.
+- `lt`: It returns 1 if all the items value are in ascending order (1 5 15). It works with numbers.
+- `lte`: It returns 1 if all the items value are in ascending order OR are equal to the first (1 5 5). It works with numbers.
 
 ### Standard Operators
 
-- `set`: Allows to define an object with a name into a context.
+- `set`: Allows to define an object with a name into the current context.
 - `rset`: Allows to redefine an existing object with a name. Unlike `set`, `rset` can redefine objects within PROTOs.
 - `splice`: It allows to combine at least two PROTOs. `splice [proto a:2] [proto b:3]` would return `proto a:2 b:3`.
 - `..`: Provided two different whole numbers numbers (and optionally, the third argument, a step) it creates a range or list. `.. 1 5`: would return `[1 2 3 4 5]`. `.. 1 10 2` would return `[1 3 5 7 9]`.
