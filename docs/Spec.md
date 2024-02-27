@@ -11,7 +11,7 @@
 - `gte`: It returns true if all the items value are in descending order OR are equal to the first (15 15 1).
 - `lt`: It returns true if all the items value are in ascending order (1 5 15).
 - `lte`: It returns true if all the items value are in ascending order OR are equal to the first (1 5 5).
-- `..`: Provided by two different while numbers numbers (and optionally, the third argument, a step) it creates at least. `.. 1 5`: would return `[1 2 3 4 5]`. `.. 1 10 2` would return `[1 3 5 7 9]`.
+- `..`: Provided two different whole numbers numbers (and optionally, the third argument, a step) it creates at least. `.. 1 5`: would return `[1 2 3 4 5]`. `.. 1 10 2` would return `[1 3 5 7 9]`.
 `l-flatten`: It takes all sublists provided and _flattens_ them into a single item. Example input `l-flatten [1 2 3 [4 5 [6 7]]]` would return `[1 2 3 4 5 6 7]`.
 - `++`: It works similarly to many C-like languages. It increased the provided item by 1 given it's a number.
 - `--`: Same as `++` but decreasing it by 1.
