@@ -1,4 +1,4 @@
-# canvas
+# canvas [~]
 
 ### Standard Operators
 
