@@ -1,6 +1,6 @@
 # canvas
 
-`cv` is an esoteric dynamic, pseudo-functional, programming language designed with expressiveness and hackability in mind. It's heavily inspired by JavaScript, LISP with a little bit of Python.
+`cv` is an esoteric, dynamic, pseudo-functional, programming/scripting language designed with expressiveness and hackability in mind. It's heavily inspired by JavaScript, LISP with a little bit of Python.
 
 Short summary:
 
