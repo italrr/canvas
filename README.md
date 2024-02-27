@@ -2,6 +2,9 @@
 
 `cv` is an esoteric, dynamic, pseudo-functional, programming/scripting language designed with expressiveness and hackability in mind. It's heavily inspired by JavaScript, LISP with a little bit of Python.
 
+Here are some of the standard operators for canvas:
+[Standard Operators](./docs/Spec.md)
+
 Short summary:
 
 - Code only supports ASCII (no unicode or emojis)
