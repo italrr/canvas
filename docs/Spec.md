@@ -2,8 +2,8 @@
 
 ### Standard Operators
 
-- `set NAME ITEM`: Allows to define an object with a name into a context.
-- `rset NAME[:] ITEM`: Allows to rename an existing object with a name.
+- `set`: Allows to define an object with a name into a context.
+- `rset`: Allows to redefine an existing object with a name. Unlike `set`, `rset` can redefine objects within PROTOs.
 - `splice`: It allows to combine at least two PROTO. `splice [proto a:2] [proto b:3]` would return `proto a:2 b:3`.
 - `eq`: It returns true if all items are 1 or not `nil`.
 - `neq`: It returns true if all items are 0 or `nil`.
