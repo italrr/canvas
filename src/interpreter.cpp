@@ -5,6 +5,10 @@
 
 
 #include "cv.hpp"
+#include "libs/io.hpp"
+#include "libs/brush.hpp"
+#include "libs/math.hpp"
+#include "libs/time.hpp"
 
 
 CV::Cursor cursor;
