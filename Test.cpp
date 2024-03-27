@@ -1,6 +1,4 @@
 #include <algorithm>
-#include <sstream>
-#include <iomanip>
 #include <functional>
 #include <iostream>
 #include <string>
@@ -24,6 +22,18 @@ namespace Tools {
     bool isString(const std::string &s){
         return s.size() > 1 && s[0] == '\'' && s[s.length()-1] == '\'';
     }  
+
+    static std::string removeTrailingZeros(double d){
+        size_t len = std::snprintf(0, 0, "%.64f", d);
+        std::string s(len+1, 0);
+        std::snprintf(&s[0], len+1, "%.64f", d);
+        s.pop_back();
+        s.erase(s.find_last_not_of('0') + 1, std::string::npos);
+        if(s.back() == '.') {
+            s.pop_back();
+        }
+        return s;
+    }
 
     std::string compileList(const std::vector<std::string> &strings){
         std::string out;
@@ -85,9 +95,36 @@ namespace ItemTypes {
         LIST,
         PROTO,
         FUNCTION,
-        INTERRUPT,
-        CONTEXT
+        INTERRUPT
     };
+    static std::string str(uint8_t type){
+        switch(type){
+            case NIL: {
+                return "NIL";
+            };
+            case NUMBER: {
+                return "NUMBER";
+            };  
+            case STRING: {
+                return "STRING";
+            };  
+            case LIST: {
+                return "LIST";
+            }; 
+            case PROTO: {
+                return "PROTO";
+            };    
+            case FUNCTION: {
+                return "FUNCTION";
+            }; 
+            case INTERRUPT: {
+                return "INTERRUPT";
+            };    
+            default: {
+                return "UNDEFINED";
+            };         
+        }
+    }
 }
 
 namespace InterruptTypes {
@@ -216,13 +253,13 @@ struct List : Item {
         this->data = malloc(sizeof(Item) * list.size());
         this->refc = 1;
         for(int i = 0; i < list.size(); ++i){
-            list[i]->incRefC();
-            memcpy(static_cast<Item*>(this->data) + i * sizeof(Item), list[i], sizeof(Item));
+            memcpy(static_cast<char*>(this->data) + i * sizeof(Item), list[i], sizeof(Item));
         }
+        std::cout << "over" << std::endl;
     }
 
     Item *get(int32_t index){
-        return static_cast<Item*>( static_cast<Item*>(this->data) + index * sizeof(Item));
+        return (Item*)( (char*)(this->data) + index * sizeof(Item));
     }
 
     bool clear(){
@@ -230,7 +267,7 @@ struct List : Item {
             return false;
         }
         for(int i = 0; i < this->size; ++i){
-            Item *item = static_cast<Item*>( static_cast<Item*>(this->data) + i * sizeof(Item));
+            Item *item = (Item*)( (char*)(this->data) + i * sizeof(Item));
             item->decRefC();
         }
         free(this->data);
@@ -273,12 +310,25 @@ struct FunctionConstraints {
     bool allowMisMatchingTypes;
     bool allowNil;
 
+    bool useExpectType;
+    uint8_t expectedType;
+
     FunctionConstraints(){
         enabled = false;
         allowNil = true;
         allowMisMatchingTypes = true;
         useMinParams = false;
         useMaxParams = false;
+        useExpectType = false;
+    }
+
+    void setExpectType(uint8_t type){
+        if(type == ItemTypes::NIL){
+            this->useExpectType = false;
+            return;
+        }
+        this->useExpectType = true;
+        this->expectedType = type;
     }
 
     void setMaxParams(unsigned n){
@@ -352,9 +402,8 @@ static std::string ItemToText(Item *item){
             return "nil";
         };
         case ItemTypes::NUMBER: {
-			std::ostringstream oss;
-            oss << std::setprecision(8) << std::noshowpoint << *static_cast<double*>(item->data);
-            return oss.str();
+            char str[100];
+            return Tools::removeTrailingZeros(*static_cast<double*>(item->data));
         };
         case ItemTypes::STRING: {
             std::string output;
@@ -597,6 +646,7 @@ struct Context {
         std::cout << "\n\n==================CONTEXT DEBUG==================" << std::endl;
         size_t maxVarName = 0;
         auto getSpace = [&](int w){
+            // if(w > 1){--w;}
             std::string space = "";
             int max = std::max(maxVarName, (size_t)10) - w;
             for(int i = 0; i < max; ++i) space += " ";
@@ -607,7 +657,7 @@ struct Context {
         }
 
         for(auto &it : this->vars){
-            std::cout << it.first << getSpace(it.first.length()) << " -> " << getSpace(it.first.length()) << ItemToText(it.second) << std::endl;
+            std::cout << it.first << getSpace(it.first.length()) << " -> " << getSpace(0) << ItemToText(it.second) << std::endl;
         }
     }
 
@@ -619,12 +669,12 @@ bool FunctionConstraints::test(const std::vector<Item*> &items, std::string &err
     }
 
     if(useMaxParams && items.size() > maxParams){
-        errormsg = "Provided ("+std::to_string(items.size())+") arguments. Expected no more than ("+std::to_string(maxParams)+") arguments.";
+        errormsg = "Provided ("+std::to_string(items.size())+") argument(s). Expected no more than ("+std::to_string(maxParams)+") arguments.";
         return false;
     }
 
     if(useMinParams && items.size() < minParams){
-        errormsg = "Provided ("+std::to_string(items.size())+") arguments. Expected no less than ("+std::to_string(minParams)+") arguments.";
+        errormsg = "Provided ("+std::to_string(items.size())+") argument(s). Expected no less than ("+std::to_string(minParams)+") arguments.";
         return false;
     } 
 
@@ -647,6 +697,15 @@ bool FunctionConstraints::test(const std::vector<Item*> &items, std::string &err
         }        
     }
 
+    if(useExpectType){
+        for(int i = 1; i < items.size(); ++i){
+            if(items[i]->type != expectedType){
+                errormsg = "Provided '"+ItemTypes::str(items[i]->type)+"'. Expected types are only '"+ItemTypes::str(expectedType)+"'.";
+                return false;
+            }
+        }        
+    }    
+
     return true;
 }
 
@@ -657,6 +716,9 @@ static Item* eval(const std::vector<Token> &tokens, const std::vector<ModifierPa
 // Interpret from STRING
 static Item *interpret(const std::string &input, Cursor *cursor, Context *ctx){
     auto literals = parseTokens(input, ' ', cursor);
+    if(cursor->error){
+        return new Item();
+    }    
     auto tokens = buildTokens(literals);
     return eval(tokens, {}, cursor, ctx);
 }
@@ -664,6 +726,9 @@ static Item *interpret(const std::string &input, Cursor *cursor, Context *ctx){
 // Interpret from single TOKEN without dropping modifiers
 static Item *interpret(const Token &token, Cursor *cursor, Context *ctx){
     auto literals = parseTokens(token.first, ' ', cursor);
+    if(cursor->error){
+        return new Item();
+    }
     auto tokens = buildTokens(literals);
     return eval(tokens, token.modifiers, cursor, ctx);
 }
@@ -723,27 +788,115 @@ static Item* eval(const std::vector<Token> &tokens, const std::vector<ModifierPa
     return new Item();
 }
 
+bool typicalVariadicArithmeticCheck(const std::string &name, const std::vector<Item*> &params, Cursor *cursor, int max = -1){
+    FunctionConstraints consts;
+    consts.setMinParams(2);
+    if(max != -1){
+        consts.setMaxParams(max);
+    }
+    consts.setExpectType(ItemTypes::NUMBER);
+    consts.allowMisMatchingTypes = false;
+    consts.allowNil = false;
+    std::string errormsg;
+    if(!consts.test(params, errormsg)){
+        cursor->setError("'"+name+"': "+errormsg);
+        return false;
+    }
+    return true;
+};
+
 static void addStandardOperators(Context *ctx){
 
-    ctx->set("+", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+    /*
 
-        FunctionConstraints consts;
-        consts.setMinParams(2);
-        consts.allowMisMatchingTypes = false;
-        consts.allowNil = false;
-        std::string errormsg;
-        if(!consts.test(params, errormsg)){
-            cursor->setError("'+': "+errormsg);
+        ARITHMETIC OPERATORS
+
+    */
+    ctx->set("+", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        if(!typicalVariadicArithmeticCheck("+", params, cursor)){
             return new Item();
         }
-
         __CV_NUMBER_NATIVE_TYPE r = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data);
         for(int i = 1; i < params.size(); ++i){
             r += *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data);
         }
-
         return static_cast<Item*>(new Number(r));
     }, true));
+    ctx->set("-", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        if(!typicalVariadicArithmeticCheck("-", params, cursor)){
+            return new Item();
+        }
+        __CV_NUMBER_NATIVE_TYPE r = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data);
+        for(int i = 1; i < params.size(); ++i){
+            r -= *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data);
+        }
+        return static_cast<Item*>(new Number(r));
+    }, true));
+    ctx->set("*", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        if(!typicalVariadicArithmeticCheck("*", params, cursor)){
+            return new Item();
+        }
+        __CV_NUMBER_NATIVE_TYPE r = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data);
+        for(int i = 1; i < params.size(); ++i){
+            r *= *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data);
+        }
+        return static_cast<Item*>(new Number(r));
+    }, true));  
+    ctx->set("/", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        if(!typicalVariadicArithmeticCheck("/", params, cursor)){
+            return new Item();
+        }
+        __CV_NUMBER_NATIVE_TYPE r = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data);
+        for(int i = 1; i < params.size(); ++i){
+            r /= *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data);
+        }
+        return static_cast<Item*>(new Number(r));
+    }, true));
+    ctx->set("^", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        if(!typicalVariadicArithmeticCheck("^", params, cursor)){
+            return new Item();
+        }
+        __CV_NUMBER_NATIVE_TYPE r = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data);
+        for(int i = 1; i < params.size(); ++i){
+            r =  std::pow(r, *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data));
+        }
+        return static_cast<Item*>(new Number(r));
+    }, true));  
+
+    /*
+        LISTS
+    */
+    ctx->set("..", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        if(!typicalVariadicArithmeticCheck("..", params, cursor)){
+            return new Item();
+        }
+
+        __CV_NUMBER_NATIVE_TYPE s = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data);
+        __CV_NUMBER_NATIVE_TYPE e = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[1]->data);
+        
+        std::vector<Item*> result;
+        if(s == e){
+            return static_cast<Item*>(new List(result));
+        }
+
+        bool inc = e > s;
+        __CV_NUMBER_NATIVE_TYPE step = Tools::positive(params.size() == 3 ? *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[2]->data) : 1);
+
+        for(__CV_NUMBER_NATIVE_TYPE i = s; (inc ? i <= e : i >= e); i += (inc ? step : -step)){
+            result.push_back(new Number(i));
+        }
+
+
+        return static_cast<Item*>(new List(result));
+
+
+    }, true));                      
+
+
+
+
+
+    
 }
 
 int main(){
@@ -752,7 +905,7 @@ int main(){
     Cursor cursor;
 
     addStandardOperators(&ctx);
-    auto r = interpret("[+ 1]", &cursor, &ctx);
+    auto r = interpret("[.. 1 [^ 2 8]]", &cursor, &ctx);
     std::cout << ItemToText(r) << std::endl;
     if(cursor.error){
         std::cout << cursor.message << std::endl;
