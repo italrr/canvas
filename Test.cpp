@@ -23,7 +23,20 @@ namespace Tools {
 
     bool isString(const std::string &s){
         return s.size() > 1 && s[0] == '\'' && s[s.length()-1] == '\'';
-    }    
+    }  
+
+    std::string compileList(const std::vector<std::string> &strings){
+        std::string out;
+
+        for(int i = 0; i < strings.size(); ++i){
+            out += strings[i];
+            if(i < strings.size()-1){
+                out += " ";
+            }
+        }
+
+        return out;
+    }  
 }
 
 namespace ModifierTypes {
@@ -240,6 +253,7 @@ struct Cursor {
         if(line != -1){
             this->line = line;
         }
+        this->error = true;
         this->message = v;
     }
 };
@@ -293,31 +307,40 @@ struct FunctionConstraints {
 struct Function : Item {
     std::string body;
     std::vector<std::string> params;
-    std::function< Item* (const std::vector<std::string> &params, const std::string &body, Cursor *cursor, Context *ctx) > fn;
+    bool binary;
+    bool variadic;
+    std::function< Item* (const std::vector<Item*> &params, Cursor *cursor, Context *ctx) > fn;
     FunctionConstraints constraints;
 
     Function(){
-
     }
 
-    Function(const std::vector<std::string> &params, const std::string &body){
-        set(params, body);
+    Function(const std::vector<std::string> &params, const std::string &body, bool variadic = false){
+        set(params, body, variadic);
     }
 
-    void set(const std::vector<std::string> &params, const std::string &body){
+    Function(const std::vector<std::string> &params, const std::function<Item*(const std::vector<Item*> &params, Cursor *cursor, Context *ctx)> &fn, bool variadic = false){
+        set(params, fn, variadic);
+    }    
+
+    void set(const std::vector<std::string> &params, const std::string &body, bool variadic){
         this->body = body;
         this->params = params;
         this->type = ItemTypes::FUNCTION;
-        this->fn = [](const std::vector<std::string> &params, const std::string &body, Cursor *cursor, Context *ctx){
+        this->fn = [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
             return (Item*)NULL;
         };
+        this->binary = false;
+        this->variadic = variadic;
     }
 
-    void set(const std::vector<std::string> &params, const std::function<Item*(const std::vector<std::string> &params, const std::string &body, Cursor *cursor, Context *ctx)> &fn){
+    void set(const std::vector<std::string> &params, const std::function<Item*(const std::vector<Item*> &params, Cursor *cursor, Context *ctx)> &fn, bool variadic){
         this->params = params;
         this->type = ItemTypes::FUNCTION;
-        this->fn = fn;       
-    }    
+        this->fn = fn;
+        this->binary = true;
+        this->variadic = variadic;
+    }
 };
     
 
@@ -338,6 +361,10 @@ static std::string ItemToText(Item *item){
             static_cast<String*>(item)->read(output, 0);
             return "'"+output+"'";
         };        
+        case ItemTypes::FUNCTION: {
+            auto fn = static_cast<Function*>(item);        
+            return "fn ["+(fn->variadic ? "..." : Tools::compileList(fn->params))+"] ["+(fn->binary ? "BINARY" : fn->body )+"]";
+        };
         case ItemTypes::LIST: {
             std::string output = "[";
             auto list = static_cast<List*>(item);
@@ -415,6 +442,7 @@ std::vector<Token> buildTokens(const std::vector<std::string> &literals){
 
     for(int i = 0; i < literals.size(); ++i){
         auto &literal = literals[i];
+
         auto token = parseTokenWModifier(literal);
         if(token.first == "" && i > 0){ // This means this modifier belongs to the token before this one
             auto &prev = tokens[tokens.size()-1];
@@ -493,6 +521,7 @@ std::vector<std::string> parseTokens(std::string input, char sep, Cursor *cursor
         char c = input[i];
         if(c == '\'' && !onComment){
             onString = !onString;
+            buffer += c;
         }else        
         if(c == '#' && !onString){
             onComment = !onComment;
@@ -525,6 +554,7 @@ std::vector<std::string> parseTokens(std::string input, char sep, Cursor *cursor
             buffer += c;
         }
     }
+
     return tokens;
 };
 
@@ -584,81 +614,107 @@ struct Context {
 };
 
 bool FunctionConstraints::test(const std::vector<Item*> &items, std::string &errormsg){
-    if(!enabled){
+    if(!enabled || items.size() == 0){
         return true;
     }
 
     if(useMaxParams && items.size() > maxParams){
-        errormsg = "Provided ("+std::to_string(items.size())+"). Expected no more than ("+std::to_string(maxParams)+") arguments.";
+        errormsg = "Provided ("+std::to_string(items.size())+") arguments. Expected no more than ("+std::to_string(maxParams)+") arguments.";
         return false;
     }
 
     if(useMinParams && items.size() < minParams){
-        errormsg = "Provided ("+std::to_string(items.size())+"). Expected no less than ("+std::to_string(minParams)+") arguments.";
+        errormsg = "Provided ("+std::to_string(items.size())+") arguments. Expected no less than ("+std::to_string(minParams)+") arguments.";
         return false;
     } 
 
+    if(!allowMisMatchingTypes){
+        uint8_t firstType = items[0]->type;
+        for(int i = 1; i < items.size(); ++i){
+            if(items[i]->type != firstType){
+                errormsg = "Provided argument with mismatching types";
+                return false;
+            }
+        }
+    }
 
+    if(!allowNil){
+        for(int i = 1; i < items.size(); ++i){
+            if(items[i]->type == ItemTypes::NIL){
+                errormsg = "Provided nil value";
+                return false;
+            }
+        }        
+    }
 
     return true;
 }
 
-static Item* infer(const Token &token, Cursor *cursor, Context *ctx){
-    if(Tools::isNumber(token.first)){
-        return new Number(std::stod(token.first));
-    }else
-    if(Tools::isString(token.first)){
-        return new String(token.first.substr(1, token.first.length() - 2));
-    }else{
-        // Otherwise it must be a list
-    }
-    return new Item();
-}
 
-static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx);
+static Item* eval(const std::vector<Token> &tokens, const std::vector<ModifierPair> &modifiers, Cursor *cursor, Context *ctx);
 
 
+// Interpret from STRING
 static Item *interpret(const std::string &input, Cursor *cursor, Context *ctx){
     auto literals = parseTokens(input, ' ', cursor);
     auto tokens = buildTokens(literals);
-    return eval(tokens, cursor, ctx);
+    return eval(tokens, {}, cursor, ctx);
 }
 
-static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx){
-    FunctionConstraints consts;
+// Interpret from single TOKEN without dropping modifiers
+static Item *interpret(const Token &token, Cursor *cursor, Context *ctx){
+    auto literals = parseTokens(token.first, ' ', cursor);
+    auto tokens = buildTokens(literals);
+    return eval(tokens, token.modifiers, cursor, ctx);
+}
 
+static Item* eval(const std::vector<Token> &tokens, const std::vector<ModifierPair> &modifiers, Cursor *cursor, Context *ctx){
     auto first = tokens[0];
     auto imp = first.first;
 
-    auto params = compileTokens(tokens, 1, tokens.size()-1);
-
     if(imp == "set"){
+        auto params = compileTokens(tokens, 1, tokens.size()-1);
         if(params.size() > 2 || params.size() < 2){
             cursor->setError("'set': Expects 2 arguments: <NAME> <VALUE>.");
             return new Item();
         }
-        return ctx->set(params[0].first, eval({params[1]}, cursor, ctx));
-    }else
-    if(imp == "if"){
-
-    }else
-    if(imp == "iter"){
-
+        return ctx->set(params[0].first, interpret(params[1], cursor, ctx));
     }else{
         auto var = ctx->get(imp);
-        // Is it variable?
-        if(var){
-            
+        // Is it a function?
+        if(var && var->type == ItemTypes::FUNCTION){
+            auto fn = static_cast<Function*>(var);
+            if(fn->binary){
+                std::vector<Item*> items;
+                if(tokens.size() > 0){
+                    for(int i = 1; i < tokens.size(); ++i){
+                        items.push_back(interpret(tokens[i], cursor, ctx));
+                    }
+                }
+                return fn->fn(items, cursor, ctx);
+            }
         }else
-        // Is it single item?
+        // Is it just a variable?
+        if(var && tokens.size() == 1){
+            return var;
+        }else
+        // Is it a natural type?
         if(tokens.size() == 1){
-            return infer(first, cursor, ctx);
+            if(!var && Tools::isNumber(imp)){
+                return new Number(std::stod(imp));
+            }else
+            if(!var && Tools::isString(imp)){
+                return new String(imp.substr(1, imp.length() - 2));
+            }else{
+                cursor->setError("'"+imp+"': Undefined symbol or imperative"); // TODO: Check if it's running as relaxed
+                return new Item();
+            }
         }else
-        // Must be a list
+        // Otherwise, we treat it as a list
         if(tokens.size() > 1){
             std::vector<Item*> items;
             for(int i = 0; i < tokens.size(); ++i){
-                items.push_back(eval({tokens[i]}, cursor, ctx));
+                items.push_back(interpret(tokens[i], cursor, ctx));
             }
             return new List(items);
         }
@@ -667,15 +723,41 @@ static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx
     return new Item();
 }
 
+static void addStandardOperators(Context *ctx){
+
+    ctx->set("+", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+
+        FunctionConstraints consts;
+        consts.setMinParams(2);
+        consts.allowMisMatchingTypes = false;
+        consts.allowNil = false;
+        std::string errormsg;
+        if(!consts.test(params, errormsg)){
+            cursor->setError("'+': "+errormsg);
+            return new Item();
+        }
+
+        __CV_NUMBER_NATIVE_TYPE r = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data);
+        for(int i = 1; i < params.size(); ++i){
+            r += *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data);
+        }
+
+        return static_cast<Item*>(new Number(r));
+    }, true));
+}
+
 int main(){
 
     Context ctx;
     Cursor cursor;
 
-
-    std::cout << ItemToText(interpret("set a [1 2 3]", &cursor, &ctx)) << std::endl;
-
-
+    addStandardOperators(&ctx);
+    auto r = interpret("[+ 1]", &cursor, &ctx);
+    std::cout << ItemToText(r) << std::endl;
+    if(cursor.error){
+        std::cout << cursor.message << std::endl;
+    }
+    r->deconstruct();
 
     ctx.debug();
 
