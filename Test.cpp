@@ -175,6 +175,15 @@ struct Item {
         --this->refc;
         deconstruct();
     }
+    virtual Item *copy(bool deep = true) const {
+        auto item = new Item();
+        item->size = this->size;
+        item->data = malloc(this->size);
+        item->type = this->type;
+        item->refc = 1;
+        memcpy(item->data, this->data, this->size);
+        return item;
+    }
     void deconstruct(){
         if(this->refc == 0 || this->type == ItemTypes::NIL){
             return;
@@ -209,6 +218,16 @@ struct Number : Item {
     Number(__CV_NUMBER_NATIVE_TYPE v){
         write(v);
     }
+
+    Item *copy(bool deep = true) const {
+        auto item = new Number();
+        item->size = this->size;
+        item->data = malloc(this->size);
+        item->type = this->type;
+        item->refc = 1;
+        memcpy(item->data, this->data, this->size);
+        return item;
+    }    
 
     void write(const __CV_NUMBER_NATIVE_TYPE v){
         this->type = ItemTypes::NUMBER;
@@ -260,29 +279,48 @@ struct String : Item {
 
 };
 
+static std::string ItemToText(Item *item);
 
 struct List : Item {
 
     List(){
-        // Again, empty contructor makes this list NIL
     }
 
     List(const std::vector<Item*> &list){
         write(list);
     }
 
+    Item *copy(bool deep = true) const {
+        auto item = new Item();
+        item->size = this->size;
+        item->type = this->type;
+        item->refc = 1;
+        item->data = malloc(this->size * sizeof(size_t));       
+
+        for(int i = 0; i < this->size; ++i){
+            auto copy = this->get(i)->copy();
+            memcpy((void*)((size_t)this->data + i * sizeof(size_t)), &copy, sizeof(size_t));
+        }        
+
+        return item;
+    }
+
     void write(const std::vector<Item*> &list){
+        
         this->type = ItemTypes::LIST;
         this->size = list.size();
-        this->data = malloc(sizeof(Item) * list.size());
         this->refc = 1;
+        this->data = malloc(this->size * sizeof(size_t));
+
         for(int i = 0; i < list.size(); ++i){
-            memcpy(static_cast<char*>(this->data) + i * sizeof(Item), list[i], sizeof(Item));
+            auto copy = list[i]->copy();
+            size_t address = (size_t)copy;   
+            memcpy((void*)((size_t)this->data + i * sizeof(size_t)), &address, sizeof(size_t));
         }
     }
 
-    Item *get(int32_t index){
-        return (Item*)( (char*)(this->data) + index * sizeof(Item));
+    Item *get(size_t index) const {
+        return static_cast<Item*>((void*)*(size_t*)((size_t)this->data + index * sizeof(size_t)));
     }
 
     bool clear(bool deep = true){
@@ -291,8 +329,9 @@ struct List : Item {
         }
         if(deep){
             for(int i = 0; i < this->size; ++i){
-                Item *item = (Item*)( (char*)(this->data) + i * sizeof(Item));
-                item->decRefC();
+                size_t address = (size_t)this->data + i * sizeof(size_t);
+                Item *item = (Item*)( (void*)address );
+                // item->decRefC();
             }
         }
         free(this->data);
@@ -445,6 +484,19 @@ struct Context : Item {
         return it->second;
     }
 
+    Item *copy(bool deep = true) const {
+
+        auto item = new Context();
+        item->type = this->type;  
+        item->head = this->head;    
+
+        for(auto &it : this->vars){
+            item->vars[it.first] = it.second;
+        }        
+
+        return item;
+    }
+
     ItemContextPair getWithContext(const std::string &name){
         auto it = vars.find(name);
         if(it == vars.end()){
@@ -530,7 +582,7 @@ static std::string ItemToText(Item *item){
             return "fn ["+(fn->variadic ? "..." : Tools::compileList(fn->params))+"] ["+(fn->binary ? "BINARY" : fn->body )+"]";
         };
         case ItemTypes::CONTEXT: {
-            std::string output = "[ctx ";
+            std::string output = "ct [";
             auto proto = static_cast<Context*>(item);
             int n = proto->vars.size();
             int c = 0;
@@ -539,7 +591,7 @@ static std::string ItemToText(Item *item){
                 auto item = it.second;
                 output += ItemToText(item)+ModifierTypes::str(ModifierTypes::NAMER)+name;
                 if(c < n-1){
-                    output += " ";
+                    output += "]";
                 }
                 ++c;                
             }
@@ -618,12 +670,12 @@ std::vector<std::string> parseTokens(std::string input, char sep, Cursor *cursor
                 --quotes;
             }
         }else
-        if(c == '[' && open == 0 && !onString){
-            ++leftBrackets;
+        if(c == '[' && !onString){
+            if(open == 0) ++leftBrackets;
             ++open;
         }else
-        if(c == ']' && open == 1 && !onString){
-            ++rightBrackets;
+        if(c == ']' && !onString){
+            if(open == 1) ++rightBrackets;
             --open;
         }
     }
@@ -640,6 +692,8 @@ std::vector<std::string> parseTokens(std::string input, char sep, Cursor *cursor
         return {};
     }
     cline = 0;
+
+
     // Add missing brackets for simple statements
     if(((leftBrackets+rightBrackets)/2 > 1) || (leftBrackets+rightBrackets) == 0 || input[0] != '[' || input[input.length()-1] != ']'){
         input = "[" + input + "]";
@@ -675,16 +729,22 @@ std::vector<std::string> parseTokens(std::string input, char sep, Cursor *cursor
             }            
             --open;
             if(open == 1 || i == input.size()-1 && buffer.length() > 0){
-                tokens.push_back(buffer);   
+                if(buffer != ""){
+                    tokens.push_back(buffer);
+                }
                 buffer = "";
             }
         }else
         if(i == input.size()-1){
-            tokens.push_back(buffer+c);
+            if(buffer != ""){
+                tokens.push_back(buffer+c);
+            }
             buffer = "";
         }else
         if(c == sep && open == 1 && !onString){
-            tokens.push_back(buffer);
+            if(buffer != ""){
+                tokens.push_back(buffer);
+            }
             buffer = "";
         }else{
             buffer += c;
@@ -698,8 +758,8 @@ std::vector<std::string> parseTokens(std::string input, char sep, Cursor *cursor
 struct Token {
     std::string first;
     std::vector<ModifierPair> modifiers;
-    std::string literal() const{
-        std::string part = "["+this->first+"]";
+    std::string literal() const {
+        std::string part = "<"+this->first+">";
         for(int i = 0; i < modifiers.size(); ++i){
             auto &mod = modifiers[i];
             part += "("+ModifierTypes::str(mod.type)+mod.subject+")";
@@ -743,7 +803,7 @@ std::vector<Token> buildTokens(const std::vector<std::string> &literals, Cursor 
         if(innLiterals.size() > 1){
             Token token;
             token.first = literals[i];
-            tokens.push_back(token);            
+            tokens.push_back(token);  
         // Simple can be inserted right away
         }else{
             auto token = parseTokenWModifier(literals[i]);
@@ -757,7 +817,6 @@ std::vector<Token> buildTokens(const std::vector<std::string> &literals, Cursor 
             }
         }
     }
-    // std::exit(1);
 
     return tokens;
 };
@@ -862,14 +921,16 @@ static Item *processPreInterpretModifiers(Item *item, std::vector<ModifierPair> 
 }
 
 // Interpret from STRING
-static Item *interpret(const std::string &input, Cursor *cursor, Context *ctx){
+static Item *interpret(const std::string &_input, Cursor *cursor, Context *ctx){
+    std::string input = _input;
     auto literals = parseTokens(input, ' ', cursor);
+    // printList(literals);
     if(cursor->error){
         return new Item();
     }    
     auto tokens = buildTokens(literals, cursor);
-    ModifierEffect effects;
-    return processPreInterpretModifiers(eval(tokens, cursor, ctx), tokens[0].modifiers, cursor, ctx, effects);
+
+    return eval(tokens, cursor, ctx);
 }
 
 // Interpret from single TOKEN without dropping modifiers. Should be only used by `eval`
@@ -895,7 +956,6 @@ static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx
         }
         ModifierEffect effects;
         auto solved = processPreInterpretModifiers(interpret(params[1], cursor, ctx), params[1].modifiers, cursor, ctx, effects);
-        // expand doesn't do anything here
         if(cursor->error){
             return new Item();
         }
@@ -903,15 +963,17 @@ static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx
         if(f.item){
             return f.context->set(params[0].first, solved);
         }else{
+
             return ctx->set(params[0].first, solved);
         }
     }else
-    if(imp == "ctx"){
+    if(imp == "ct"){
         auto params = compileTokens(tokens, 1, tokens.size()-1);
         Context *pctx = new Context(ctx);
         for(int i = 0; i < params.size(); ++i){
             ModifierEffect effects;
             auto solved = processPreInterpretModifiers(interpret(params[i], cursor, pctx), params[i].modifiers, cursor, pctx, effects);
+            
             if(effects.expand && solved->type == ItemTypes::CONTEXT){
                 auto proto = static_cast<Context*>(solved);
                 for(auto &it : proto->vars){
@@ -936,10 +998,10 @@ static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx
                         if(effects.expand && solved->type == ItemTypes::LIST){
                             auto list = static_cast<List*>(solved);
                             for(int i = 0; i < list->size; ++i){
-                                items.push_back(list->get(i));
+                                items.push_back(list->get(i)->copy());
                             }
                             // We don't deconstruct the list since we're just moving the items to the return here
-                            list->clear(false); 
+                            list->clear(true); 
                             delete list;
                         }else
                         if(effects.expand && solved->type != ItemTypes::LIST){
@@ -958,7 +1020,8 @@ static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx
         }else
         // Is it just a variable?
         if(var && tokens.size() == 1){
-            return var;
+            ModifierEffect effects;
+            return processPreInterpretModifiers(var, first.modifiers, cursor, ctx, effects);
         }else
         // Is it a natural type?
         if(tokens.size() == 1){
@@ -1001,16 +1064,16 @@ static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx
                 if(effects.expand && solved->type == ItemTypes::LIST){
                     auto list = static_cast<List*>(solved);
                     for(int i = 0; i < list->size; ++i){
-                        items.push_back(list->get(i));
+                        items.push_back(list->get(i)->copy());
                     }
                     // We don't deconstruct the list since we're just moving the items to the return here
-                    list->clear(false); 
-                    delete list;
+                    // list->clear(true); 
+                    // delete list;
                 }else
                 if(effects.expand && solved->type != ItemTypes::LIST){
-                    cursor->setError("'^': expand modifier can only be used on iterables (Lists, Protos, etc).");
+                    cursor->setError("'^': expand modifier can only be used on iterables (Lists, etc).");
                     items.push_back(solved);
-                }else{
+                }else{   
                     items.push_back(solved);
                 }
                 if(cursor->error){
@@ -1207,15 +1270,23 @@ int main(){
     Cursor cursor;
 
     addStandardOperators(&ctx);
+    // Context nctx;
+    // nctx.set("a", new Number(25));
+    // ctx.set("test", &nctx);
 
-    auto r = interpret("[set a [ctx 10~n]][+ 1 1]", &cursor, &ctx);
+    // auto r = interpret("5 2", &cursor, &ctx);
+    auto r = interpret("[set a [ct 10~n]][a][15]", &cursor, &ctx);
+    // auto r = interpret("[1 [28 28]^ 3]^ [4 5 6]^ [7 8 [99 99]^]^]", &cursor, &ctx);
+
     std::cout << ItemToText(r) << std::endl;
+    // return 0;
     if(cursor.error){
         std::cout << cursor.message << std::endl;
     }
     ctx.debug();
 
     ctx.deconstruct();
+
 
 
     return 0;
