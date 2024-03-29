@@ -179,10 +179,22 @@ namespace ItemTypes {
 
 namespace InterruptTypes {
     enum InterruptTypes : uint8_t {
-        STOP,
         SKIP,
-        RET		
+        STOP
     };
+    std::string str(uint8_t type){
+        switch(type){
+            case InterruptTypes::SKIP:{
+                return "SKIP";
+            };
+            case InterruptTypes::STOP:{
+                return "STOP";
+            };    
+            default: {
+                return "UNDEFINED";    
+            }        
+        }
+    }
 }
 
 struct Item;
@@ -310,6 +322,43 @@ struct Item {
         // this->setToNil();
         return true;
     }
+};
+
+struct Interrupt : Item {
+    uint8_t intType;
+
+    Interrupt(uint8_t intType){
+        this->type = ItemTypes::INTERRUPT;
+        this->intType = intType;
+        this->size = 0;
+    }
+
+    Item *copy(bool deep = true) const {
+        auto item = new Interrupt(this->intType);
+        item->size = this->size;
+        item->type = this->type;
+        item->data = malloc(this->size);
+        memcpy(item->data, this->data, this->size);
+        return item;
+    }  
+
+    bool hasPayload(){
+        return this->size != 0;
+    }
+
+    void setPayload(Item *item){
+        if(this->size == 0){
+            this->size = sizeof(size_t);
+            this->data = malloc(this->size);
+        }
+        size_t address = (size_t)item;   
+        memcpy((void*)((size_t)this->data), &address, sizeof(size_t));
+    }
+
+    Item *getPayload(){
+        return this->size > 0 ? static_cast<Item*>((void*)*(size_t*)((size_t)this->data)) : NULL;
+    }
+
 };
 
 struct Number : Item {
@@ -757,6 +806,14 @@ struct Context : Item {
         return item;
     }
 
+    void setTop(Context *nctx){
+        auto ctop = this->get("top");
+        if(ctop){
+            return;
+        }
+        this->set("top", nctx);
+    }
+
     ItemContextPair getWithContext(const std::string &name){
         auto it = vars.find(name);
         if(it == vars.end()){
@@ -838,6 +895,10 @@ static std::string ItemToText(Item *item){
         case ItemTypes::NIL: {
             return "nil";
         };
+        case ItemTypes::INTERRUPT: {
+            auto interrupt = static_cast<Interrupt*>(item);
+            return "[INT-"+InterruptTypes::str(interrupt->intType)+(interrupt->hasPayload() ? " "+ItemToText(interrupt->getPayload())+"" : "")+"]";
+        };                
         case ItemTypes::NUMBER: {
             auto r = Tools::removeTrailingZeros(*static_cast<double*>(item->data));
             return r;
@@ -1257,7 +1318,7 @@ static Item *processPreInterpretModifiers(Item *item, std::vector<ModifierPair> 
                 if(i == modifiers.size()-1){
                     effects.expand = true;
                 }else{
-                    cursor->setError("'^': expand modifier can only be used at the end of a modifier chain.");
+                    cursor->setError("'"+ModifierTypes::str(ModifierTypes::EXPAND)+"': Expand modifier can only be used at the end of a modifier chain.");
                     return item;
                 }
             } break;                                   
@@ -1284,43 +1345,39 @@ static Item *interpret(const Token &token, Cursor *cursor, Context *ctx){
     if(cursor->error){
         return new Item();
     }
-
     auto tokens = buildTokens(literals, cursor);
-
-
     return eval(tokens, cursor, ctx);
 }
+
+static Item *processIteration(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx);
+static void processPostInterpretExpandListOrContext(Item* solved, ModifierEffect &effects, std::vector<Item*> &items, Cursor *cursor, Context *ctx);
+
+static Item *runFunction(Function *fn, const std::vector<Item*> items, Cursor *cursor, Context *ctx);
+static Item *runFunction(Function *fn, const std::vector<Token> &tokens, Cursor *cursor, Context *ctx);
 
 static Item *runFunction(Function *fn, const std::vector<Token> &tokens, Cursor *cursor, Context *ctx){
     std::vector<Item*> items;
     for(int i = 0; i < tokens.size(); ++i){
         ModifierEffect effects;
-        auto solved = processPreInterpretModifiers(interpret(tokens[i], cursor, ctx), tokens[i].modifiers, cursor, ctx, effects);
-        if(effects.expand && solved->type == ItemTypes::LIST){
-            auto list = static_cast<List*>(solved);
-            for(int i = 0; i < list->size; ++i){
-                items.push_back(list->get(i)->copy());
-            }
-            // We don't deconstruct the list since we're just moving the items to the return here
-            // list->clear(true); 
-            // delete list;
-        }else
-        if(effects.expand && solved->type != ItemTypes::LIST){
-            cursor->setError("'"+ModifierTypes::str(ModifierTypes::EXPAND)+"': Expand modifier can only be used on iterables.");
-            items.push_back(solved);
-        }else{
-            items.push_back(solved);
-        }                        
+        auto solved = processPreInterpretModifiers(interpret(tokens[i], cursor, ctx), tokens[i].modifiers, cursor, ctx, effects);                     
         if(cursor->error){
             return new Item();
         }
+        processPostInterpretExpandListOrContext(solved, effects, items, cursor, NULL);
+        if(cursor->error){
+            return new Item();
+        } 
     }
+    return runFunction(fn, items, cursor, ctx);
+}
 
+
+static Item *runFunction(Function *fn, const std::vector<Item*> items, Cursor *cursor, Context *ctx){
     if(fn->binary){
         return fn->fn(items, cursor, ctx);  
     }else{
         Context *tctx = new Context(ctx);
-        tctx->set("top", ctx);
+        tctx->setTop(ctx);
         if(fn->variadic){
             auto list = new List(items, false);
             tctx->set("...", list);
@@ -1335,8 +1392,78 @@ static Item *runFunction(Function *fn, const std::vector<Token> &tokens, Cursor 
         }
         return interpret(fn->body, cursor, tctx);
     }
-
 }
+
+static void processPostInterpretExpandListOrContext(Item* solved, ModifierEffect &effects, std::vector<Item*> &items, Cursor *cursor, Context *ctx){
+    if(effects.expand && solved->type == ItemTypes::LIST){
+        auto list = static_cast<List*>(solved);
+        for(int j = 0; j < list->size; ++j){
+            items.push_back(list->get(j));
+        }
+        // We don't deconstruct the list since we're just moving the items to the return here
+        // list->clear(true); 
+        // delete list;
+    }else
+    if(effects.expand && solved->type == ItemTypes::CONTEXT){
+        if(effects.expand && solved->type == ItemTypes::CONTEXT){
+            auto proto = static_cast<Context*>(solved);
+            for(auto &it : proto->vars){
+                if(ctx == NULL){
+                    items.push_back(it.second);
+                }else{
+                    ctx->set(it.first, it.second);
+                }
+            }
+            // solved->clear(false); 
+            // delete solved;
+        }  
+    }else
+    if(effects.expand && solved->type != ItemTypes::CONTEXT && solved->type != ItemTypes::LIST){
+        cursor->setError("'"+ModifierTypes::str(ModifierTypes::EXPAND)+"': Expand modifier can only be used on iterables.");
+        items.push_back(solved);
+    }else{   
+        items.push_back(solved);
+    } 
+}
+
+static Item *processIteration(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx){
+    std::vector<Item*> items;
+    for(int i = 0; i < tokens.size(); ++i){
+        ModifierEffect effects;
+        auto solved = processPreInterpretModifiers(interpret(tokens[i], cursor, ctx), tokens[i].modifiers, cursor, ctx, effects);
+        if(cursor->error){
+            return new Item();
+        }
+        if(solved->type == ItemTypes::INTERRUPT){
+            auto interrupt =  static_cast<Interrupt*>(solved);
+            if(interrupt->intType == InterruptTypes::SKIP){
+                if(interrupt->hasPayload()){
+                    items.push_back(interrupt->getPayload());
+                }
+                continue;
+            }else
+            if(interrupt->intType == InterruptTypes::STOP){
+                return interrupt;
+            }
+        }   
+        processPostInterpretExpandListOrContext(solved, effects, items, cursor, NULL);
+        if(cursor->error){
+            return new Item();
+        }                           
+    }          
+    return tokens.size() == 1 ? items[0] : new List(items);    
+}
+
+static bool checkCond(Item *item){
+    if(item->type == ItemTypes::NUMBER){
+        return *static_cast<__CV_NUMBER_NATIVE_TYPE*>(item->data) <= 0 ? false : true;
+    }else
+    if(item->type != ItemTypes::NIL){
+        return true;
+    }else{
+        return false;
+    }
+};
 
 static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx){
 
@@ -1362,22 +1489,118 @@ static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx
             return ctx->set(params[0].first, solved);
         }
     }else
-    if(imp == "iter"){
-        auto params = compileTokens(tokens, 1, tokens.size()-1);
-        if(params.size() > 2 || params.size() < 2){
-            cursor->setError("'fn': Expects exactly 2 arguments: <ITERABLE> <[CODE[0]...CODE[n]]>.");
+    if(imp == "skip" || imp == "stop"){
+        auto interrupt = new Interrupt(imp == "skip" ? InterruptTypes::SKIP : InterruptTypes::STOP);
+        if(tokens.size() > 1){
+            auto params = compileTokens(tokens, 1, tokens.size()-1);
+            auto solved = processIteration(params, cursor, ctx);
+            if(solved->type == ItemTypes::INTERRUPT){
+                // delete interrupt
+                return solved;
+            }else{
+                interrupt->setPayload(solved);
+            }
+        }
+        return interrupt;
+    }else
+    if(imp == "if"){
+        if(tokens.size() > 4){
+            cursor->setError("'if': Expects no more than 3 arguments: <CONDITION> <[CODE[0]...CODE[n]]> (ELSE-OPT)<[CODE[0]...CODE[n]]>.");
             return new Item();
         }
+        if(tokens.size() < 3){
+            cursor->setError("'if': Expects no less than 2 arguments: <CONDITION> <[CODE[0]...CODE[n]]> (ELSE-OPT)<[CODE[0]...CODE[n]]>.");
+            return new Item();
+        }        
+
+        auto params = compileTokens(tokens, 1, tokens.size()-1);
+        auto cond = params[0];
+        auto trueBranch = params[1];
+        auto tctx = new Context(ctx);
+        tctx->setTop(ctx);
+
+        ModifierEffect origEff;
+        auto condV = processPreInterpretModifiers(interpret(cond, cursor, tctx), cond.modifiers, cursor, tctx, origEff);
+        if(cursor->error){
+            return new Item();
+        } 
+        if(checkCond(condV)){
+            ModifierEffect effects;
+            auto solved = processPreInterpretModifiers(interpret(trueBranch, cursor, tctx), trueBranch.modifiers, cursor, tctx, effects);
+            if(cursor->error){
+                return new Item();
+            }
+            return solved;      
+        }else
+        if(params.size() == 3){
+            auto falseBranch = params[2];
+            ModifierEffect effects;
+            auto solved = processPreInterpretModifiers(interpret(falseBranch, cursor, tctx), falseBranch.modifiers, cursor, tctx, effects);
+            if(cursor->error){
+                return new Item();
+            }
+            return solved;            
+        }else{
+            return condV;
+        }
+    }else
+    if(imp == "do"){
+        if(tokens.size() > 3 || tokens.size() < 3){
+            cursor->setError("'do': Expects exactly 2 arguments: <CONDITION> <[CODE[0]...CODE[n]]>.");
+            return new Item();
+        }
+        auto params = compileTokens(tokens, 1, tokens.size()-1);
+        auto cond = params[0];
         auto code = params[1];
         auto tctx = new Context(ctx);
-        tctx->set("head", ctx);
+        tctx->setTop(ctx);
+
+        ModifierEffect origEff;
+        auto condV = processPreInterpretModifiers(interpret(cond, cursor, tctx), cond.modifiers, cursor, tctx, origEff);
+        if(cursor->error){
+            return new Item();
+        }  
+        Item *last = NULL;
+        while(checkCond(condV)){
+            ModifierEffect effects;
+            auto solved = processPreInterpretModifiers(interpret(code, cursor, tctx), code.modifiers, cursor, tctx, effects);
+            if(cursor->error){
+                return new Item();
+            }
+            if(solved->type == ItemTypes::INTERRUPT){
+                auto interrupt =  static_cast<Interrupt*>(solved);
+                if(interrupt->intType == InterruptTypes::SKIP){
+                    continue;
+                }else
+                if(interrupt->intType == InterruptTypes::STOP){
+                    return interrupt->hasPayload() ?  interrupt->getPayload() : interrupt;
+                }
+            }         
+            last = solved;
+            // Next iteration
+            condV = processPreInterpretModifiers(interpret(cond, cursor, tctx), cond.modifiers, cursor, tctx, origEff);
+            if(cursor->error){
+                return new Item();
+            }            
+        }             
+        return last ? last : new Item();
+    }else
+    if(imp == "iter"){
+        if(tokens.size() > 3 || tokens.size() < 3){
+            cursor->setError("'iter': Expects exactly 2 arguments: <ITERABLE> <[CODE[0]...CODE[n]]>.");
+            return new Item();
+        }        
+        auto params = compileTokens(tokens, 1, tokens.size()-1);
+        auto code = params[1];
+        auto tctx = new Context(ctx);
+        tctx->setTop(ctx);
         ModifierEffect origEff;
         auto iterable = processPreInterpretModifiers(interpret(params[0], cursor, tctx), params[0].modifiers, cursor, tctx, origEff);
         if(cursor->error){
             return new Item();
         }            
         if(iterable->type == ItemTypes::LIST){
-            std::vector<Item*> results;
+            std::vector<Item*> items;
             auto list = static_cast<List*>(iterable);
             for(int i = 0; i < list->size; ++i){
                 auto item = list->get(i);
@@ -1386,30 +1609,61 @@ static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx
                     tctx->set(origEff.named, item);
                 }                
                 ModifierEffect effects;
-                auto iteration = processPreInterpretModifiers(interpret(code, cursor, tctx), code.modifiers, cursor, tctx, effects);
+                auto solved = processPreInterpretModifiers(interpret(code, cursor, tctx), code.modifiers, cursor, tctx, effects);
+                if(cursor->error){
+                    return new Item();
+                }                   
+                if(solved->type == ItemTypes::INTERRUPT){
+                    auto interrupt =  static_cast<Interrupt*>(solved);
+                    if(interrupt->intType == InterruptTypes::SKIP){
+                        if(interrupt->hasPayload()){
+                            items.push_back(interrupt->getPayload());
+                        }
+                        continue;
+                    }else
+                    if(interrupt->intType == InterruptTypes::STOP){
+                        return interrupt->hasPayload() ?  interrupt->getPayload() : interrupt;
+                    }
+                }           
+                processPostInterpretExpandListOrContext(solved, effects, items, cursor, NULL);
+                if(cursor->error){
+                    return new Item();
+                }                               
+            }
+            return static_cast<Item*>(new List(items));
+        }else
+        if(iterable->type == ItemTypes::CONTEXT){
+            std::vector<Item*> items;
+            auto list = static_cast<Context*>(iterable);
+            for(auto &it : list->vars){
+                auto item = it.second;
+                // We use the namer to name every iteration's current variable
+                if(origEff.named.size() > 0){
+                    tctx->set(origEff.named, item);
+                }                
+                ModifierEffect effects;
+                auto solved = processPreInterpretModifiers(interpret(code, cursor, tctx), code.modifiers, cursor, tctx, effects);
                 if(cursor->error){
                     return new Item();
                 }             
-                if(effects.expand && iteration->type == ItemTypes::LIST){
-                    auto list = static_cast<List*>(iteration);
-                    for(int j = 0; j < list->size; ++j){
-                        results.push_back(list->get(j));
+                if(solved->type == ItemTypes::INTERRUPT){
+                    auto interrupt =  static_cast<Interrupt*>(solved);
+                    if(interrupt->intType == InterruptTypes::SKIP){
+                        if(interrupt->hasPayload()){
+                            items.push_back(interrupt->getPayload());
+                        }
+                        continue;
+                    }else
+                    if(interrupt->intType == InterruptTypes::STOP){
+                        return interrupt->hasPayload() ?  interrupt->getPayload() : interrupt;
                     }
-                    // We don't deconstruct the list since we're just moving the items to the return here
-                    // list->clear(true); 
-                    // delete list;
-                }else
-                if(effects.expand && iteration->type != ItemTypes::LIST){
-                    cursor->setError("'"+ModifierTypes::str(ModifierTypes::EXPAND)+"': Expand modifier can only be used on iterables.");
-                    results.push_back(iteration);
-                }else{   
-                    results.push_back(iteration);
-                }                              
+                }               
+                processPostInterpretExpandListOrContext(solved, effects, items, cursor, NULL);
+                if(cursor->error){
+                    return new Item();
+                } 
             }
-            return static_cast<Item*>(new List(results));
-        }else
-        if(iterable->type == ItemTypes::CONTEXT){
-            
+            return static_cast<Item*>(new List(items));
         }else{
             cursor->setError("'iter': Expects argument(0) to be iterable.");
             return new Item();            
@@ -1441,14 +1695,14 @@ static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx
             if(cursor->error){
                 return new Item();
             }                
-            if(effects.expand && solved->type == ItemTypes::CONTEXT){
-                auto proto = static_cast<Context*>(solved);
-                for(auto &it : proto->vars){
-                    pctx->set(it.first, it.second);
-                }
-                solved->clear(false); 
-                delete solved;
-            }            
+            std::vector<Item*> items;
+            processPostInterpretExpandListOrContext(solved, effects, items, cursor, pctx);
+            if(cursor->error){
+                return new Item();
+            }  
+            for(int j = 0; j < items.size(); ++j){
+                pctx->set("lst-"+std::to_string(j), items[j]);
+            }
         }
         return pctx;
     }else{
@@ -1516,30 +1770,7 @@ static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx
                 return eval(inlineCode, cursor, effects.toCtx); // Check if toCtx is null? Shouldn't be possible tho
             }else{
             // List it is
-                std::vector<Item*> items;
-                for(int i = 0; i < tokens.size(); ++i){
-                    ModifierEffect effects;
-                    auto solved = processPreInterpretModifiers(interpret(tokens[i], cursor, ctx), tokens[i].modifiers, cursor, ctx, effects);
-                    if(cursor->error){
-                        return new Item();
-                    }                       
-                    if(effects.expand && solved->type == ItemTypes::LIST){
-                        auto list = static_cast<List*>(solved);
-                        for(int j = 0; j < list->size; ++j){
-                            items.push_back(list->get(j)->copy());
-                        }
-                        // We don't deconstruct the list since we're just moving the items to the return here
-                        // list->clear(true); 
-                        // delete list;
-                    }else
-                    if(effects.expand && solved->type != ItemTypes::LIST){
-                        cursor->setError("'"+ModifierTypes::str(ModifierTypes::EXPAND)+"': Expand modifier can only be used on iterables.");
-                        items.push_back(solved);
-                    }else{   
-                        items.push_back(solved);
-                    }             
-                }          
-                return new List(items);
+                return processIteration(tokens, cursor, ctx);
             }
         }
     }
@@ -1785,16 +2016,14 @@ static void addStandardOperators(Context *ctx){
         consts.setExpectedTypeAt(0, ItemTypes::STRING);
         consts.setExpectedTypeAt(1, ItemTypes::LIST);
         
+        // TODO: add function support
+
         std::string errormsg;
         if(!consts.test(params, errormsg)){
             cursor->setError("'l-sort': "+errormsg);
             return new Item();
         }
 
-        if(params[0]->type != ItemTypes::STRING){
-            cursor->setError("'l-sort': criteria can only be 'DESC' or 'ASC'. Providing a function is not yet supported");
-            return new Item();
-        }
         auto criteria = static_cast<String*>(params[0]);
 
         auto order = criteria->get();
@@ -1826,6 +2055,44 @@ static void addStandardOperators(Context *ctx){
         return static_cast<Item*>(new List(items));
     }, false));    
 
+
+    ctx->set("l-filter", new Function({"c", "l"}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        FunctionConstraints consts;
+        consts.setMinParams(2);
+        consts.setMaxParams(2);
+        consts.allowMisMatchingTypes = true;        
+        consts.allowNil = false;
+        consts.setExpectedTypeAt(0, ItemTypes::FUNCTION);
+        consts.setExpectedTypeAt(1, ItemTypes::LIST);
+        
+        std::string errormsg;
+        if(!consts.test(params, errormsg)){
+            cursor->setError("'l-filter': "+errormsg);
+            return new Item();
+        }
+
+        auto criteria = static_cast<Function*>(params[0]);
+
+        if(criteria->variadic || criteria->params.size() != 1){
+            cursor->setError("'l-filter': criteria's function must receive exactly 1 argument(a).");
+            return new Item();
+        }
+
+        auto list = static_cast<List*>(params[1]);
+        std::vector<Item*> items;
+        for(int i = 0; i < list->size; ++i){
+            auto result = runFunction(criteria, std::vector<Item*>{list->get(i)}, cursor, ctx);
+            if(checkCond(result)){
+                continue;
+            }
+            items.push_back(list->get(i));
+        }        
+
+
+        
+
+        return static_cast<Item*>(new List(items));
+    }, false));  
 
 
     ctx->set("l-flat", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
@@ -2459,8 +2726,8 @@ int main(){
     // auto r = interpret(":", &cursor, &ctx);
 
 
-    auto r = interpret("iter [1 2 3]~n [+ n 1]", &cursor, &ctx);
-    // r = interpret("test 5 6", &cursor, &ctx);
+    auto r = interpret("[l-filter [fn [a][eq a 3]][1 2 3 4]]", &cursor, &ctx);
+    // r = interpret("if [lt 10 5][++ a][-- a][+ 1 1]", &cursor, &ctx);
     // auto r = interpret("[1 [28 28]^ 3]^ [4 5 6]^ [7 8 [99 99]^]^]", &cursor, &ctx);
 
     std::cout << ItemToText(r) << std::endl;
@@ -2468,7 +2735,7 @@ int main(){
     if(cursor.error){
         std::cout << cursor.message << std::endl;
     }
-    // ctx.debug();
+    ctx.debug();
 
     // ctx.deconstruct();
 
