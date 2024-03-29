@@ -2254,10 +2254,8 @@ void CV::registerEmbeddedOperators(std::shared_ptr<CV::Item> &ctx){
 				cursor->setError("operator 'l-flatten': expects only lists");
 				return std::make_shared<Item>(Item());
 			}
-
+			
 			auto out = createList(0);
-
-
 			std::function<void(const std::shared_ptr<Item> &obj)> recursive = [&](const std::shared_ptr<Item> &obj){
 				if(obj->type == ItemTypes::LIST){
 					auto list = std::static_pointer_cast<ListType>(obj);

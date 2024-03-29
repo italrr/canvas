@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <functional>
 #include <iostream>
+#include <algorithm>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -72,18 +73,22 @@ namespace ModifierTypes {
         NAMER,
         SCOPE,
         LINKER,
-        EXPAND
+        EXPAND,
+        TRAIT
     };
     static uint8_t getToken(char mod){
         if(mod == '~'){
             return ModifierTypes::NAMER;
         }else
-        if(mod == ':'){
+        if(mod == '.'){
             return ModifierTypes::SCOPE;
         }else
         if(mod == '|'){
             return ModifierTypes::LINKER;
         }else
+        if(mod == ':'){
+            return ModifierTypes::TRAIT;
+        }else        
         if(mod == '^'){
             return ModifierTypes::EXPAND;            
         }else{
@@ -96,8 +101,11 @@ namespace ModifierTypes {
                 return "~";
             };
             case ModifierTypes::SCOPE: {
+                return ".";
+            };   
+            case ModifierTypes::TRAIT: {
                 return ":";
-            };    
+            };              
             case ModifierTypes::LINKER: {
                 return "|";
             }; 
@@ -159,6 +167,15 @@ namespace InterruptTypes {
     };
 }
 
+// struct Trait {
+//     std::string name;
+//     std::string value;
+//     std::function<Item*(Item* subject, const std::string &value)> action;
+//     Trait(){
+        
+//     }
+// };
+
 struct Item {
     uint8_t type;
     uint32_t size;
@@ -175,6 +192,9 @@ struct Item {
         --this->refc;
         deconstruct();
     }
+    virtual bool isEq(Item *item){
+        return (this->type == ItemTypes::NIL && item->type == ItemTypes::NIL) || this == item;
+    }
     virtual Item *copy(bool deep = true) const {
         auto item = new Item();
         item->size = this->size;
@@ -185,13 +205,13 @@ struct Item {
         return item;
     }
     void deconstruct(){
-        if(this->refc == 0 || this->type == ItemTypes::NIL){
-            return;
-        }
-        --this->refc;
-        if(this->refc == 0){
-            this->clear();
-        }
+        // if(this->refc == 0 || this->type == ItemTypes::NIL){
+        //     return;
+        // }
+        // --this->refc;
+        // if(this->refc == 0){
+        //     this->clear();
+        // }
     }
     void setToNil(){
         this->data = NULL;
@@ -203,8 +223,8 @@ struct Item {
         if(this->type == ItemTypes::NIL){
             return false;
         }
-        free(this->data);
-        this->setToNil();
+        // free(this->data);
+        // this->setToNil();
         return true;
     }
 };
@@ -218,6 +238,11 @@ struct Number : Item {
     Number(__CV_NUMBER_NATIVE_TYPE v){
         write(v);
     }
+
+    bool isEq(Item *item){
+        return  item->type == this->type && *static_cast<__CV_NUMBER_NATIVE_TYPE*>(this->data)
+                == *static_cast<__CV_NUMBER_NATIVE_TYPE*>(item->data);
+    }    
 
     Item *copy(bool deep = true) const {
         auto item = new Number();
@@ -260,6 +285,21 @@ struct String : Item {
         this->write(str);
     }    
 
+    bool isEq(Item *item){
+        if(this->type != item->type || this->size != item->size){
+            return false;
+        }
+        for(int i = 0; i < this->size; ++i){
+            char cA = static_cast<uint8_t>(*(char*)((size_t)this->data + i));
+            char cB =  static_cast<uint8_t>(*(char*)((size_t)item->data + i));
+            if(cA != cB){
+                return false;
+            }
+        }
+
+        return true;
+    } 
+
     void read(std::string &dst, uint32_t start, uint32_t amount = 0){
         if(amount == 0){
             amount =  this->size;
@@ -277,6 +317,14 @@ struct String : Item {
         memcpy(this->data, &str[0], str.size());
     } 
 
+    std::string get(){
+        std::string r;
+        for(int i = 0; i < this->size; ++i){
+            r += static_cast<uint8_t>(*(char*)((size_t)this->data + i));
+        }        
+        return r;   
+    }
+
 };
 
 static std::string ItemToText(Item *item);
@@ -286,12 +334,12 @@ struct List : Item {
     List(){
     }
 
-    List(const std::vector<Item*> &list){
-        write(list);
+    List(const std::vector<Item*> &list, bool toCopy = true){
+        write(list, toCopy);
     }
 
     Item *copy(bool deep = true) const {
-        auto item = new Item();
+        auto item = new List();
         item->size = this->size;
         item->type = this->type;
         item->refc = 1;
@@ -299,27 +347,30 @@ struct List : Item {
 
         for(int i = 0; i < this->size; ++i){
             auto copy = this->get(i)->copy();
-            memcpy((void*)((size_t)this->data + i * sizeof(size_t)), &copy, sizeof(size_t));
+            size_t address = (size_t)copy;   
+            memcpy((void*)((size_t)item->data + i * sizeof(size_t)), &address, sizeof(size_t));
         }        
 
         return item;
     }
 
-    void write(const std::vector<Item*> &list){
-        
+    void write(const std::vector<Item*> &list, bool toCopy = true){
+
         this->type = ItemTypes::LIST;
         this->size = list.size();
         this->refc = 1;
         this->data = malloc(this->size * sizeof(size_t));
 
         for(int i = 0; i < list.size(); ++i){
-            auto copy = list[i]->copy();
+            auto copy = toCopy ? list[i]->copy() : list[i];
             size_t address = (size_t)copy;   
             memcpy((void*)((size_t)this->data + i * sizeof(size_t)), &address, sizeof(size_t));
         }
     }
 
     Item *get(size_t index) const {
+        // This insane dereference can be improved
+        // maybe later
         return static_cast<Item*>((void*)*(size_t*)((size_t)this->data + index * sizeof(size_t)));
     }
 
@@ -327,15 +378,15 @@ struct List : Item {
         if(this->type == ItemTypes::NIL){
             return false;
         }
-        if(deep){
-            for(int i = 0; i < this->size; ++i){
-                size_t address = (size_t)this->data + i * sizeof(size_t);
-                Item *item = (Item*)( (void*)address );
-                // item->decRefC();
-            }
-        }
-        free(this->data);
-        this->setToNil();
+        // if(deep){
+        //     for(int i = 0; i < this->size; ++i){
+        //         size_t address = (size_t)this->data + i * sizeof(size_t);
+        //         Item *item = (Item*)( (void*)address );
+        //         // item->decRefC();
+        //     }
+        // }
+        // free(this->data);
+        // this->setToNil();
         return true;
     }       
 
@@ -374,8 +425,8 @@ struct FunctionConstraints {
     bool allowMisMatchingTypes;
     bool allowNil;
 
-    bool useExpectType;
-    uint8_t expectedType;
+    std::vector<uint8_t> expectedTypes;
+    std::unordered_map<int, uint8_t> expectedTypeAt;
 
     FunctionConstraints(){
         enabled = false;
@@ -383,16 +434,19 @@ struct FunctionConstraints {
         allowMisMatchingTypes = true;
         useMinParams = false;
         useMaxParams = false;
-        useExpectType = false;
     }
 
     void setExpectType(uint8_t type){
-        if(type == ItemTypes::NIL){
-            this->useExpectType = false;
-            return;
-        }
-        this->useExpectType = true;
-        this->expectedType = type;
+        this->expectedTypes.push_back(type);
+    }
+
+    void setExpectedTypeAt(int pos, uint8_t type){
+        this->expectedTypeAt[pos] = type;
+    }
+
+    void clearExpectedTypes(){
+        this->expectedTypeAt.clear();
+        this->expectedTypes.clear();
     }
 
     void setMaxParams(unsigned n){
@@ -415,6 +469,7 @@ struct FunctionConstraints {
         useMinParams = true;
     }
 
+    bool test(List *list, std::string &errormsg);
     bool test(const std::vector<Item*> &items, std::string &errormsg);
 
 };
@@ -461,13 +516,15 @@ struct Context;
 struct ItemContextPair {
     Item *item;
     Context *context;
+    std::string name;
     ItemContextPair(){
         item = NULL;   
         context = NULL;
     }
-    ItemContextPair(Item *item, Context *ctx){
+    ItemContextPair(Item *item, Context *ctx, const std::string &name){
         this->item = item;
         this->context = ctx;
+        this->name = name;
     }
 }; 
 
@@ -502,8 +559,17 @@ struct Context : Item {
         if(it == vars.end()){
             return this->head ? this->head->getWithContext(name) : ItemContextPair();
         }
-        return ItemContextPair(it->second, this);
+        return ItemContextPair(it->second, this, it->first);
     }    
+
+    ItemContextPair getWithContext(Item *item){
+        for(auto &it : this->vars){
+            if(it.second == item){
+                return ItemContextPair(it.second, this, it.first);
+            }
+        }
+        return this->head ? this->head->getWithContext(item) : ItemContextPair();
+    }        
 
     Item *set(const std::string &name, Item *item){
         auto v = get(name);
@@ -570,7 +636,8 @@ static std::string ItemToText(Item *item){
             return "nil";
         };
         case ItemTypes::NUMBER: {
-            return Tools::removeTrailingZeros(*static_cast<double*>(item->data));
+            auto r = Tools::removeTrailingZeros(*static_cast<double*>(item->data));
+            return r;
         };
         case ItemTypes::STRING: {
             std::string output;
@@ -579,10 +646,10 @@ static std::string ItemToText(Item *item){
         };        
         case ItemTypes::FUNCTION: {
             auto fn = static_cast<Function*>(item);        
-            return "fn ["+(fn->variadic ? "..." : Tools::compileList(fn->params))+"] ["+(fn->binary ? "BINARY" : fn->body )+"]";
+            return "[fn ["+(fn->variadic ? "..." : Tools::compileList(fn->params))+"] ["+(fn->binary ? "BINARY" : fn->body )+"]]";
         };
         case ItemTypes::CONTEXT: {
-            std::string output = "ct [";
+            std::string output = "[ct ";
             auto proto = static_cast<Context*>(item);
             int n = proto->vars.size();
             int c = 0;
@@ -591,7 +658,7 @@ static std::string ItemToText(Item *item){
                 auto item = it.second;
                 output += ItemToText(item)+ModifierTypes::str(ModifierTypes::NAMER)+name;
                 if(c < n-1){
-                    output += "]";
+                    output += " ";
                 }
                 ++c;                
             }
@@ -624,7 +691,7 @@ struct ModifierPair {
     uint8_t type;
     std::string subject;
     ModifierPair(){
-
+        type = ModifierTypes::UNDEFINED;
     }
     ModifierPair(uint8_t type, const std::string &subject){
         this->type = type;
@@ -758,6 +825,14 @@ std::vector<std::string> parseTokens(std::string input, char sep, Cursor *cursor
 struct Token {
     std::string first;
     std::vector<ModifierPair> modifiers;
+    ModifierPair getModifier(uint8_t type) const {
+        for(int i = 0; i < modifiers.size(); ++i){
+            if(modifiers[i].type == type){
+                return modifiers[i];
+            }
+        }
+        return ModifierPair();
+    }
     std::string literal() const {
         std::string part = "<"+this->first+">";
         for(int i = 0; i < modifiers.size(); ++i){
@@ -829,6 +904,14 @@ std::vector<Token> compileTokens(const std::vector<Token> &tokens, int from, int
 	return compiled;
 }
 
+bool FunctionConstraints::test(List *list, std::string &errormsg){
+    std::vector<Item*> items;
+    for(int i = 0; i < list->size; ++i){
+        items.push_back(list->get(i));
+    }
+    return this->test(items, errormsg);
+}
+
 bool FunctionConstraints::test(const std::vector<Item*> &items, std::string &errormsg){
     if(!enabled || items.size() == 0){
         return true;
@@ -844,15 +927,6 @@ bool FunctionConstraints::test(const std::vector<Item*> &items, std::string &err
         return false;
     } 
 
-    if(!allowMisMatchingTypes){
-        uint8_t firstType = items[0]->type;
-        for(int i = 1; i < items.size(); ++i){
-            if(items[i]->type != firstType){
-                errormsg = "Provided argument with mismatching types";
-                return false;
-            }
-        }
-    }
 
     if(!allowNil){
         for(int i = 1; i < items.size(); ++i){
@@ -863,12 +937,56 @@ bool FunctionConstraints::test(const std::vector<Item*> &items, std::string &err
         }        
     }
 
-    if(useExpectType){
+
+    if(!allowMisMatchingTypes){
+        uint8_t firstType = ItemTypes::NIL;
+        for(int i = 0; i < items.size(); ++i){
+            if(items[i]->type != ItemTypes::NIL && i < items.size()-1){
+                firstType = items[i]->type;
+            }
+        }        
         for(int i = 1; i < items.size(); ++i){
-            if(items[i]->type != expectedType){
-                errormsg = "Provided '"+ItemTypes::str(items[i]->type)+"'. Expected types are only '"+ItemTypes::str(expectedType)+"'.";
+            if(items[i]->type != firstType && items[i]->type != ItemTypes::NIL){
+                errormsg = "Provided arguments with mismatching types";
                 return false;
             }
+        }
+    }
+
+    if(expectedTypeAt.size() > 0){
+        for(int i = 0; i < items.size(); ++i){
+            if(expectedTypeAt.count(i) > 0){
+                if(items[i]->type != expectedTypeAt[i]){
+                    errormsg = "Provided '"+ItemTypes::str(items[i]->type)+"' at position "+std::to_string(i)+". Expected type is '"+ItemTypes::str(expectedTypeAt[i])+"'.";
+                    return false;
+                }
+            }
+        }
+    }
+
+    if(expectedTypes.size() > 0){
+        for(int i = 0; i < items.size(); ++i){
+            bool f = true;
+            for(int j = 0; j < this->expectedTypes.size(); ++j){
+                auto exType = this->expectedTypes[j];
+                if(items[i]->type != exType){
+                    f = false;
+                    break;
+                }
+
+            }
+            if(!f){
+                std::string exTypes = "";
+                for(int i = 0; i < expectedTypes.size(); ++i){
+                    exTypes += "'"+ItemTypes::str(expectedTypes[i])+"'";
+                    if(i < expectedTypes.size()-1){
+                        exTypes += ", ";
+                    }
+                }
+                errormsg = "Provided '"+ItemTypes::str(items[i]->type)+"'. Expected types are only "+exTypes+".";
+                return false;
+            }
+
         }        
     }    
 
@@ -884,6 +1002,9 @@ static Item *processPreInterpretModifiers(Item *item, std::vector<ModifierPair> 
     for(int i = 0; i < modifiers.size(); ++i){
         auto &mod = modifiers[i];
         switch(mod.type){
+            case ModifierTypes::TRAIT: {
+
+            } break;            
             case ModifierTypes::LINKER: {
 
             } break;
@@ -1001,8 +1122,8 @@ static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx
                                 items.push_back(list->get(i)->copy());
                             }
                             // We don't deconstruct the list since we're just moving the items to the return here
-                            list->clear(true); 
-                            delete list;
+                            // list->clear(true); 
+                            // delete list;
                         }else
                         if(effects.expand && solved->type != ItemTypes::LIST){
                             cursor->setError("'^': expand modifier can only be used on iterables (Lists, Protos, etc).");
@@ -1015,13 +1136,15 @@ static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx
                         }
                     }
                 }
+
                 return fn->fn(items, cursor, ctx);
             }
-        }else
+        }else   
         // Is it just a variable?
         if(var && tokens.size() == 1){
             ModifierEffect effects;
-            return processPreInterpretModifiers(var, first.modifiers, cursor, ctx, effects);
+            auto r = processPreInterpretModifiers(var, first.modifiers, cursor, ctx, effects);
+            return r;
         }else
         // Is it a natural type?
         if(tokens.size() == 1){
@@ -1029,6 +1152,9 @@ static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx
                 auto n = new Number(std::stod(imp));
                 ModifierEffect effects;
                 auto result = processPreInterpretModifiers(n, first.modifiers, cursor, ctx, effects);
+                if(cursor->error){
+                    return new Item();
+                }                      
                 return result;
             }else
             if(!var && Tools::isString(imp)){
@@ -1049,38 +1175,54 @@ static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx
                 ModifierEffect effects;
                 auto n = new Item();
                 auto result = processPreInterpretModifiers(n, first.modifiers, cursor, ctx, effects);
+                if(cursor->error){
+                    return new Item();
+                }                      
                 return result;
             }else{
                 cursor->setError("'"+imp+"': Undefined symbol or imperative."); // TODO: Check if it's running as relaxed
                 return new Item();
             }
         }else
-        // Otherwise, we treat it as a list
+        // List or in-line context switch?
         if(tokens.size() > 1){
-            std::vector<Item*> items;
-            for(int i = 0; i < tokens.size(); ++i){
+            auto fmods = tokens[0].getModifier(ModifierTypes::SCOPE);
+            // Super rad inline-contex switching d:)
+            if(fmods.type == ModifierTypes::SCOPE){
                 ModifierEffect effects;
-                auto solved = processPreInterpretModifiers(interpret(tokens[i], cursor, ctx), tokens[i].modifiers, cursor, ctx, effects);
-                if(effects.expand && solved->type == ItemTypes::LIST){
-                    auto list = static_cast<List*>(solved);
-                    for(int i = 0; i < list->size; ++i){
-                        items.push_back(list->get(i)->copy());
-                    }
-                    // We don't deconstruct the list since we're just moving the items to the return here
-                    // list->clear(true); 
-                    // delete list;
-                }else
-                if(effects.expand && solved->type != ItemTypes::LIST){
-                    cursor->setError("'^': expand modifier can only be used on iterables (Lists, etc).");
-                    items.push_back(solved);
-                }else{   
-                    items.push_back(solved);
-                }
+                auto solved = processPreInterpretModifiers(interpret(tokens[0], cursor, ctx), tokens[0].modifiers, cursor, ctx, effects);
                 if(cursor->error){
                     return new Item();
-                }                
+                } 
+                auto inlineCode = compileTokens(tokens, 1, tokens.size()-1);
+                return eval(inlineCode, cursor, ctx);
+            }else{
+            // List it is
+                std::vector<Item*> items;
+                for(int i = 0; i < tokens.size(); ++i){
+                    ModifierEffect effects;
+                    auto solved = processPreInterpretModifiers(interpret(tokens[i], cursor, ctx), tokens[i].modifiers, cursor, ctx, effects);
+                    if(cursor->error){
+                        return new Item();
+                    }                       
+                    if(effects.expand && solved->type == ItemTypes::LIST){
+                        auto list = static_cast<List*>(solved);
+                        for(int i = 0; i < list->size; ++i){
+                            items.push_back(list->get(i)->copy());
+                        }
+                        // We don't deconstruct the list since we're just moving the items to the return here
+                        // list->clear(true); 
+                        // delete list;
+                    }else
+                    if(effects.expand && solved->type != ItemTypes::LIST){
+                        cursor->setError("'^': expand modifier can only be used on iterables (Lists, etc).");
+                        items.push_back(solved);
+                    }else{   
+                        items.push_back(solved);
+                    }             
+                }          
+                return new List(items);
             }
-            return new List(items);
         }
     }
 
@@ -1151,8 +1293,8 @@ static void addStandardOperators(Context *ctx){
         }
         return static_cast<Item*>(new Number(r));
     }, true));
-    ctx->set("pow", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
-        if(!typicalVariadicArithmeticCheck("^", params, cursor)){
+    ctx->set("pow", new Function({"a", "b"}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        if(!typicalVariadicArithmeticCheck("pow", params, cursor, 2)){
             return new Item();
         }
         __CV_NUMBER_NATIVE_TYPE r = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data);
@@ -1160,7 +1302,135 @@ static void addStandardOperators(Context *ctx){
             r =  std::pow(r, *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data));
         }
         return static_cast<Item*>(new Number(r));
-    }, true));  
+    }, false)); 
+    ctx->set("sqrt", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        FunctionConstraints consts;
+        consts.setMinParams(1);
+        consts.setExpectType(ItemTypes::NUMBER);
+        consts.allowMisMatchingTypes = false;
+        consts.allowNil = false;
+        std::string errormsg;
+        if(!consts.test(params, errormsg)){
+            cursor->setError("'sqrt': "+errormsg);
+            return new Item();
+        }
+        if(params.size() == 1){
+            return static_cast<Item*>(new Number(std::sqrt(*static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data))));
+        }else{
+            std::vector<Item*> result;
+            for(int i = 0; i < params.size(); ++i){
+                result.push_back(
+                    static_cast<Item*>(new Number(std::sqrt(*static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data))))
+                );
+            }
+            return static_cast<Item*>(new List(result, false));
+        }
+    }, true));    
+       
+    /* 
+        QUICK MATH
+    */ 
+    ctx->set("++", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        FunctionConstraints consts;
+        consts.setMinParams(1);
+        consts.allowMisMatchingTypes = false;        
+        consts.allowNil = false;
+        consts.setExpectType(ItemTypes::NUMBER);
+
+        std::string errormsg;
+        if(!consts.test(params, errormsg)){
+            cursor->setError("'++': "+errormsg);
+            return new Item();
+        }
+
+        if(params.size() == 1){
+            ++(*static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data));
+            return params[0];
+        }else{   
+            for(int i = 0; i < params.size(); ++i){
+                ++(*static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data));
+            }
+        }
+
+        return static_cast<Item*>(new List(params, false));
+    }, true));
+
+    ctx->set("--", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        FunctionConstraints consts;
+        consts.setMinParams(1);
+        consts.allowMisMatchingTypes = false;        
+        consts.allowNil = false;
+        consts.setExpectType(ItemTypes::NUMBER);
+
+        std::string errormsg;
+        if(!consts.test(params, errormsg)){
+            cursor->setError("'--': "+errormsg);
+            return new Item();
+        }
+
+        if(params.size() == 1){
+            --(*static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data));
+            return params[0];
+        }else{   
+            for(int i = 0; i < params.size(); ++i){
+                --(*static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data));
+            }
+        }
+
+        return static_cast<Item*>(new List(params, false));
+    }, true));    
+
+
+    ctx->set("//", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        FunctionConstraints consts;
+        consts.setMinParams(1);
+        consts.allowMisMatchingTypes = false;        
+        consts.allowNil = false;
+        consts.setExpectType(ItemTypes::NUMBER);
+
+        std::string errormsg;
+        if(!consts.test(params, errormsg)){
+            cursor->setError("'//': "+errormsg);
+            return new Item();
+        }
+
+        if(params.size() == 1){
+            *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data) /= 2;
+            return params[0];
+        }else{   
+            for(int i = 0; i < params.size(); ++i){
+                *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data) /= 2;
+            }
+        }
+
+        return static_cast<Item*>(new List(params, false));
+    }, true));    
+
+    ctx->set("**", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        FunctionConstraints consts;
+        consts.setMinParams(1);
+        consts.allowMisMatchingTypes = false;        
+        consts.allowNil = false;
+        consts.setExpectType(ItemTypes::NUMBER);
+
+        std::string errormsg;
+        if(!consts.test(params, errormsg)){
+            cursor->setError("'**': "+errormsg);
+            return new Item();
+        }
+
+        if(params.size() == 1){
+            *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data) *= *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data);
+            return params[0];
+        }else{   
+            for(int i = 0; i < params.size(); ++i){
+                *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data) *= *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data);
+            }
+        }
+
+        return static_cast<Item*>(new List(params, false));
+    }, true));
+
 
     /*
         LISTS
@@ -1186,7 +1456,435 @@ static void addStandardOperators(Context *ctx){
         }
 
         return static_cast<Item*>(new List(result));
-    }, true));          
+    }, true));
+    
+    ctx->set("l-sort", new Function({"c", "l"}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        FunctionConstraints consts;
+        consts.setMinParams(2);
+        consts.setMaxParams(2);
+        consts.allowMisMatchingTypes = true;        
+        consts.allowNil = false;
+        consts.setExpectedTypeAt(0, ItemTypes::STRING);
+        consts.setExpectedTypeAt(1, ItemTypes::LIST);
+        
+        std::string errormsg;
+        if(!consts.test(params, errormsg)){
+            cursor->setError("'l-sort': "+errormsg);
+            return new Item();
+        }
+
+        if(params[0]->type != ItemTypes::STRING){
+            cursor->setError("'l-sort': criteria can only be 'DESC' or 'ASC'. Providing a function is not yet supported");
+            return new Item();
+        }
+        auto criteria = static_cast<String*>(params[0]);
+
+        auto order = criteria->get();
+        if(order != "DESC" && order != "ASC"){
+            cursor->setError("'l-sort': criteria can only be 'DESC' or 'ASC'.");
+            return new Item();
+        }        
+
+        auto list = static_cast<List*>(params[1]);
+        std::vector<Item*> items;
+        for(int i = 0; i < list->size; ++i){
+            items.push_back(list->get(i));
+        }        
+
+        FunctionConstraints constsList;
+        constsList.setExpectType(ItemTypes::NUMBER);
+        constsList.allowMisMatchingTypes = false;        
+        constsList.allowNil = false;
+        if(!constsList.test(items, errormsg)){
+            cursor->setError("'l-sort': "+errormsg);
+            return new Item();
+        }        
+
+        std::sort(items.begin(), items.end(), [&](Item *a, Item *b){
+            return order == "DESC" ?     *static_cast<__CV_NUMBER_NATIVE_TYPE*>(a->data) > *static_cast<__CV_NUMBER_NATIVE_TYPE*>(b->data) :
+                                        *static_cast<__CV_NUMBER_NATIVE_TYPE*>(a->data) < *static_cast<__CV_NUMBER_NATIVE_TYPE*>(b->data);
+        });
+
+        return static_cast<Item*>(new List(items));
+    }, false));    
+
+
+
+    ctx->set("l-flatten", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        FunctionConstraints consts;
+        consts.allowMisMatchingTypes = true;        
+        consts.allowNil = true;
+        
+        std::string errormsg;
+        if(!consts.test(params, errormsg)){
+            cursor->setError("'l-flatten': "+errormsg);
+            return new Item();
+        }
+
+
+        std::vector<Item*> finalList;
+
+        std::function<void(Item *item)> recursive = [&](Item *item){
+            if(item->type == ItemTypes::LIST){
+                auto list = static_cast<List*>(item);
+                for(int i = 0; i < list->size; ++i){
+                    recursive(list->get(i));
+                }
+            }else
+            if(item->type == ItemTypes::CONTEXT){
+                auto ctx = static_cast<Context*>(item);
+                for(auto &it : ctx->vars){
+                    recursive(it.second);
+                }
+            }else{                
+                finalList.push_back(item);
+            }
+        };
+
+
+        for(int i = 0; i < params.size(); ++i){
+            recursive(params[i]);
+        }
+
+
+
+        return static_cast<Item*>(new List(finalList));
+    }, true));   
+
+
+
+    ctx->set("splice", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        FunctionConstraints consts;
+        consts.setMinParams(2);
+        consts.allowNil = false;
+        consts.allowMisMatchingTypes = false;
+        consts.setExpectType(ItemTypes::CONTEXT);
+        consts.setExpectType(ItemTypes::LIST);
+
+        std::string errormsg;
+        if(!consts.test(params, errormsg)){
+            cursor->setError("'splice': "+errormsg);
+            return new Item();
+        }
+
+        auto getAllItems = [](Item *item){
+            std::unordered_map<std::string, Item*> all;
+            if(item->type == ItemTypes::LIST){
+                auto list = static_cast<List*>(item);
+                for(int i = 0; i < list->size; ++i){
+                    all[std::to_string(i)] = list->get(i);
+                }
+            }else{
+                auto ctx = static_cast<Context*>(item);
+                for(auto &it : ctx->vars){
+                    all[it.first] = it.second;
+                }
+            }
+            return all;
+        };
+
+        auto first = params[0];
+        // First item decides the spliced result
+        if(first->type == ItemTypes::LIST){
+            std::vector<Item*> compiled;
+            for(int i = 0; i < params.size(); ++i){
+                auto all = getAllItems(params[i]);
+                for(auto &it : all){
+                    compiled.push_back(it.second);
+                }
+            }
+            return static_cast<Item*>(new List(compiled));
+        }else{
+            auto ctx = new Context();
+            for(int i = 0; i < params.size(); ++i){
+                auto all = getAllItems(params[i]);
+                for(auto &it : all){
+                    ctx->set(it.first, it.second);
+                }
+            }
+            return static_cast<Item*>(ctx);
+        }
+
+        return new Item();
+    }, true));    
+
+    ctx->set("l-push", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        FunctionConstraints consts;
+        consts.setMinParams(2);
+        consts.allowMisMatchingTypes = true;
+        consts.allowNil = true;
+
+        std::string errormsg;
+        if(!consts.test(params, errormsg)){
+            cursor->setError("'l-push': "+errormsg);
+            return new Item();
+        }
+
+        std::vector<Item*> items;
+        auto last = params[params.size()-1];
+
+        if(last->type == ItemTypes::LIST){
+            auto list = static_cast<List*>(last);
+            for(int i = 0; i < list->size; ++i){
+                items.push_back(list->get(i));
+            }
+        }else{
+            items.push_back(last);
+        }
+
+        for(int i = 0; i < params.size()-1; ++i){
+            items.push_back(params[i]);
+        }
+
+        return static_cast<Item*>(new List(items, false));
+
+    }, true)); 
+    
+    ctx->set("l-pop", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        FunctionConstraints consts;
+        consts.setMinParams(2);
+        consts.allowMisMatchingTypes = true;
+        consts.allowNil = true;
+
+        std::string errormsg;
+        if(!consts.test(params, errormsg)){
+            cursor->setError("'<<': "+errormsg);
+            return new Item();
+        }
+
+        std::vector<Item*> items;
+        auto first = params[0];
+
+        if(first->type == ItemTypes::LIST){
+            auto list = static_cast<List*>(first);
+            for(int i = 0; i < list->size; ++i){
+                items.push_back(list->get(i));
+            }
+        }else{
+            items.push_back(first);
+        }
+
+        for(int i = 1; i < params.size(); ++i){
+            items.push_back(params[i]);
+        }
+
+        return static_cast<Item*>(new List(items, false));
+
+    }, true));     
+
+    ctx->set("l-sub", new Function({"l", "p", "n"}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        FunctionConstraints consts;
+        consts.setMinParams(2);
+        consts.setMaxParams(3);
+        consts.allowMisMatchingTypes = true;
+        consts.allowNil = false;
+        consts.setExpectedTypeAt(0, ItemTypes::LIST);
+        consts.setExpectedTypeAt(1, ItemTypes::NUMBER);
+        consts.setExpectedTypeAt(2, ItemTypes::NUMBER);
+        static const std::string name = "l-sub";
+        std::string errormsg;
+        if(!consts.test(params, errormsg)){
+            cursor->setError("'"+name+"': "+errormsg);
+            return new Item();
+        }
+
+        int index = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[1]->data);
+        auto list = static_cast<List*>(params[0]);
+        int n = params.size() > 2 ? *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[2]->data) : 1;
+
+        if(index+n < 0 || index+n > list->size){
+            cursor->setError("'"+name+"': position("+std::to_string(index+n)+") is out of range("+std::to_string(list->size)+")");
+            return new Item();
+        }      
+
+        std::vector<Item*> result;
+        for(int i = 0; i < list->size; ++i){
+            if(i >= index && i < index+n){
+                result.push_back(list->get(i));
+            }
+        }
+
+        return static_cast<Item*>(new List(result, false));
+
+    }, false));
+
+
+    ctx->set("l-cut", new Function({"l", "p", "n"}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        FunctionConstraints consts;
+        consts.setMinParams(2);
+        consts.setMaxParams(3);
+        consts.allowMisMatchingTypes = true;
+        consts.allowNil = false;
+        consts.setExpectedTypeAt(0, ItemTypes::LIST);
+        consts.setExpectedTypeAt(1, ItemTypes::NUMBER);
+        consts.setExpectedTypeAt(2, ItemTypes::NUMBER);
+        static const std::string name = "l-cut";
+        std::string errormsg;
+        if(!consts.test(params, errormsg)){
+            cursor->setError("'"+name+"': "+errormsg);
+            return new Item();
+        }
+
+        int index = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[1]->data);
+        auto list = static_cast<List*>(params[0]);
+        int n = params.size() > 2 ? *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[2]->data) : 1;
+
+        if(index+n < 0 || index+n > list->size){
+            cursor->setError("'"+name+"': position("+std::to_string(index+n)+") is out of range("+std::to_string(list->size)+")");
+            return new Item();
+        }      
+
+        std::vector<Item*> result;
+        for(int i = 0; i < list->size; ++i){
+            if(i >= index && i < index+n){
+                continue;
+            }
+            result.push_back(list->get(i));
+        }
+
+        return static_cast<Item*>(new List(result, false));
+
+    }, false));      
+
+    ctx->set("l-reverse", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        FunctionConstraints consts;
+        consts.setMinParams(1);
+        consts.setExpectType(ItemTypes::LIST);
+        consts.allowMisMatchingTypes = false;
+        consts.allowNil = false;
+
+        std::string errormsg;
+        if(!consts.test(params, errormsg)){
+            cursor->setError("'l-reverse': "+errormsg);
+            return new Item();
+        }
+
+        auto reverse = [&](List *lst){
+            std::vector<Item*> result;
+            for(int i = 0; i < lst->size; ++i){
+                result.push_back(lst->get(lst->size-1 - i));
+            }
+            return new List(result);
+        };
+
+        if(params.size() == 1){
+            return static_cast<Item*>(reverse(static_cast<List*>(params[0])));
+        }else{
+            std::vector<Item*> items;
+            for(int i = 0; i < params.size(); ++i){
+                items.push_back(
+                    static_cast<Item*>(reverse(static_cast<List*>(params[i])))
+                );
+            }
+            return static_cast<Item*>(new List(items, false));
+        }
+
+
+
+    }, true));        
+
+
+    /*
+        STRING
+    */
+    ctx->set("s-join", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        FunctionConstraints consts;
+        consts.allowMisMatchingTypes = false;
+        consts.allowNil = false;
+        consts.setExpectType(ItemTypes::STRING);
+        static const std::string name = "s-join";
+        std::string errormsg;
+        if(!consts.test(params, errormsg)){
+            cursor->setError("'"+name+"': "+errormsg);
+            return new Item();
+        }
+        std::string result;
+        for(int i = 0; i < params.size(); ++i){
+            auto str = static_cast<String*>(params[i]);
+            result += str->get();
+        }
+        return static_cast<Item*>(new String(result));
+    }, true));   
+
+    ctx->set("s-cut", new Function({"s", "p", "n"}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        FunctionConstraints consts;
+        consts.setMinParams(2);
+        consts.setMaxParams(3);
+        consts.allowMisMatchingTypes = true;
+        consts.allowNil = false;
+        consts.setExpectedTypeAt(0, ItemTypes::STRING);
+        consts.setExpectedTypeAt(1, ItemTypes::NUMBER);
+        consts.setExpectedTypeAt(2, ItemTypes::NUMBER);
+
+        static const std::string name = "s-cut";
+        std::string errormsg;
+        if(!consts.test(params, errormsg)){
+            cursor->setError("'"+name+"': "+errormsg);
+            return new Item();
+        }
+
+
+
+        int index = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[1]->data);
+        auto str = static_cast<String*>(params[0]);
+        int n = params.size() > 2 ? *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[2]->data) : 1;
+
+        if(index+n < 0 || index+n > str->size){
+            cursor->setError("'"+name+"': position("+std::to_string(index+n)+") is out of range("+std::to_string(str->size)+")");
+            return new Item();
+        }      
+
+        std::string result;
+        for(int i = 0; i < str->size; ++i){
+            if(i >= index && i < index+n){
+                continue;
+            }
+            result += *(char*)((size_t)str->data + i);
+        }
+
+        return static_cast<Item*>(new String(result));
+
+    }, false));       
+
+
+    ctx->set("s-sub", new Function({"s", "p", "n"}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        FunctionConstraints consts;
+        consts.setMinParams(2);
+        consts.setMaxParams(3);
+        consts.allowMisMatchingTypes = true;
+        consts.allowNil = false;
+        consts.setExpectedTypeAt(0, ItemTypes::STRING);
+        consts.setExpectedTypeAt(1, ItemTypes::NUMBER);
+        consts.setExpectedTypeAt(2, ItemTypes::NUMBER);
+
+        static const std::string name = "s-sub";
+        std::string errormsg;
+        if(!consts.test(params, errormsg)){
+            cursor->setError("'"+name+"': "+errormsg);
+            return new Item();
+        }
+
+
+        int index = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[1]->data);
+        auto str = static_cast<String*>(params[0]);
+        int n = params.size() > 2 ? *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[2]->data) : 1;
+
+        if(index+n < 0 || index+n > str->size){
+            cursor->setError("'"+name+"': position("+std::to_string(index+n)+") is out of range("+std::to_string(str->size)+")");
+            return new Item();
+        }      
+
+        std::string result;
+        for(int i = 0; i < str->size; ++i){
+            if(i >= index && i < index+n){
+                result += *(char*)((size_t)str->data + i);
+            }
+        }
+
+        return static_cast<Item*>(new String(result));
+
+    }, false));     
+
 
     /*
         LOGIC
@@ -1258,10 +1956,138 @@ static void addStandardOperators(Context *ctx){
     }, true));                  
 
 
+    ctx->set("eq", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        FunctionConstraints consts;
+        consts.setMinParams(2);
+        consts.allowMisMatchingTypes = false;
+        consts.allowNil = false;
+        std::string errormsg;
+        if(!consts.test(params, errormsg)){
+            cursor->setError("'eq': "+errormsg);
+            return new Item();
+        }
+        auto last = params[0];
+        for(int i = 1; i < params.size(); ++i){
+            if(!last->isEq(params[i])){
+                return static_cast<Item*>(new Number(0));
+            }
+        }				
+        return static_cast<Item*>(new Number(1));
+    }, true));     
 
 
+    ctx->set("neq", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        FunctionConstraints consts;
+        consts.setMinParams(2);
+        consts.allowMisMatchingTypes = false;
+        consts.allowNil = false;
+        std::string errormsg;
+        if(!consts.test(params, errormsg)){
+            cursor->setError("'neq': "+errormsg);
+            return new Item();
+        }
+        for(int i = 0; i < params.size(); ++i){
+            auto p1 = params[i];
+            for(int j = 0; j < params.size(); ++j){
+                if(i == j){
+                    continue;
+                }
+                auto p2 = params[j];
+                if(p1->isEq(p2)){
+                    return static_cast<Item*>(new Number(0));
+                }
+            }
+        }				
+        return static_cast<Item*>(new Number(1));
+    }, true));      
 
-    
+
+    ctx->set("gt", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        FunctionConstraints consts;
+        consts.setMinParams(2);
+        consts.allowNil = false;
+        consts.allowMisMatchingTypes = false;
+        consts.setExpectType(ItemTypes::NUMBER);
+        std::string errormsg;
+        if(!consts.test(params, errormsg)){
+            cursor->setError("'gt': "+errormsg);
+            return new Item();
+        }
+        __CV_NUMBER_NATIVE_TYPE last = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data);
+        for(int i = 1; i < params.size(); ++i){
+            if(last <=  *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data)){
+                return static_cast<Item*>(new Number(0));
+            }
+            last = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data);
+        }				
+        return static_cast<Item*>(new Number(1));
+    }, true));    
+
+
+    ctx->set("gte", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        FunctionConstraints consts;
+        consts.setMinParams(2);
+        consts.allowNil = false;
+        consts.allowMisMatchingTypes = false;
+        consts.setExpectType(ItemTypes::NUMBER);
+        std::string errormsg;
+        if(!consts.test(params, errormsg)){
+            cursor->setError("'gte': "+errormsg);
+            return new Item();
+        }
+        __CV_NUMBER_NATIVE_TYPE last = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data);
+        for(int i = 1; i < params.size(); ++i){
+            if(last <  *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data)){
+                return static_cast<Item*>(new Number(0));
+            }
+            last = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data);
+        }				
+        return static_cast<Item*>(new Number(1));
+    }, true));         
+
+
+    ctx->set("lt", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        FunctionConstraints consts;
+        consts.setMinParams(2);
+        consts.allowNil = false;
+        consts.allowMisMatchingTypes = false;
+        consts.setExpectType(ItemTypes::NUMBER);
+        std::string errormsg;
+        if(!consts.test(params, errormsg)){
+            cursor->setError("'lt': "+errormsg);
+            return new Item();
+        }
+        __CV_NUMBER_NATIVE_TYPE last = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data);
+        for(int i = 1; i < params.size(); ++i){
+            if(last >=  *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data)){
+                return static_cast<Item*>(new Number(0));
+            }
+            last = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data);
+        }				
+        return static_cast<Item*>(new Number(1));
+    }, true));    
+
+    ctx->set("lte", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        FunctionConstraints consts;
+        consts.setMinParams(2);
+        consts.allowNil = false;
+        consts.allowMisMatchingTypes = false;
+        consts.setExpectType(ItemTypes::NUMBER);
+        std::string errormsg;
+        if(!consts.test(params, errormsg)){
+            cursor->setError("'gte': "+errormsg);
+            return new Item();
+        }
+        __CV_NUMBER_NATIVE_TYPE last = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data);
+        for(int i = 1; i < params.size(); ++i){
+            if(last >  *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data)){
+                return static_cast<Item*>(new Number(0));
+            }
+            last = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data);
+        }				
+        return static_cast<Item*>(new Number(1));
+    }, true));    
+         
 }
 
 int main(){
@@ -1274,8 +2100,8 @@ int main(){
     // nctx.set("a", new Number(25));
     // ctx.set("test", &nctx);
 
-    // auto r = interpret("5 2", &cursor, &ctx);
-    auto r = interpret("[set a [ct 10~n]][a][15]", &cursor, &ctx);
+    auto r = interpret("set test [ct 25~n 100~j]", &cursor, &ctx);
+    r = interpret("test. n", &cursor, &ctx);
     // auto r = interpret("[1 [28 28]^ 3]^ [4 5 6]^ [7 8 [99 99]^]^]", &cursor, &ctx);
 
     std::cout << ItemToText(r) << std::endl;
