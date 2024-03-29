@@ -80,13 +80,13 @@ namespace ModifierTypes {
         if(mod == '~'){
             return ModifierTypes::NAMER;
         }else
-        if(mod == '.'){
+        if(mod == ':'){
             return ModifierTypes::SCOPE;
         }else
-        if(mod == '|'){
+        if(mod == '<'){
             return ModifierTypes::LINKER;
         }else
-        if(mod == ':'){
+        if(mod == '|'){
             return ModifierTypes::TRAIT;
         }else        
         if(mod == '^'){
@@ -101,13 +101,13 @@ namespace ModifierTypes {
                 return "~";
             };
             case ModifierTypes::SCOPE: {
-                return ".";
+                return ":";
             };   
             case ModifierTypes::TRAIT: {
-                return ":";
+                return "|";
             };              
             case ModifierTypes::LINKER: {
-                return "|";
+                return "<";
             }; 
             case ModifierTypes::EXPAND: {
                 return "^";
@@ -167,21 +167,30 @@ namespace InterruptTypes {
     };
 }
 
-// struct Trait {
-//     std::string name;
-//     std::string value;
-//     std::function<Item*(Item* subject, const std::string &value)> action;
-//     Trait(){
-        
-//     }
-// };
+struct Item;
+struct Context;
+struct Cursor;
+
+struct Trait {
+    std::string name;
+    std::function<Item*(Item* subject, const std::string &value, Cursor *cursor, Context *ctx)> action;
+    Trait(){
+        this->action = [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+            return (Item*)NULL;
+        };
+    }
+};
+
 
 struct Item {
     uint8_t type;
     uint32_t size;
     void *data;
     uint32_t refc;
+    std::unordered_map<std::string, Trait> traits;
+
     Item(){
+        registerTraits();
         setToNil();
     }
     void incRefC(){
@@ -192,6 +201,31 @@ struct Item {
         --this->refc;
         deconstruct();
     }
+    
+    void registerTrait(const std::string &name, const std::function<Item*(Item* subject, const std::string &value, Cursor *cursor, Context *ctx)> &action){
+        Trait trait;
+        trait.name = name;
+        trait.action = action;
+        this->traits[name] = trait;
+    }
+
+    Item *runTrait(const std::string &name, const std::string &value, Cursor *cursor, Context *ctx){
+        return this->traits.find(name)->second.action(this, value, cursor, ctx);
+    }
+
+    bool hasTrait(const std::string &name){
+        auto it = this->traits.find(name);
+        if(it == this->traits.end()){
+            return false;
+        }
+        return true;
+    }
+    
+
+    virtual void registerTraits(){
+
+    }
+
     virtual bool isEq(Item *item){
         return (this->type == ItemTypes::NIL && item->type == ItemTypes::NIL) || this == item;
     }
@@ -232,10 +266,11 @@ struct Item {
 struct Number : Item {
 
     Number(){
-
+        registerTraits();
     }
 
     Number(__CV_NUMBER_NATIVE_TYPE v){
+        registerTraits();        
         write(v);
     }
 
@@ -243,6 +278,33 @@ struct Number : Item {
         return  item->type == this->type && *static_cast<__CV_NUMBER_NATIVE_TYPE*>(this->data)
                 == *static_cast<__CV_NUMBER_NATIVE_TYPE*>(item->data);
     }    
+
+    void registerTraits(){
+        this->registerTrait("is-neg", [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+            if(subject->type == ItemTypes::NIL){
+                return subject;
+            }
+            return static_cast<Item*>(new Number(  *static_cast<__CV_NUMBER_NATIVE_TYPE*>(subject->data) < 0 ? 1 : 0 ));
+        });
+        this->registerTrait("inv", [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+            if(subject->type == ItemTypes::NIL){
+                return subject;
+            }
+            return static_cast<Item*>(new Number(  *static_cast<__CV_NUMBER_NATIVE_TYPE*>(subject->data) * -1 ));
+        });    
+        this->registerTrait("is-odd", [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+            if(subject->type == ItemTypes::NIL){
+                return subject;
+            }
+            return static_cast<Item*>(new Number(  (int)(*static_cast<__CV_NUMBER_NATIVE_TYPE*>(subject->data)) % 2 != 0 ));
+        });   
+        this->registerTrait("is-even", [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+            if(subject->type == ItemTypes::NIL){
+                return subject;
+            }
+            return static_cast<Item*>(new Number(  (int)(*static_cast<__CV_NUMBER_NATIVE_TYPE*>(subject->data)) % 2 == 0 ));
+        });                       
+    }
 
     Item *copy(bool deep = true) const {
         auto item = new Number();
@@ -279,11 +341,32 @@ struct String : Item {
     
     String(){
         // Empty constructor makes this string NIL
+        registerTraits();
     }
 
     String(const std::string &str){
+        registerTraits();
         this->write(str);
     }    
+
+    void registerTraits(){
+        this->registerTrait("n", [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+            if(subject->type == ItemTypes::NIL){
+                return subject;
+            }
+            return static_cast<Item*>(new Number( subject->size ));
+        });
+        this->registerTrait("reverse", [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+            if(subject->type == ItemTypes::NIL){
+                return subject;
+            }
+            std::string result;
+            for(int i = 0; i < subject->size; ++i){
+                result += *(char*)((size_t)subject->data + subject->size-1 - i);
+            }
+            return static_cast<Item*>(new String( result ));
+        });                           
+    }
 
     bool isEq(Item *item){
         if(this->type != item->type || this->size != item->size){
@@ -332,10 +415,32 @@ static std::string ItemToText(Item *item);
 struct List : Item {
 
     List(){
+        registerTraits();
     }
 
     List(const std::vector<Item*> &list, bool toCopy = true){
+        registerTraits();        
         write(list, toCopy);
+    }
+
+    void registerTraits(){
+        this->registerTrait("n", [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+            if(subject->type == ItemTypes::NIL){
+                return subject;
+            }
+            return static_cast<Item*>(new Number( subject->size ));
+        });
+        this->registerTrait("reverse", [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+            if(subject->type == ItemTypes::NIL){
+                return subject;
+            }
+            std::vector<Item*> result;
+            auto list = static_cast<List*>(subject);
+            for(int i = 0; i < list->size; ++i){
+                result.push_back(list->get(list->size-1 - i));
+            }
+            return static_cast<Item*>(new List(result));
+        });                           
     }
 
     Item *copy(bool deep = true) const {
@@ -482,15 +587,54 @@ struct Function : Item {
     FunctionConstraints constraints;
 
     Function(){
+        registerTraits();
     }
 
     Function(const std::vector<std::string> &params, const std::string &body, bool variadic = false){
+        registerTraits();
         set(params, body, variadic);
     }
 
     Function(const std::vector<std::string> &params, const std::function<Item*(const std::vector<Item*> &params, Cursor *cursor, Context *ctx)> &fn, bool variadic = false){
+        registerTraits();
         set(params, fn, variadic);
     }    
+
+
+    void registerTraits(){
+        this->registerTrait("is-variadic", [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+            if(subject->type == ItemTypes::NIL){
+                return subject;
+            }
+            auto func = static_cast<Function*>(subject);
+            return static_cast<Item*>(new Number( func->variadic ));
+        });
+
+        this->registerTrait("is-binary", [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+            if(subject->type == ItemTypes::NIL){
+                return subject;
+            }
+            auto func = static_cast<Function*>(subject);
+            return static_cast<Item*>(new Number( func->binary ));
+        }); 
+
+        this->registerTrait("n-args", [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+            if(subject->type == ItemTypes::NIL){
+                return subject;
+            }
+            auto func = static_cast<Function*>(subject);
+            return static_cast<Item*>(new Number( func->params.size() ));
+        });   
+
+        this->registerTrait("proto", [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+            if(subject->type == ItemTypes::NIL){
+                return subject;
+            }
+            auto func = static_cast<Function*>(subject);
+            return static_cast<Item*>(new String( func->binary ? "[]" : func->body ));
+        });                       
+                           
+    }
 
     void set(const std::vector<std::string> &params, const std::string &body, bool variadic){
         this->body = body;
@@ -510,6 +654,7 @@ struct Function : Item {
         this->binary = true;
         this->variadic = variadic;
     }
+    
 };    
 
 struct Context;
@@ -1003,7 +1148,16 @@ static Item *processPreInterpretModifiers(Item *item, std::vector<ModifierPair> 
         auto &mod = modifiers[i];
         switch(mod.type){
             case ModifierTypes::TRAIT: {
-
+                auto name = mod.subject;
+                if(name.size() == 0){
+                    cursor->setError("'"+ModifierTypes::str(ModifierTypes::SCOPE)+"': Trait modifier requires a name");
+                    return item;                    
+                }
+                if(!item->hasTrait(name)){
+                    cursor->setError("'"+ModifierTypes::str(ModifierTypes::SCOPE)+"': Trait '"+name+"' doesn't belong to '"+ItemTypes::str(item->type)+"' type");
+                    return item;                      
+                }
+                return item->runTrait(name, "", cursor, ctx);
             } break;            
             case ModifierTypes::LINKER: {
 
@@ -1013,13 +1167,13 @@ static Item *processPreInterpretModifiers(Item *item, std::vector<ModifierPair> 
             } break;        
             case ModifierTypes::SCOPE: {
                 if(item->type != ItemTypes::CONTEXT){
-                    cursor->setError("':': Scope modifier can only be used on contexts.");
+                    cursor->setError("'"+ModifierTypes::str(ModifierTypes::SCOPE)+"': Scope modifier can only be used on contexts.");
                     return item;
                 }
                 if(mod.subject.size() > 0){
                     auto subsequent = static_cast<Context*>(item)->get(mod.subject);
                     if(!subsequent){
-                        cursor->setError("':"+mod.subject+"': Undefined symbol or imperative.");
+                        cursor->setError("'"+ModifierTypes::str(ModifierTypes::SCOPE)+"':"+mod.subject+"': Undefined symbol or imperative.");
                         return item;
                     }
                     item = subsequent;
@@ -1064,6 +1218,55 @@ static Item *interpret(const Token &token, Cursor *cursor, Context *ctx){
     return eval(tokens, cursor, ctx);
 }
 
+static Item *runFunction(Function *fn, const std::vector<Token> &tokens, Cursor *cursor, Context *ctx){
+    std::vector<Item*> items;
+    for(int i = 0; i < tokens.size(); ++i){
+        ModifierEffect effects;
+        auto solved = processPreInterpretModifiers(interpret(tokens[i], cursor, ctx), tokens[i].modifiers, cursor, ctx, effects);
+        if(effects.expand && solved->type == ItemTypes::LIST){
+            auto list = static_cast<List*>(solved);
+            for(int i = 0; i < list->size; ++i){
+                items.push_back(list->get(i)->copy());
+            }
+            // We don't deconstruct the list since we're just moving the items to the return here
+            // list->clear(true); 
+            // delete list;
+        }else
+        if(effects.expand && solved->type != ItemTypes::LIST){
+            cursor->setError("'"+ModifierTypes::str(ModifierTypes::EXPAND)+"': expand modifier can only be used on iterables (Lists, Protos, etc).");
+            items.push_back(solved);
+        }else{
+            items.push_back(solved);
+        }                        
+        if(cursor->error){
+            return new Item();
+        }
+    }
+
+    if(fn->binary){
+        return fn->fn(items, cursor, ctx);  
+    }else{
+        Context *tctx = new Context(ctx);
+        if(fn->variadic){
+            auto list = new List(items, false);
+            tctx->set("...", list);
+        }else{
+            if(items.size() != fn->params.size()){
+                cursor->setError("'"+ItemToText(fn)+"': Expects exactly "+(std::to_string(fn->params.size()))+" arguments");
+                return new Item();
+            }
+            for(int i = 0; i < items.size(); ++i){
+                tctx->set(fn->params[i], items[i]);
+            }
+        }
+
+        std::cout << fn->body << std::endl;
+
+        return interpret(fn->body, cursor, tctx);
+    }
+
+}
+
 static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx){
 
     auto first = tokens[0];
@@ -1088,6 +1291,23 @@ static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx
             return ctx->set(params[0].first, solved);
         }
     }else
+    if(imp == "fn"){
+        auto params = compileTokens(tokens, 1, tokens.size()-1);
+        if(params.size() > 2 || params.size() < 2){
+            cursor->setError("'fn': Expects exactly 2 arguments: <[ARGS[0]...ARGS[n]]> <[CODE[0]...CODE[n]]>.");
+            return new Item();
+        }
+        bool isVariadic = false;
+        auto argNames = parseTokens(params[0].first, ' ', cursor);
+        if(cursor->error){
+            return new Item();
+        }
+        if(argNames.size() == 1 && argNames[0] == "..."){
+            isVariadic = true;
+        }
+        auto code = params[1];
+        return static_cast<Item*>(new Function(isVariadic ? std::vector<std::string>({}) : argNames, code.first, isVariadic));
+    }else
     if(imp == "ct"){
         auto params = compileTokens(tokens, 1, tokens.size()-1);
         Context *pctx = new Context(ctx);
@@ -1110,35 +1330,7 @@ static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx
         // Is it a function?
         if(var && var->type == ItemTypes::FUNCTION){
             auto fn = static_cast<Function*>(var);
-            if(fn->binary){
-                std::vector<Item*> items;
-                if(tokens.size() > 0){
-                    for(int i = 1; i < tokens.size(); ++i){
-                        ModifierEffect effects;
-                        auto solved = processPreInterpretModifiers(interpret(tokens[i], cursor, ctx), tokens[i].modifiers, cursor, ctx, effects);
-                        if(effects.expand && solved->type == ItemTypes::LIST){
-                            auto list = static_cast<List*>(solved);
-                            for(int i = 0; i < list->size; ++i){
-                                items.push_back(list->get(i)->copy());
-                            }
-                            // We don't deconstruct the list since we're just moving the items to the return here
-                            // list->clear(true); 
-                            // delete list;
-                        }else
-                        if(effects.expand && solved->type != ItemTypes::LIST){
-                            cursor->setError("'^': expand modifier can only be used on iterables (Lists, Protos, etc).");
-                            items.push_back(solved);
-                        }else{
-                            items.push_back(solved);
-                        }                        
-                        if(cursor->error){
-                            return new Item();
-                        }
-                    }
-                }
-
-                return fn->fn(items, cursor, ctx);
-            }
+            return runFunction(fn, compileTokens(tokens, 1, tokens.size()-1), cursor, ctx);
         }else   
         // Is it just a variable?
         if(var && tokens.size() == 1){
@@ -1195,7 +1387,7 @@ static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx
                     return new Item();
                 } 
                 auto inlineCode = compileTokens(tokens, 1, tokens.size()-1);
-                return eval(inlineCode, cursor, ctx);
+                return eval(inlineCode, cursor, effects.toCtx); // Check if toCtx is null? Shouldn't be possible tho
             }else{
             // List it is
                 std::vector<Item*> items;
@@ -1787,6 +1979,43 @@ static void addStandardOperators(Context *ctx){
     /*
         STRING
     */
+    ctx->set("s-reverse", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        FunctionConstraints consts;
+        consts.setMinParams(1);
+        consts.setExpectType(ItemTypes::LIST);
+        consts.allowMisMatchingTypes = false;
+        consts.allowNil = false;
+
+        std::string errormsg;
+        if(!consts.test(params, errormsg)){
+            cursor->setError("'l-reverse': "+errormsg);
+            return new Item();
+        }
+
+        auto reverse = [&](String *str){
+            std::string result;
+            for(int i = 0; i < str->size; ++i){
+                result += *(char*)((size_t)str->data + str->size-1 - i);
+            }
+            return result;
+        };
+
+        if(params.size() == 1){
+            return static_cast<Item*>(new String(reverse(static_cast<String*>(params[0]))));
+        }else{
+            std::vector<Item*> items;
+            for(int i = 0; i < params.size(); ++i){
+                items.push_back(
+                    static_cast<Item*>(new String(reverse(static_cast<String*>(params[i]))))
+                );
+            }
+            return static_cast<Item*>(new List(items, false));
+        }
+
+
+
+    }, true));  
+
     ctx->set("s-join", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
         FunctionConstraints consts;
         consts.allowMisMatchingTypes = false;
@@ -2090,6 +2319,7 @@ static void addStandardOperators(Context *ctx){
          
 }
 
+
 int main(){
 
     Context ctx;
@@ -2100,8 +2330,11 @@ int main(){
     // nctx.set("a", new Number(25));
     // ctx.set("test", &nctx);
 
-    auto r = interpret("set test [ct 25~n 100~j]", &cursor, &ctx);
-    r = interpret("test. n", &cursor, &ctx);
+    // auto r = interpret(":", &cursor, &ctx);
+
+
+    auto r = interpret("set test [fn [...][...^]]", &cursor, &ctx);
+    r = interpret("test 5 2 3", &cursor, &ctx);
     // auto r = interpret("[1 [28 28]^ 3]^ [4 5 6]^ [7 8 [99 99]^]^]", &cursor, &ctx);
 
     std::cout << ItemToText(r) << std::endl;
@@ -2111,7 +2344,7 @@ int main(){
     }
     ctx.debug();
 
-    ctx.deconstruct();
+    // ctx.deconstruct();
 
 
 
