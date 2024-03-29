@@ -11,6 +11,24 @@
 
 #define __CV_NUMBER_NATIVE_TYPE double
 
+struct Cursor {
+    bool error;
+    int line;
+    std::string message;
+    Cursor(){
+        error = false;
+        line = 1;
+        message = "";
+    }
+    void setError(const std::string &v, int line = -1){
+        if(line != -1){
+            this->line = line;
+        }
+        this->error = true;
+        this->message = v;
+    }
+};
+
 namespace Tools {
     bool isNumber(const std::string &s){
         return (s.find_first_not_of( "-.0123456789") == std::string::npos);
@@ -171,10 +189,20 @@ struct Item;
 struct Context;
 struct Cursor;
 
+namespace TraitType {
+    enum TraitType : uint8_t {
+        ANY_NUMBER,
+        ANY_STRING,
+        SPECIFIC
+    };
+}
+
 struct Trait {
     std::string name;
+    uint8_t type;
     std::function<Item*(Item* subject, const std::string &value, Cursor *cursor, Context *ctx)> action;
     Trait(){
+        this->type = TraitType::SPECIFIC;
         this->action = [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
             return (Item*)NULL;
         };
@@ -188,6 +216,7 @@ struct Item {
     void *data;
     uint32_t refc;
     std::unordered_map<std::string, Trait> traits;
+    std::unordered_map<uint8_t, Trait> traitsAny;
 
     Item(){
         registerTraits();
@@ -202,6 +231,13 @@ struct Item {
         deconstruct();
     }
     
+    void registerTrait(uint8_t type, const std::function<Item*(Item* subject, const std::string &value, Cursor *cursor, Context *ctx)> &action){
+        Trait trait;
+        trait.action = action;
+        trait.type = type;
+        this->traitsAny[type] = trait;
+    }    
+    
     void registerTrait(const std::string &name, const std::function<Item*(Item* subject, const std::string &value, Cursor *cursor, Context *ctx)> &action){
         Trait trait;
         trait.name = name;
@@ -213,6 +249,10 @@ struct Item {
         return this->traits.find(name)->second.action(this, value, cursor, ctx);
     }
 
+    Item *runTrait(uint8_t type, const std::string &value, Cursor *cursor, Context *ctx){
+        return this->traitsAny.find(type)->second.action(this, value, cursor, ctx);
+    }    
+
     bool hasTrait(const std::string &name){
         auto it = this->traits.find(name);
         if(it == this->traits.end()){
@@ -220,6 +260,15 @@ struct Item {
         }
         return true;
     }
+
+    bool hasTrait(uint8_t type){
+        auto it = this->traitsAny.find(type);
+        if(it == this->traitsAny.end()){
+            return false;
+        }
+        return true;
+    }
+        
     
 
     virtual void registerTraits(){
@@ -349,7 +398,22 @@ struct String : Item {
         this->write(str);
     }    
 
-    void registerTraits(){
+    void registerTraits(){ 
+        this->registerTrait(TraitType::ANY_NUMBER, [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+            if(subject->type == ItemTypes::NIL){
+                return subject;
+            }
+            auto str = static_cast<String*>(subject); 
+            auto index = std::stod(value);
+            if(index < 0 || index >= str->size){
+                cursor->setError("'String|*ANY_NUMBER*': Index("+Tools::removeTrailingZeros(index)+") is out of range(0-"+std::to_string(str->size)+")");
+                return new Item();
+            }
+            auto c = *(char*)((size_t)str->data + (int)index);
+            auto s = std::string("")+c;
+
+            return static_cast<Item*>(new String( s )); // increment ref count
+        });           
         this->registerTrait("n", [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
             if(subject->type == ItemTypes::NIL){
                 return subject;
@@ -424,6 +488,18 @@ struct List : Item {
     }
 
     void registerTraits(){
+        this->registerTrait(TraitType::ANY_NUMBER, [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+            if(subject->type == ItemTypes::NIL){
+                return subject;
+            }
+            auto list = static_cast<List*>(subject); 
+            auto index = std::stod(value);
+            if(index < 0 || index >= list->size){
+                cursor->setError("'List|*ANY_NUMBER*': Index("+Tools::removeTrailingZeros(index)+") is out of range(0-"+std::to_string(list->size)+")");
+                return new Item();
+            }
+            return list->get(index); // increment ref count
+        });        
         this->registerTrait("n", [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
             if(subject->type == ItemTypes::NIL){
                 return subject;
@@ -495,24 +571,6 @@ struct List : Item {
         return true;
     }       
 
-};
-
-struct Cursor {
-    bool error;
-    int line;
-    std::string message;
-    Cursor(){
-        error = false;
-        line = 1;
-        message = "";
-    }
-    void setError(const std::string &v, int line = -1){
-        if(line != -1){
-            this->line = line;
-        }
-        this->error = true;
-        this->message = v;
-    }
 };
 
 struct Context;
@@ -849,6 +907,7 @@ struct ModifierEffect {
     bool expand;
     bool ctxSwitch;
     Context *toCtx;
+    std::string named;
     ModifierEffect(){
 
     }
@@ -995,9 +1054,13 @@ Token parseTokenWModifier(const std::string &input){
         char c = input[input.length()-1 - i];
         auto t = ModifierTypes::getToken(c);        
         if(t != ModifierTypes::UNDEFINED){
-            std::reverse(buffer.begin(), buffer.end());            
-            token.modifiers.push_back(ModifierPair(t, buffer));
-            buffer = "";            
+            if(buffer != "]"){ // This a dirty hack. but will do for now. it happens when using non-value modifiers such as ^
+                std::reverse(buffer.begin(), buffer.end());            
+                token.modifiers.push_back(ModifierPair(t, buffer));
+                buffer = "";            
+            }else{
+                token.modifiers.push_back(ModifierPair(t, ""));
+            }
         }else
         if(t == ModifierTypes::UNDEFINED && i == input.length()-1){
             buffer += c;
@@ -1017,8 +1080,6 @@ std::vector<Token> buildTokens(const std::vector<std::string> &literals, Cursor 
     std::vector<Token> tokens;
     for(int i = 0; i < literals.size(); ++i){
         auto innLiterals = parseTokens(literals[i], ' ', cursor);
-
-
         // Complex tokens (It's usually tokens that actually are complete statements) need to be evaluated further        
         if(innLiterals.size() > 1){
             Token token;
@@ -1153,6 +1214,15 @@ static Item *processPreInterpretModifiers(Item *item, std::vector<ModifierPair> 
                     cursor->setError("'"+ModifierTypes::str(ModifierTypes::SCOPE)+"': Trait modifier requires a name");
                     return item;                    
                 }
+                // ANY_NUMBER type trait
+                if(Tools::isNumber(name) && item->hasTrait(TraitType::ANY_NUMBER)){
+                    return item->runTrait(TraitType::ANY_NUMBER, name, cursor, ctx);    
+                }else
+                // ANY_STRING type trait
+                if(!Tools::isNumber(name) && item->hasTrait(TraitType::ANY_STRING)){
+                    return item->runTrait(TraitType::ANY_STRING, name, cursor, ctx);    
+                }else                
+                // Regular trait
                 if(!item->hasTrait(name)){
                     cursor->setError("'"+ModifierTypes::str(ModifierTypes::SCOPE)+"': Trait '"+name+"' doesn't belong to '"+ItemTypes::str(item->type)+"' type");
                     return item;                      
@@ -1163,6 +1233,7 @@ static Item *processPreInterpretModifiers(Item *item, std::vector<ModifierPair> 
 
             } break;
             case ModifierTypes::NAMER: {
+                effects.named = mod.subject;
                 ctx->set(mod.subject, item);
             } break;        
             case ModifierTypes::SCOPE: {
@@ -1204,7 +1275,6 @@ static Item *interpret(const std::string &_input, Cursor *cursor, Context *ctx){
         return new Item();
     }    
     auto tokens = buildTokens(literals, cursor);
-
     return eval(tokens, cursor, ctx);
 }
 
@@ -1214,7 +1284,10 @@ static Item *interpret(const Token &token, Cursor *cursor, Context *ctx){
     if(cursor->error){
         return new Item();
     }
+
     auto tokens = buildTokens(literals, cursor);
+
+
     return eval(tokens, cursor, ctx);
 }
 
@@ -1233,7 +1306,7 @@ static Item *runFunction(Function *fn, const std::vector<Token> &tokens, Cursor 
             // delete list;
         }else
         if(effects.expand && solved->type != ItemTypes::LIST){
-            cursor->setError("'"+ModifierTypes::str(ModifierTypes::EXPAND)+"': expand modifier can only be used on iterables (Lists, Protos, etc).");
+            cursor->setError("'"+ModifierTypes::str(ModifierTypes::EXPAND)+"': Expand modifier can only be used on iterables.");
             items.push_back(solved);
         }else{
             items.push_back(solved);
@@ -1247,6 +1320,7 @@ static Item *runFunction(Function *fn, const std::vector<Token> &tokens, Cursor 
         return fn->fn(items, cursor, ctx);  
     }else{
         Context *tctx = new Context(ctx);
+        tctx->set("top", ctx);
         if(fn->variadic){
             auto list = new List(items, false);
             tctx->set("...", list);
@@ -1259,9 +1333,6 @@ static Item *runFunction(Function *fn, const std::vector<Token> &tokens, Cursor 
                 tctx->set(fn->params[i], items[i]);
             }
         }
-
-        std::cout << fn->body << std::endl;
-
         return interpret(fn->body, cursor, tctx);
     }
 
@@ -1291,6 +1362,59 @@ static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx
             return ctx->set(params[0].first, solved);
         }
     }else
+    if(imp == "iter"){
+        auto params = compileTokens(tokens, 1, tokens.size()-1);
+        if(params.size() > 2 || params.size() < 2){
+            cursor->setError("'fn': Expects exactly 2 arguments: <ITERABLE> <[CODE[0]...CODE[n]]>.");
+            return new Item();
+        }
+        auto code = params[1];
+        auto tctx = new Context(ctx);
+        tctx->set("head", ctx);
+        ModifierEffect origEff;
+        auto iterable = processPreInterpretModifiers(interpret(params[0], cursor, tctx), params[0].modifiers, cursor, tctx, origEff);
+        if(cursor->error){
+            return new Item();
+        }            
+        if(iterable->type == ItemTypes::LIST){
+            std::vector<Item*> results;
+            auto list = static_cast<List*>(iterable);
+            for(int i = 0; i < list->size; ++i){
+                auto item = list->get(i);
+                // We use the namer to name every iteration's current variable
+                if(origEff.named.size() > 0){
+                    tctx->set(origEff.named, item);
+                }                
+                ModifierEffect effects;
+                auto iteration = processPreInterpretModifiers(interpret(code, cursor, tctx), code.modifiers, cursor, tctx, effects);
+                if(cursor->error){
+                    return new Item();
+                }             
+                if(effects.expand && iteration->type == ItemTypes::LIST){
+                    auto list = static_cast<List*>(iteration);
+                    for(int j = 0; j < list->size; ++j){
+                        results.push_back(list->get(j));
+                    }
+                    // We don't deconstruct the list since we're just moving the items to the return here
+                    // list->clear(true); 
+                    // delete list;
+                }else
+                if(effects.expand && iteration->type != ItemTypes::LIST){
+                    cursor->setError("'"+ModifierTypes::str(ModifierTypes::EXPAND)+"': Expand modifier can only be used on iterables.");
+                    results.push_back(iteration);
+                }else{   
+                    results.push_back(iteration);
+                }                              
+            }
+            return static_cast<Item*>(new List(results));
+        }else
+        if(iterable->type == ItemTypes::CONTEXT){
+            
+        }else{
+            cursor->setError("'iter': Expects argument(0) to be iterable.");
+            return new Item();            
+        }
+    }else
     if(imp == "fn"){
         auto params = compileTokens(tokens, 1, tokens.size()-1);
         if(params.size() > 2 || params.size() < 2){
@@ -1314,7 +1438,9 @@ static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx
         for(int i = 0; i < params.size(); ++i){
             ModifierEffect effects;
             auto solved = processPreInterpretModifiers(interpret(params[i], cursor, pctx), params[i].modifiers, cursor, pctx, effects);
-            
+            if(cursor->error){
+                return new Item();
+            }                
             if(effects.expand && solved->type == ItemTypes::CONTEXT){
                 auto proto = static_cast<Context*>(solved);
                 for(auto &it : proto->vars){
@@ -1399,15 +1525,15 @@ static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx
                     }                       
                     if(effects.expand && solved->type == ItemTypes::LIST){
                         auto list = static_cast<List*>(solved);
-                        for(int i = 0; i < list->size; ++i){
-                            items.push_back(list->get(i)->copy());
+                        for(int j = 0; j < list->size; ++j){
+                            items.push_back(list->get(j)->copy());
                         }
                         // We don't deconstruct the list since we're just moving the items to the return here
                         // list->clear(true); 
                         // delete list;
                     }else
                     if(effects.expand && solved->type != ItemTypes::LIST){
-                        cursor->setError("'^': expand modifier can only be used on iterables (Lists, etc).");
+                        cursor->setError("'"+ModifierTypes::str(ModifierTypes::EXPAND)+"': Expand modifier can only be used on iterables.");
                         items.push_back(solved);
                     }else{   
                         items.push_back(solved);
@@ -1702,14 +1828,14 @@ static void addStandardOperators(Context *ctx){
 
 
 
-    ctx->set("l-flatten", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+    ctx->set("l-flat", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
         FunctionConstraints consts;
         consts.allowMisMatchingTypes = true;        
         consts.allowNil = true;
         
         std::string errormsg;
         if(!consts.test(params, errormsg)){
-            cursor->setError("'l-flatten': "+errormsg);
+            cursor->setError("'l-flat': "+errormsg);
             return new Item();
         }
 
@@ -2333,8 +2459,8 @@ int main(){
     // auto r = interpret(":", &cursor, &ctx);
 
 
-    auto r = interpret("set test [fn [...][...^]]", &cursor, &ctx);
-    r = interpret("test 5 2 3", &cursor, &ctx);
+    auto r = interpret("iter [1 2 3]~n [+ n 1]", &cursor, &ctx);
+    // r = interpret("test 5 6", &cursor, &ctx);
     // auto r = interpret("[1 [28 28]^ 3]^ [4 5 6]^ [7 8 [99 99]^]^]", &cursor, &ctx);
 
     std::cout << ItemToText(r) << std::endl;
@@ -2342,7 +2468,7 @@ int main(){
     if(cursor.error){
         std::cout << cursor.message << std::endl;
     }
-    ctx.debug();
+    // ctx.debug();
 
     // ctx.deconstruct();
 
