@@ -435,94 +435,6 @@ struct Number : Item {
 
 };
 
-struct String : Item {
-    
-    String(){
-        // Empty constructor makes this string NIL
-        registerTraits();
-    }
-
-    String(const std::string &str){
-        registerTraits();
-        this->write(str);
-    }    
-
-    void registerTraits(){ 
-        this->registerTrait(TraitType::ANY_NUMBER, [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
-            if(subject->type == ItemTypes::NIL){
-                return subject;
-            }
-            auto str = static_cast<String*>(subject); 
-            auto index = std::stod(value);
-            if(index < 0 || index >= str->size){
-                cursor->setError("'String|*ANY_NUMBER*': Index("+Tools::removeTrailingZeros(index)+") is out of range(0-"+std::to_string(str->size)+")");
-                return new Item();
-            }
-            auto c = *(char*)((size_t)str->data + (int)index);
-            auto s = std::string("")+c;
-
-            return static_cast<Item*>(new String( s )); // increment ref count
-        });           
-        this->registerTrait("n", [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
-            if(subject->type == ItemTypes::NIL){
-                return subject;
-            }
-            return static_cast<Item*>(new Number( subject->size ));
-        });
-        this->registerTrait("reverse", [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
-            if(subject->type == ItemTypes::NIL){
-                return subject;
-            }
-            std::string result;
-            for(int i = 0; i < subject->size; ++i){
-                result += *(char*)((size_t)subject->data + subject->size-1 - i);
-            }
-            return static_cast<Item*>(new String( result ));
-        });                           
-    }
-
-    bool isEq(Item *item){
-        if(this->type != item->type || this->size != item->size){
-            return false;
-        }
-        for(int i = 0; i < this->size; ++i){
-            char cA = static_cast<uint8_t>(*(char*)((size_t)this->data + i));
-            char cB =  static_cast<uint8_t>(*(char*)((size_t)item->data + i));
-            if(cA != cB){
-                return false;
-            }
-        }
-
-        return true;
-    } 
-
-    void read(std::string &dst, uint32_t start, uint32_t amount = 0){
-        if(amount == 0){
-            amount =  this->size;
-        }
-        for(auto i = start; i < this->size; ++i){
-            dst += *static_cast<char*>( static_cast<char*>(this->data) + i );
-        }
-    }
-
-    void write(const std::string &str){
-        this->type = ItemTypes::STRING;
-        this->size = str.size();
-        this->data = malloc(this->size);
-        this->refc = 1;
-        memcpy(this->data, &str[0], str.size());
-    } 
-
-    std::string get(){
-        std::string r;
-        for(int i = 0; i < this->size; ++i){
-            r += static_cast<uint8_t>(*(char*)((size_t)this->data + i));
-        }        
-        return r;   
-    }
-
-};
-
 static std::string ItemToText(Item *item);
 
 struct List : Item {
@@ -622,6 +534,111 @@ struct List : Item {
 
 };
 
+struct String : Item {
+    
+    String(){
+        // Empty constructor makes this string NIL
+        registerTraits();
+    }
+
+    String(const std::string &str){
+        registerTraits();
+        this->write(str);
+    }    
+
+    void registerTraits(){ 
+        this->registerTrait(TraitType::ANY_NUMBER, [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+            if(subject->type == ItemTypes::NIL){
+                return subject;
+            }
+            auto str = static_cast<String*>(subject); 
+            auto index = std::stod(value);
+            if(index < 0 || index >= str->size){
+                cursor->setError("'String|*ANY_NUMBER*': Index("+Tools::removeTrailingZeros(index)+") is out of range(0-"+std::to_string(str->size)+")");
+                return new Item();
+            }
+            auto c = *(char*)((size_t)str->data + (int)index);
+            auto s = std::string("")+c;
+
+            return static_cast<Item*>(new String( s )); // increment ref count
+        });           
+        this->registerTrait("n", [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+            if(subject->type == ItemTypes::NIL){
+                return subject;
+            }
+            return static_cast<Item*>(new Number( subject->size ));
+        });
+        this->registerTrait("list", [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+            if(subject->type == ItemTypes::NIL){
+                return subject;
+            }
+            std::vector<Item*> all;
+
+            for(int i = 0; i < subject->size; ++i){
+                
+                auto c = *(char*)((size_t)subject->data + i);
+                auto s = std::string("")+c;
+
+                all.push_back(new String(s));
+            }
+
+
+            return static_cast<Item*>(new List(all));
+        });        
+        this->registerTrait("reverse", [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+            if(subject->type == ItemTypes::NIL){
+                return subject;
+            }
+            std::string result;
+            for(int i = 0; i < subject->size; ++i){
+                result += *(char*)((size_t)subject->data + subject->size-1 - i);
+            }
+            return static_cast<Item*>(new String( result ));
+        });                           
+    }
+
+    bool isEq(Item *item){
+        if(this->type != item->type || this->size != item->size){
+            return false;
+        }
+        for(int i = 0; i < this->size; ++i){
+            char cA = static_cast<uint8_t>(*(char*)((size_t)this->data + i));
+            char cB =  static_cast<uint8_t>(*(char*)((size_t)item->data + i));
+            if(cA != cB){
+                return false;
+            }
+        }
+
+        return true;
+    } 
+
+    void read(std::string &dst, uint32_t start, uint32_t amount = 0){
+        if(amount == 0){
+            amount =  this->size;
+        }
+        for(auto i = start; i < this->size; ++i){
+            dst += *static_cast<char*>( static_cast<char*>(this->data) + i );
+        }
+    }
+
+    void write(const std::string &str){
+        this->type = ItemTypes::STRING;
+        this->size = str.size();
+        this->data = malloc(this->size);
+        this->refc = 1;
+        memcpy(this->data, &str[0], str.size());
+    } 
+
+    std::string get(){
+        std::string r;
+        for(int i = 0; i < this->size; ++i){
+            r += static_cast<uint8_t>(*(char*)((size_t)this->data + i));
+        }        
+        return r;   
+    }
+
+};
+
 struct Context;
 struct Token;
 
@@ -641,7 +658,7 @@ struct FunctionConstraints {
     std::unordered_map<int, uint8_t> expectedTypeAt;
 
     FunctionConstraints(){
-        enabled = false;
+        enabled = true;
         allowNil = true;
         allowMisMatchingTypes = true;
         useMinParams = false;
@@ -1108,20 +1125,20 @@ struct Token {
     }
 };
 
-Token parseTokenWModifier(const std::string &input){
+Token parseTokenWModifier(const std::string &_input){
     std::string buffer;
     Token token;
+    std::string input = _input;
+    if(input[0] == '[' && input[input.size()-1] == ']'){
+        input = input.substr(1, input.length() - 2);
+    }
     for(int i = 0; i < input.length(); ++i){
         char c = input[input.length()-1 - i];
-        auto t = ModifierTypes::getToken(c);        
+        auto t = ModifierTypes::getToken(c);
         if(t != ModifierTypes::UNDEFINED){
-            if(buffer != "]"){ // This a dirty hack. but will do for now. it happens when using non-value modifiers such as ^
                 std::reverse(buffer.begin(), buffer.end());            
                 token.modifiers.push_back(ModifierPair(t, buffer));
-                buffer = "";            
-            }else{
-                token.modifiers.push_back(ModifierPair(t, ""));
-            }
+                buffer = "";   
         }else
         if(t == ModifierTypes::UNDEFINED && i == input.length()-1){
             buffer += c;
@@ -1149,10 +1166,11 @@ std::vector<Token> buildTokens(const std::vector<std::string> &literals, Cursor 
         // Simple can be inserted right away
         }else{
             auto token = parseTokenWModifier(literals[i]);
-
             if(token.first == "" && i > 0){ // This means this modifier belongs to the token before this one
                 auto &prev = tokens[tokens.size()-1];
-                prev.modifiers = token.modifiers;
+                for(int j = 0; j < token.modifiers.size(); ++j){
+                    prev.modifiers.push_back(token.modifiers[j]);
+                }
                 continue;
             }else{
                 tokens.push_back(token);
@@ -1233,11 +1251,11 @@ bool FunctionConstraints::test(const std::vector<Item*> &items, std::string &err
 
     if(expectedTypes.size() > 0){
         for(int i = 0; i < items.size(); ++i){
-            bool f = true;
+            bool f = false;
             for(int j = 0; j < this->expectedTypes.size(); ++j){
                 auto exType = this->expectedTypes[j];
-                if(items[i]->type != exType){
-                    f = false;
+                if(items[i]->type == exType){
+                    f = true;
                     break;
                 }
 
@@ -1288,7 +1306,7 @@ static Item *processPreInterpretModifiers(Item *item, std::vector<ModifierPair> 
                     cursor->setError("'"+ModifierTypes::str(ModifierTypes::SCOPE)+"': Trait '"+name+"' doesn't belong to '"+ItemTypes::str(item->type)+"' type");
                     return item;                      
                 }
-                return item->runTrait(name, "", cursor, ctx);
+                item = item->runTrait(name, "", cursor, ctx);
             } break;            
             case ModifierTypes::LINKER: {
 
@@ -1335,7 +1353,19 @@ static Item *interpret(const std::string &_input, Cursor *cursor, Context *ctx){
     if(cursor->error){
         return new Item();
     }    
+
+    // printList(literals);
+
     auto tokens = buildTokens(literals, cursor);
+
+
+    // for(int i = 0; i < tokens.size(); ++i){
+    //     std::cout << tokens[i].literal() << std::endl;
+    // }
+
+
+    // std::exit(1);
+
     return eval(tokens, cursor, ctx);
 }
 
@@ -2411,9 +2441,11 @@ static void addStandardOperators(Context *ctx){
 
     ctx->set("s-join", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
         FunctionConstraints consts;
+        // consts.setMinParams(2);
         consts.allowMisMatchingTypes = false;
         consts.allowNil = false;
         consts.setExpectType(ItemTypes::STRING);
+
         static const std::string name = "s-join";
         std::string errormsg;
         if(!consts.test(params, errormsg)){
@@ -2725,9 +2757,9 @@ int main(){
 
     // auto r = interpret(":", &cursor, &ctx);
 
-
-    auto r = interpret("[l-filter [fn [a][eq a 3]][1 2 3 4]]", &cursor, &ctx);
-    // r = interpret("if [lt 10 5][++ a][-- a][+ 1 1]", &cursor, &ctx);
+    // auto r = interpret("set a 'hola como estas?'|list", &cursor, &ctx);
+    auto r = interpret("s-join ['hola como estas?'|list]^", &cursor, &ctx);
+    // auto r = interpret("[1 2 [3 4 5]|n]", &cursor, &ctx);
     // auto r = interpret("[1 [28 28]^ 3]^ [4 5 6]^ [7 8 [99 99]^]^]", &cursor, &ctx);
 
     std::cout << ItemToText(r) << std::endl;
