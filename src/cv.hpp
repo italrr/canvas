@@ -1,20 +1,22 @@
-#ifndef CANVAS_INTERPRETER_HPP
-    #define CANVAS_INTERPRETER_HPP
+#ifndef CANVAS_HPP
+    #define CANVAS_HPP
 
-    #include <cstring>
-    #include <vector>
-    #include <memory>
-    #include <mutex>
-    #include <thread>
+    #include <string>
     #include <functional>
-    #include <sstream>
+    #include <memory>
     #include <unordered_map>
-    #include <iomanip>
-    #include <cmath>
+    #include <inttypes.h>    
+    #include <vector>
 
-    static const double CANVAS_LANG_VERSION[3] = {1, 0, 0};
+    #define __CV_NUMBER_NATIVE_TYPE double
+
+    static const __CV_NUMBER_NATIVE_TYPE CANVAS_LANG_VERSION[3] = { 1, 2, 0 };
 
     namespace CV {
+
+        namespace Tools {
+            bool isLineComplete(const std::string &input);
+        }
 
         namespace SupportedPlatform {
             enum SupportedPlatform : int {
@@ -78,210 +80,410 @@
             const static int PLATFORM = SupportedPlatform::UNSUPPORTED;
         #endif    
 
-    
-        static const std::vector<std::string> RESERVED_WORDS = {
-            "nil", "set", "proto", "fn",
-            "ret", "skip", "stop",
-            "if", "do", "iter",
-            "for", "rset"
+
+        struct Cursor {
+            bool error;
+            int line;
+            std::string message;
+            Cursor(){
+                error = false;
+                line = 1;
+                message = "";
+            }
+            void setError(const std::string &v, int line = -1){
+                if(line != -1){
+                    this->line = line;
+                }
+                this->error = true;
+                this->message = v;
+            }
         };
 
-        static bool isReserved(const std::string &word){
-            for(unsigned i = 0; i < RESERVED_WORDS.size(); ++i){
-                if(word == RESERVED_WORDS[i]){
-                    return true;
+
+        namespace ModifierTypes {
+            enum ModifierTypes : uint8_t {
+                UNDEFINED,
+                NAMER,
+                SCOPE,
+                LINKER,
+                EXPAND,
+                TRAIT
+            };
+            static uint8_t getToken(char mod){
+                if(mod == '~'){
+                    return ModifierTypes::NAMER;
+                }else
+                if(mod == ':'){
+                    return ModifierTypes::SCOPE;
+                }else
+                if(mod == '<'){
+                    return ModifierTypes::LINKER;
+                }else
+                if(mod == '|'){
+                    return ModifierTypes::TRAIT;
+                }else        
+                if(mod == '^'){
+                    return ModifierTypes::EXPAND;            
+                }else{
+                    return ModifierTypes::UNDEFINED;
                 }
             }
-            return false;
+            static std::string str(uint8_t type){
+                switch(type){
+                    case ModifierTypes::NAMER: {
+                        return "~";
+                    };
+                    case ModifierTypes::SCOPE: {
+                        return ":";
+                    };   
+                    case ModifierTypes::TRAIT: {
+                        return "|";
+                    };              
+                    case ModifierTypes::LINKER: {
+                        return "<";
+                    }; 
+                    case ModifierTypes::EXPAND: {
+                        return "^";
+                    };                          
+                    default: {
+                        return "";
+                    };       
+                }
+            }
         }
 
         namespace ItemTypes {
-            enum ItemTypes : unsigned {
+            enum ItemTypes : uint8_t {
                 NIL,
                 NUMBER,
                 STRING,
                 LIST,
-                PROTO,
+                CONTEXT,
                 FUNCTION,
-                INTERRUPT,
-                CONTEXT
+                INTERRUPT
             };
-        }
-        namespace InterruptTypes {
-            enum InterruptTypes : unsigned {
-                STOP,
-                SKIP,
-                RET		
-            };
-        }
-        namespace Tools {
-            unsigned genItemCountId();
-            bool isNumber(const std::string &s);
-            double positive(double n);
-            std::string filterEscapeChars(const std::string &input, bool remove = false);
-            bool isValidVarName(const std::string &s);
-            bool isString(const std::string &s);
-            std::vector<std::string> split(const std::string &str, const char sep);
-            bool isList(const std::string &s);
-            std::string removeExtraSpace(const std::string &in);
-            std::vector<std::string> parse(const std::string &input, std::string &error);
-            bool isLineComplete(const std::string &input);
-            int getModifiers(const std::string &input, std::unordered_map<std::string, std::string> &mods);
-            std::vector<std::string> getCleanTokens(std::string &input, std::string &error);
+            static std::string str(uint8_t type){
+                switch(type){
+                    case NIL: {
+                        return "NIL";
+                    };
+                    case NUMBER: {
+                        return "NUMBER";
+                    };  
+                    case STRING: {
+                        return "STRING";
+                    };  
+                    case LIST: {
+                        return "LIST";
+                    }; 
+                    case CONTEXT: {
+                        return "CONTEXT";
+                    };    
+                    case FUNCTION: {
+                        return "FUNCTION";
+                    }; 
+                    case INTERRUPT: {
+                        return "INTERRUPT";
+                    };    
+                    default: {
+                        return "UNDEFINED";
+                    };         
+                }
+            }
         }
 
-        struct Cursor {
-            int line;
-            int column;
-            bool error;
-            std::string message;
-            Cursor(){
-                line = 0;
-                column = 0;
-                error = false;
-                message = "";
+        namespace InterruptTypes {
+            enum InterruptTypes : uint8_t {
+                SKIP,
+                STOP
+            };
+            static std::string str(uint8_t type){
+                switch(type){
+                    case InterruptTypes::SKIP:{
+                        return "SKIP";
+                    };
+                    case InterruptTypes::STOP:{
+                        return "STOP";
+                    };    
+                    default: {
+                        return "UNDEFINED";    
+                    }        
+                }
             }
-            void setError(const std::string &message, int line, int column){
-                this->message = message;
-                this->line = line;
-                this->column = column;
-                this->error = true;
-            }
-            void setError(const std::string &message){
-                this->message = message;
-                this->error = true;
-            }
-        };        
+        }
+
+
+
+
+
+        namespace TraitType {
+            enum TraitType : uint8_t {
+                ANY_NUMBER,
+                ANY_STRING,
+                SPECIFIC
+            };
+        }
+
+
+        struct Item;
+        struct Context;
+        struct ItemContextPair;
+        
+        struct Trait {
+            std::string name;
+            uint8_t type;
+            std::function<std::shared_ptr<Item>(Item *subject, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx)> action;
+            Trait();
+        };
 
 
         struct Item {
-            std::string name;
-            unsigned id;
-            void *data;
-            unsigned size;
-            unsigned type;
-            bool temporary;
-            std::unordered_map<std::string,std::shared_ptr<Item>> members;
-            std::shared_ptr<Item> head;
+            uint8_t type;
+            std::unordered_map<std::string, Trait> traits;
+            std::unordered_map<uint8_t, Trait> traitsAny;
+
             Item();
-            void clear();
-            void write(void *data, size_t size, int type);
-            virtual std::shared_ptr<Item> copy();
 
-            void registerProperty(const std::string &name, const std::shared_ptr<Item> &v, bool onRealContext = false);
-
-            void deregisterProperty(const std::string &name);
-
-            std::shared_ptr<Item> findProperty(const std::string &name);
-            Item *findContext(const std::string &name);
-            Item *findRealContext();
-
-            std::shared_ptr<CV::Item> findAndSetProperty(const std::string &name, const std::shared_ptr<CV::Item> &v);
-            std::shared_ptr<Item> getProperty(const std::string &name);
-            virtual std::string str(bool singleLine = false) const;
-
-            virtual operator std::string() const;
-        };
-
-        std::shared_ptr<Item> create(double n);
-        std::shared_ptr<Item> infer(const std::string &input, std::shared_ptr<Item> &ctx, Cursor *cursor);
-        std::shared_ptr<Item> eval(const std::string &input, std::shared_ptr<Item> &ctx, Cursor *cursor);
-        
-
-
-        struct NumberType : Item {
-
-
-            NumberType();
-            ~NumberType();
-            void set(int n);
-            void set(float n);
-            void set(double n);
-            double get();
-
-            std::shared_ptr<Item> copy();
-
-            std::string str(bool singleLine = false) const;
-
-        };
-
-        struct StringType : Item {
-            std::string literal;
-            StringType();
-            std::shared_ptr<Item> copy();
-            std::shared_ptr<Item> get(int index);
-            void set(const std::string &v);
-            std::string str(bool singleLine = false) const;
-        };
-
-        struct ListType : Item {
-            std::vector<std::shared_ptr<Item>> list;
-            ListType(int n = 0);
-            void build(const std::vector<std::shared_ptr<Item>> &objects);
-            void add(const std::shared_ptr<Item> &item);
-            std::shared_ptr<Item> get(int index);
-            std::shared_ptr<Item> copy();
-            std::string str(bool singleLine = false) const;
-        };
-
-
-        struct FunctionType : Item {
-            std::function<std::shared_ptr<Item>(const std::vector<std::shared_ptr<Item>> &operands, std::shared_ptr<Item> &ctx, Cursor *cursor)> lambda;
-            std::vector<std::string> params;
-            std::string body;
-            bool inner;
-            FunctionType();
-            FunctionType(const std::function<std::shared_ptr<Item>(const std::vector<std::shared_ptr<Item>> &operands, std::shared_ptr<Item> &ctx, Cursor *cursor)> &lambda,
-                        const std::vector<std::string> &params = {});
+            void registerTrait(uint8_t type, const std::function<std::shared_ptr<Item>(Item *subject, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx)> &action);
             
-            void set(const std::string &body, const std::vector<std::string> &params = {});
+            void registerTrait(const std::string &name, const std::function<std::shared_ptr<Item>(Item *subject, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx)> &action);
             
-            std::shared_ptr<Item> copy();
-            std::string str(bool singleLine = false) const;
+            std::shared_ptr<Item> runTrait(const std::string &name, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx);
+
+            std::shared_ptr<Item> runTrait(uint8_t type, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx);   
+
+            bool hasTrait(const std::string &name);
+
+            bool hasTrait(uint8_t type);
+                
+            virtual void registerTraits(){ }
+
+            virtual bool isEq(std::shared_ptr<Item> &item);
+            virtual std::shared_ptr<Item> copy(bool deep = true) const;
+
+            virtual bool clear(bool deep = true);
         };
 
-        struct InterruptType : Item {
-            int intype;
+        struct Interrupt : Item {
+            uint8_t intType;
             std::shared_ptr<Item> payload;
-            std::shared_ptr<Item> copy();
-            InterruptType(int intype = InterruptTypes::STOP, std::shared_ptr<Item> payload = std::make_shared<Item>(Item()));
-            std::string str(bool singleLine = false) const;
+
+            Interrupt(uint8_t intType);
+
+            std::shared_ptr<Item> copy(bool deep = true) const; 
+
+            bool hasPayload();
+
+            void setPayload(std::shared_ptr<Item> &item);
+
+            std::shared_ptr<Item> getPayload();
+
         };
 
-        struct ProtoType : Item {
 
-            ProtoType();
-            void populate(const std::vector<std::string> &names, const std::vector<std::shared_ptr<Item>> &values, std::shared_ptr<Item> &ctx, Cursor *cursor);
+        struct Number : Item {
+            __CV_NUMBER_NATIVE_TYPE n;
 
-            void add(const std::string &name, std::shared_ptr<Item> &item, std::shared_ptr<Item> &ctx, Cursor *cursor);
+            Number();
+            Number(__CV_NUMBER_NATIVE_TYPE v);
 
-            std::vector<std::string> getKeys();
-            // std::shared_ptr<Item> copy(){
-            // 	auto copied = std::shared_ptr<MOCK>(new MOCK());
-            // 	for(auto &it : this->items){
-            // 		copied->items[it.first] = it.second;
-            // 	}
-            // 	return std::static_pointer_cast<Item>(copied);
-            // }
+            bool isEq(std::shared_ptr<Item> &item);
 
-            std::string str(bool singleLine = false) const;
+            void registerTraits();
+
+            std::shared_ptr<Item> copy(bool deep = true) const;
+
+            void set(const __CV_NUMBER_NATIVE_TYPE v);
             
+            __CV_NUMBER_NATIVE_TYPE get();
 
         };
 
-        std::shared_ptr<CV::Item> create(double n);
-        std::shared_ptr<CV::Item> createContext(const std::shared_ptr<CV::Item> &head, bool temporary);
-        std::shared_ptr<CV::ListType> createList(int n);
-        std::shared_ptr<CV::ProtoType> createProto();
-        std::shared_ptr<CV::StringType> createString(const std::string &str = "");
 
 
-        std::shared_ptr<Item> infer(const std::string &input, std::shared_ptr<Item> &ctx, Cursor *cursor);
-        std::shared_ptr<Item> eval(const std::string &input, std::shared_ptr<Item> &ctx, Cursor *cursor);
+        struct List : Item {
 
-        std::string printContext(CV::Item *ctx, bool ignoreInners = true);
+            std::vector<std::shared_ptr<Item>> data;
 
-        void registerEmbeddedOperators(std::shared_ptr<CV::Item> &ctx);
+            List();
+
+            List(const std::vector<std::shared_ptr<Item>> &list, bool toCopy = true);
+
+            void registerTraits();
+
+            std::shared_ptr<Item> copy(bool deep = true) const;
+
+            void set(const std::vector<std::shared_ptr<Item>> &list, bool toCopy = true);
+
+            std::shared_ptr<Item> get(size_t index) const;
+
+            bool clear(bool deep = true);      
+
+        };
+
+
+
+        struct String : Item {
+            
+            std::string data;
+
+            String();
+            String(const std::string &str);  
+
+            void registerTraits();
+
+            bool isEq(std::shared_ptr<CV::Item> &item);
+
+            std::shared_ptr<CV::Item> copy(bool deep = true) const;
+
+            void set(const std::string &str);
+
+            std::string &get();
+
+        };
+
+
+
+        struct Function : Item {
+            std::string body;
+            std::vector<std::string> params;
+            bool binary;
+            bool variadic;
+            std::function< std::shared_ptr<CV::Item> (const std::vector<std::shared_ptr<CV::Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx) > fn;
+
+            Function();
+            Function(const std::vector<std::string> &params, const std::string &body, bool variadic = false);
+            Function(const std::vector<std::string> &params, const std::function<std::shared_ptr<CV::Item> (const std::vector<std::shared_ptr<CV::Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx)> &fn, bool variadic = false);
+            void registerTraits();
+            void set(const std::vector<std::string> &params, const std::string &body, bool variadic);
+            void set(const std::vector<std::string> &params, const std::function<std::shared_ptr<CV::Item> (const std::vector<std::shared_ptr<CV::Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx)> &fn, bool variadic);
+            
+        };    
+
+
+        struct Context : Item {
+            std::unordered_map<std::string, std::shared_ptr<CV::Item>> vars;
+            std::shared_ptr<Context> head;
+
+            std::shared_ptr<CV::Item> get(const std::string &name);
+
+            std::shared_ptr<CV::Item> copy(bool deep = true) const;
+
+            void setTop(std::shared_ptr<Context> &nctx);
+            ItemContextPair getWithContext(const std::string &name);
+            ItemContextPair getWithContext(std::shared_ptr<CV::Item> &item);
+            std::shared_ptr<CV::Item> set(const std::string &name, const std::shared_ptr<CV::Item> &item);
+            Context();
+            Context(std::shared_ptr<Context> &ctx);
+
+            bool clear(bool deep = true);
+
+            void debug();
+
+        };
+
+        struct ItemContextPair {
+            Item *item;
+            Context *context;
+            std::string name;
+            ItemContextPair(){
+                item = NULL;   
+                context = NULL;
+            }
+            ItemContextPair(Item *item, Context *ctx, const std::string &name){
+                this->item = item;
+                this->context = ctx;
+                this->name = name;
+            }
+        };         
+
+        struct FunctionConstraints {
+            bool enabled;
+
+            bool useMinParams;
+            int minParams;
+
+            bool useMaxParams;
+            int maxParams;
+
+            bool allowMisMatchingTypes;
+            bool allowNil;
+
+            std::vector<uint8_t> expectedTypes;
+            std::unordered_map<int, uint8_t> expectedTypeAt;
+
+            FunctionConstraints();
+
+            void setExpectType(uint8_t type);
+
+            void setExpectedTypeAt(int pos, uint8_t type);
+
+            void clearExpectedTypes();
+
+            void setMaxParams(unsigned n);
+            void setMinParams(unsigned n);
+
+            bool test(List *list, std::string &errormsg);
+            bool test(const std::vector<std::shared_ptr<CV::Item>> &items, std::string &errormsg);
+
+        };        
+
+
+        struct ModifierPair {
+            uint8_t type;
+            std::string subject;
+            ModifierPair(){
+                type = ModifierTypes::UNDEFINED;
+            }
+            ModifierPair(uint8_t type, const std::string &subject){
+                this->type = type;
+                this->subject = subject;
+
+            }
+        };
+
+        struct ModifierEffect {
+            bool expand;
+            bool ctxSwitch;
+            std::shared_ptr<Context> toCtx;
+            std::string named;
+            ModifierEffect(){
+
+            }
+            void reset(){
+                this->expand = false;
+                this->ctxSwitch = false;
+            }
+        };
+
+        struct Token {
+            std::string first;
+            std::vector<CV::ModifierPair> modifiers;
+            CV::ModifierPair getModifier(uint8_t type) const {
+                for(int i = 0; i < modifiers.size(); ++i){
+                    if(modifiers[i].type == type){
+                        return modifiers[i];
+                    }
+                }
+                return CV::ModifierPair();
+            }
+            std::string literal() const {
+                std::string part = "<"+this->first+">";
+                for(int i = 0; i < modifiers.size(); ++i){
+                    auto &mod = modifiers[i];
+                    part += "("+CV::ModifierTypes::str(mod.type)+mod.subject+")";
+                }
+                return part;
+            }
+        };
+
+
+
+        void AddStandardOperators(std::shared_ptr<CV::Context> &ctx);
+        std::shared_ptr<CV::Item> interpret(const std::string &input, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx);
+        std::shared_ptr<CV::Item>  interpret(const CV::Token &token, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx);
+        std::string ItemToText(CV::Item *item);
+
     }
 
 #endif
