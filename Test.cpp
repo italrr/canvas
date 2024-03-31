@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <functional>
 #include <iostream>
+#include <memory>
 #include <algorithm>
 #include <string>
 #include <vector>
@@ -212,11 +213,11 @@ namespace TraitType {
 struct Trait {
     std::string name;
     uint8_t type;
-    std::function<Item*(Item* subject, const std::string &value, Cursor *cursor, Context *ctx)> action;
+    std::function<std::shared_ptr<Item>(Item *subject, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx)> action;
     Trait(){
         this->type = TraitType::SPECIFIC;
-        this->action = [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
-            return (Item*)NULL;
+        this->action = [](Item *subject, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx){
+            return std::shared_ptr<Item>(NULL);
         };
     }
 };
@@ -224,44 +225,34 @@ struct Trait {
 
 struct Item {
     uint8_t type;
-    uint32_t size;
-    void *data;
-    uint32_t refc;
     std::unordered_map<std::string, Trait> traits;
     std::unordered_map<uint8_t, Trait> traitsAny;
 
     Item(){
         registerTraits();
-        setToNil();
+        this->type = ItemTypes::NIL;
     }
-    void incRefC(){
-        ++this->refc;
-    }
-    void decRefC(){
-        if(this->refc == 0) return;
-        --this->refc;
-        deconstruct();
-    }
-    
-    void registerTrait(uint8_t type, const std::function<Item*(Item* subject, const std::string &value, Cursor *cursor, Context *ctx)> &action){
+
+    void registerTrait(uint8_t type, const std::function<std::shared_ptr<Item>(Item *subject, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx)> &action){
         Trait trait;
         trait.action = action;
         trait.type = type;
         this->traitsAny[type] = trait;
     }    
     
-    void registerTrait(const std::string &name, const std::function<Item*(Item* subject, const std::string &value, Cursor *cursor, Context *ctx)> &action){
+    void registerTrait(const std::string &name, const std::function<std::shared_ptr<Item>(Item *subject, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx)> &action){
         Trait trait;
         trait.name = name;
         trait.action = action;
         this->traits[name] = trait;
     }
 
-    Item *runTrait(const std::string &name, const std::string &value, Cursor *cursor, Context *ctx){
-        return this->traits.find(name)->second.action(this, value, cursor, ctx);
+    std::shared_ptr<Item> runTrait(const std::string &name, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx){
+        auto &trait = this->traits.find(name)->second;
+        return trait.action( this, value, cursor, ctx);
     }
 
-    Item *runTrait(uint8_t type, const std::string &value, Cursor *cursor, Context *ctx){
+    std::shared_ptr<Item> runTrait(uint8_t type, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx){
         return this->traitsAny.find(type)->second.action(this, value, cursor, ctx);
     }    
 
@@ -287,81 +278,53 @@ struct Item {
 
     }
 
-    virtual bool isEq(Item *item){
-        return (this->type == ItemTypes::NIL && item->type == ItemTypes::NIL) || this == item;
+    virtual bool isEq(std::shared_ptr<Item> &item){
+        return (this->type == ItemTypes::NIL && item->type == ItemTypes::NIL) || this == item.get();
     }
-    virtual Item *copy(bool deep = true) const {
-        auto item = new Item();
-        item->size = this->size;
-        item->data = malloc(this->size);
-        item->type = this->type;
-        item->refc = 1;
-        memcpy(item->data, this->data, this->size);
-        return item;
+    virtual std::shared_ptr<Item> copy(bool deep = true) const {
+        return std::make_shared<Item>(Item());
     }
-    void deconstruct(){
-        // if(this->refc == 0 || this->type == ItemTypes::NIL){
-        //     return;
-        // }
-        // --this->refc;
-        // if(this->refc == 0){
-        //     this->clear();
-        // }
-    }
-    void setToNil(){
-        this->data = NULL;
-        this->size = 0;
-        this->refc = 0;
-        this->type = ItemTypes::NIL;        
-    }
+
     virtual bool clear(bool deep = true){
         if(this->type == ItemTypes::NIL){
             return false;
         }
-        // free(this->data);
-        // this->setToNil();
+
         return true;
     }
 };
 
 struct Interrupt : Item {
     uint8_t intType;
+    std::shared_ptr<Item> payload;
 
     Interrupt(uint8_t intType){
         this->type = ItemTypes::INTERRUPT;
         this->intType = intType;
-        this->size = 0;
     }
 
-    Item *copy(bool deep = true) const {
-        auto item = new Interrupt(this->intType);
-        item->size = this->size;
-        item->type = this->type;
-        item->data = malloc(this->size);
-        memcpy(item->data, this->data, this->size);
-        return item;
+    std::shared_ptr<Item> copy(bool deep = true) const {
+        auto item = std::make_shared<Interrupt>(this->intType);
+        item->payload = this->payload;
+        return std::static_pointer_cast<Item>(item);
     }  
 
     bool hasPayload(){
-        return this->size != 0;
+        return this->payload.get() != NULL;
     }
 
-    void setPayload(Item *item){
-        if(this->size == 0){
-            this->size = sizeof(size_t);
-            this->data = malloc(this->size);
-        }
-        size_t address = (size_t)item;   
-        memcpy((void*)((size_t)this->data), &address, sizeof(size_t));
+    void setPayload(std::shared_ptr<Item> &item){
+        this->payload = item;
     }
 
-    Item *getPayload(){
-        return this->size > 0 ? static_cast<Item*>((void*)*(size_t*)((size_t)this->data)) : NULL;
+    std::shared_ptr<Item> getPayload(){
+        return this->payload;
     }
 
 };
 
 struct Number : Item {
+    __CV_NUMBER_NATIVE_TYPE n;
 
     Number(){
         registerTraits();
@@ -369,68 +332,51 @@ struct Number : Item {
 
     Number(__CV_NUMBER_NATIVE_TYPE v){
         registerTraits();        
-        write(v);
+        set(v);
     }
 
-    bool isEq(Item *item){
-        return  item->type == this->type && *static_cast<__CV_NUMBER_NATIVE_TYPE*>(this->data)
-                == *static_cast<__CV_NUMBER_NATIVE_TYPE*>(item->data);
+    bool isEq(std::shared_ptr<Item> &item){
+        return item->type == this->type && this->n == std::static_pointer_cast<Number>(item)->n;
     }    
 
     void registerTraits(){
-        this->registerTrait("is-neg", [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+        this->registerTrait("is-neg", [](Item *subject, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx){
             if(subject->type == ItemTypes::NIL){
-                return subject;
+                return std::make_shared<Item>();
             }
-            return static_cast<Item*>(new Number(  *static_cast<__CV_NUMBER_NATIVE_TYPE*>(subject->data) < 0 ? 1 : 0 ));
+            return std::static_pointer_cast<Item>(std::make_shared<Number>(Number(static_cast<Number*>(subject)->n < 0)));
         });
-        this->registerTrait("inv", [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+        this->registerTrait("inv", [](Item *subject, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx){
             if(subject->type == ItemTypes::NIL){
-                return subject;
+                return std::make_shared<Item>();
             }
-            return static_cast<Item*>(new Number(  *static_cast<__CV_NUMBER_NATIVE_TYPE*>(subject->data) * -1 ));
+            return std::static_pointer_cast<Item>(std::make_shared<Number>(Number(static_cast<Number*>(subject)->n * -1)));
         });    
-        this->registerTrait("is-odd", [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+        this->registerTrait("is-odd", [](Item *subject, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx){
             if(subject->type == ItemTypes::NIL){
-                return subject;
+                return std::make_shared<Item>();
             }
-            return static_cast<Item*>(new Number(  (int)(*static_cast<__CV_NUMBER_NATIVE_TYPE*>(subject->data)) % 2 != 0 ));
+            return std::static_pointer_cast<Item>(std::make_shared<Number>(Number( (int)static_cast<Number*>(subject)->n % 2 != 0)));
         });   
-        this->registerTrait("is-even", [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+        this->registerTrait("is-even", [](Item *subject, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx){
             if(subject->type == ItemTypes::NIL){
-                return subject;
+                return std::make_shared<Item>();
             }
-            return static_cast<Item*>(new Number(  (int)(*static_cast<__CV_NUMBER_NATIVE_TYPE*>(subject->data)) % 2 == 0 ));
+            return std::static_pointer_cast<Item>(std::make_shared<Number>(Number( (int)static_cast<Number*>(subject)->n % 2 == 0)));
         });                       
     }
 
-    Item *copy(bool deep = true) const {
-        auto item = new Number();
-        item->size = this->size;
-        item->data = malloc(this->size);
-        item->type = this->type;
-        item->refc = 1;
-        memcpy(item->data, this->data, this->size);
-        return item;
+    std::shared_ptr<Item> copy(bool deep = true) const {
+        return std::make_shared<Number>(Number(this->n));
     }    
 
-    void write(const __CV_NUMBER_NATIVE_TYPE v){
+    void set(const __CV_NUMBER_NATIVE_TYPE v){
         this->type = ItemTypes::NUMBER;
-        this->size = sizeof(__CV_NUMBER_NATIVE_TYPE);
-        this->data = malloc(this->size);
-        this->refc = 1;        
-        memcpy(this->data, &v, sizeof(__CV_NUMBER_NATIVE_TYPE));
-    }
-
-    void read(__CV_NUMBER_NATIVE_TYPE *v){
-        if(this->type == ItemTypes::NIL){
-            return;
-        }
-        memcpy(v, this->data, sizeof(__CV_NUMBER_NATIVE_TYPE));
+        this->n = v;
     }
     
     __CV_NUMBER_NATIVE_TYPE get(){
-        return this->type == ItemTypes::NIL ? 0 : *static_cast<__CV_NUMBER_NATIVE_TYPE*>(this->data);
+        return this->n;
     }
 
 };
@@ -439,96 +385,73 @@ static std::string ItemToText(Item *item);
 
 struct List : Item {
 
+    std::vector<std::shared_ptr<Item>> data;
+
     List(){
         registerTraits();
     }
 
-    List(const std::vector<Item*> &list, bool toCopy = true){
+    List(const std::vector<std::shared_ptr<Item>> &list, bool toCopy = true){
         registerTraits();        
-        write(list, toCopy);
+        set(list, toCopy);
     }
 
     void registerTraits(){
-        this->registerTrait(TraitType::ANY_NUMBER, [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+        this->registerTrait(TraitType::ANY_NUMBER, [](Item *subject, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx){
             if(subject->type == ItemTypes::NIL){
-                return subject;
+                return std::make_shared<Item>();
             }
             auto list = static_cast<List*>(subject); 
             auto index = std::stod(value);
-            if(index < 0 || index >= list->size){
-                cursor->setError("'List|*ANY_NUMBER*': Index("+Tools::removeTrailingZeros(index)+") is out of range(0-"+std::to_string(list->size)+")");
-                return new Item();
+            if(index < 0 || index >= list->data.size()){
+                cursor->setError("'List|*ANY_NUMBER*': Index("+Tools::removeTrailingZeros(index)+") is out of range(0-"+std::to_string(list->data.size())+")");
+                return std::make_shared<Item>(Item());
             }
-            return list->get(index); // increment ref count
+            return list->get(index); 
         });        
-        this->registerTrait("n", [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+        this->registerTrait("n", [](Item *subject, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx){
             if(subject->type == ItemTypes::NIL){
-                return subject;
+                return std::make_shared<Item>();
             }
-            return static_cast<Item*>(new Number( subject->size ));
+            auto list = static_cast<List*>(subject); 
+            return std::static_pointer_cast<Item>(std::make_shared<Number>(Number(list->data.size())));
         });
-        this->registerTrait("reverse", [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+        this->registerTrait("reverse", [](Item *subject, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx){
             if(subject->type == ItemTypes::NIL){
-                return subject;
+                return std::make_shared<Item>();
             }
-            std::vector<Item*> result;
-            auto list = static_cast<List*>(subject);
-            for(int i = 0; i < list->size; ++i){
-                result.push_back(list->get(list->size-1 - i));
+            std::vector<std::shared_ptr<Item>> result;
+            auto list = static_cast<List*>(subject); 
+            for(int i = 0; i < list->data.size(); ++i){
+                result.push_back(list->data[list->data.size()-1 - i]);
             }
-            return static_cast<Item*>(new List(result));
+            return std::static_pointer_cast<Item>(std::make_shared<List>(List(result)));
         });                           
     }
 
-    Item *copy(bool deep = true) const {
-        auto item = new List();
-        item->size = this->size;
-        item->type = this->type;
-        item->refc = 1;
-        item->data = malloc(this->size * sizeof(size_t));       
-
-        for(int i = 0; i < this->size; ++i){
-            auto copy = this->get(i)->copy();
-            size_t address = (size_t)copy;   
-            memcpy((void*)((size_t)item->data + i * sizeof(size_t)), &address, sizeof(size_t));
+    std::shared_ptr<Item> copy(bool deep = true) const {
+        auto nlist = std::make_shared<List>(List());
+        for(int i = 0; i < this->data.size(); ++i){
+            nlist->data.push_back(deep ? this->data[i]->copy() : this->data[i]);
         }        
-
-        return item;
+        return std::static_pointer_cast<Item>(nlist);
     }
 
-    void write(const std::vector<Item*> &list, bool toCopy = true){
-
+    void set(const std::vector<std::shared_ptr<Item>> &list, bool toCopy = true){
         this->type = ItemTypes::LIST;
-        this->size = list.size();
-        this->refc = 1;
-        this->data = malloc(this->size * sizeof(size_t));
-
         for(int i = 0; i < list.size(); ++i){
-            auto copy = toCopy ? list[i]->copy() : list[i];
-            size_t address = (size_t)copy;   
-            memcpy((void*)((size_t)this->data + i * sizeof(size_t)), &address, sizeof(size_t));
-        }
+            this->data.push_back(toCopy ? list[i]->copy() : list[i]);
+        }        
     }
 
-    Item *get(size_t index) const {
-        // This insane dereference can be improved
-        // maybe later
-        return static_cast<Item*>((void*)*(size_t*)((size_t)this->data + index * sizeof(size_t)));
+    std::shared_ptr<Item> get(size_t index) const {
+        return this->data[index];
     }
 
     bool clear(bool deep = true){
         if(this->type == ItemTypes::NIL){
             return false;
         }
-        // if(deep){
-        //     for(int i = 0; i < this->size; ++i){
-        //         size_t address = (size_t)this->data + i * sizeof(size_t);
-        //         Item *item = (Item*)( (void*)address );
-        //         // item->decRefC();
-        //     }
-        // }
-        // free(this->data);
-        // this->setToNil();
         return true;
     }       
 
@@ -536,6 +459,8 @@ struct List : Item {
 
 struct String : Item {
     
+    std::string data;
+
     String(){
         // Empty constructor makes this string NIL
         registerTraits();
@@ -543,98 +468,78 @@ struct String : Item {
 
     String(const std::string &str){
         registerTraits();
-        this->write(str);
+        this->set(str);
     }    
 
     void registerTraits(){ 
-        this->registerTrait(TraitType::ANY_NUMBER, [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+        this->registerTrait(TraitType::ANY_NUMBER, [](Item *subject, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx){
             if(subject->type == ItemTypes::NIL){
-                return subject;
+                return std::make_shared<Item>();
             }
-            auto str = static_cast<String*>(subject); 
+            auto str = static_cast<String*>(subject);
             auto index = std::stod(value);
-            if(index < 0 || index >= str->size){
-                cursor->setError("'String|*ANY_NUMBER*': Index("+Tools::removeTrailingZeros(index)+") is out of range(0-"+std::to_string(str->size)+")");
-                return new Item();
+            if(index < 0 || index >= str->data.size()){
+                cursor->setError("'String|*ANY_NUMBER*': Index("+Tools::removeTrailingZeros(index)+") is out of range(0-"+std::to_string(str->data.size())+")");
+                return std::make_shared<Item>(Item());
             }
-            auto c = *(char*)((size_t)str->data + (int)index);
-            auto s = std::string("")+c;
-
-            return static_cast<Item*>(new String( s )); // increment ref count
+            return std::static_pointer_cast<Item>(std::make_shared<String>(String(  std::string("")+str->data[index]  )));
         });           
-        this->registerTrait("n", [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+        this->registerTrait("n", [](Item *subject, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx){
             if(subject->type == ItemTypes::NIL){
-                return subject;
+                return std::make_shared<Item>();
             }
-            return static_cast<Item*>(new Number( subject->size ));
+            auto str = static_cast<String*>(subject);
+            return std::static_pointer_cast<Item>(std::make_shared<Number>(Number( str->data.size() )));
         });
-        this->registerTrait("list", [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+        this->registerTrait("list", [](Item *subject, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx){
             if(subject->type == ItemTypes::NIL){
-                return subject;
+                return std::make_shared<Item>();
             }
-            std::vector<Item*> all;
+            std::vector<std::shared_ptr<Item>> result;
+            auto str = static_cast<String*>(subject);
 
-            for(int i = 0; i < subject->size; ++i){
-                
-                auto c = *(char*)((size_t)subject->data + i);
-                auto s = std::string("")+c;
-
-                all.push_back(new String(s));
+            for(int i = 0; i < str->data.size(); ++i){
+                result.push_back(std::static_pointer_cast<Item>(std::make_shared<String>(String(  std::string("")+str->data[i]  ))));
             }
 
 
-            return static_cast<Item*>(new List(all));
+            return std::static_pointer_cast<Item>(std::make_shared<List>(List(result)));
         });        
-        this->registerTrait("reverse", [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+        this->registerTrait("reverse", [](Item *subject, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx){
             if(subject->type == ItemTypes::NIL){
-                return subject;
+                return std::make_shared<Item>();
             }
             std::string result;
-            for(int i = 0; i < subject->size; ++i){
-                result += *(char*)((size_t)subject->data + subject->size-1 - i);
+            auto str = static_cast<String*>(subject);
+
+            for(int i = 0; i < str->data.size(); ++i){
+                result += str->data[str->data.size()-1 - i];
             }
-            return static_cast<Item*>(new String( result ));
+            return std::static_pointer_cast<Item>(std::make_shared<String>(String(  result  )));
+
         });                           
     }
 
-    bool isEq(Item *item){
-        if(this->type != item->type || this->size != item->size){
+    bool isEq(std::shared_ptr<Item> &item){
+        if(this->type != item->type || this->data.size() != std::static_pointer_cast<String>(item)->data.size()){
             return false;
         }
-        for(int i = 0; i < this->size; ++i){
-            char cA = static_cast<uint8_t>(*(char*)((size_t)this->data + i));
-            char cB =  static_cast<uint8_t>(*(char*)((size_t)item->data + i));
-            if(cA != cB){
-                return false;
-            }
-        }
-
-        return true;
+        return this->data == std::static_pointer_cast<String>(item)->data;
     } 
 
-    void read(std::string &dst, uint32_t start, uint32_t amount = 0){
-        if(amount == 0){
-            amount =  this->size;
-        }
-        for(auto i = start; i < this->size; ++i){
-            dst += *static_cast<char*>( static_cast<char*>(this->data) + i );
-        }
+    std::shared_ptr<Item> copy(bool deep = true) const {
+        auto copied = std::make_shared<String>(String());
+        copied->set(this->data);
+        return copied;
     }
 
-    void write(const std::string &str){
+    void set(const std::string &str){
         this->type = ItemTypes::STRING;
-        this->size = str.size();
-        this->data = malloc(this->size);
-        this->refc = 1;
-        memcpy(this->data, &str[0], str.size());
+        this->data = str;
     } 
 
-    std::string get(){
-        std::string r;
-        for(int i = 0; i < this->size; ++i){
-            r += static_cast<uint8_t>(*(char*)((size_t)this->data + i));
-        }        
-        return r;   
+    std::string &get(){     
+        return this->data;   
     }
 
 };
@@ -699,7 +604,7 @@ struct FunctionConstraints {
     }
 
     bool test(List *list, std::string &errormsg);
-    bool test(const std::vector<Item*> &items, std::string &errormsg);
+    bool test(const std::vector<std::shared_ptr<Item>> &items, std::string &errormsg);
 
 };
 struct Function : Item {
@@ -707,7 +612,7 @@ struct Function : Item {
     std::vector<std::string> params;
     bool binary;
     bool variadic;
-    std::function< Item* (const std::vector<Item*> &params, Cursor *cursor, Context *ctx) > fn;
+    std::function< std::shared_ptr<Item> (const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx) > fn;
     FunctionConstraints constraints;
 
     Function(){
@@ -719,43 +624,44 @@ struct Function : Item {
         set(params, body, variadic);
     }
 
-    Function(const std::vector<std::string> &params, const std::function<Item*(const std::vector<Item*> &params, Cursor *cursor, Context *ctx)> &fn, bool variadic = false){
+    Function(const std::vector<std::string> &params, const std::function<std::shared_ptr<Item> (const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx)> &fn, bool variadic = false){
         registerTraits();
         set(params, fn, variadic);
     }    
 
 
     void registerTraits(){
-        this->registerTrait("is-variadic", [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+        this->registerTrait("is-variadic", [](Item *subject, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx){
             if(subject->type == ItemTypes::NIL){
-                return subject;
+                return std::make_shared<Item>();
             }
             auto func = static_cast<Function*>(subject);
-            return static_cast<Item*>(new Number( func->variadic ));
+            return std::static_pointer_cast<Item>(std::make_shared<Number>(Number( func->variadic )));
         });
 
-        this->registerTrait("is-binary", [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+        this->registerTrait("is-binary", [](Item *subject, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx){
             if(subject->type == ItemTypes::NIL){
-                return subject;
+                return std::make_shared<Item>();
             }
             auto func = static_cast<Function*>(subject);
-            return static_cast<Item*>(new Number( func->binary ));
+            return std::static_pointer_cast<Item>(std::make_shared<Number>(Number( func->binary )));
         }); 
 
-        this->registerTrait("n-args", [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+        this->registerTrait("n-args", [](Item *subject, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx){
             if(subject->type == ItemTypes::NIL){
-                return subject;
+                return std::make_shared<Item>();
             }
             auto func = static_cast<Function*>(subject);
-            return static_cast<Item*>(new Number( func->params.size() ));
+            return std::static_pointer_cast<Item>(std::make_shared<Number>(Number( func->params.size()  )));            
         });   
 
-        this->registerTrait("proto", [](Item* subject, const std::string &value, Cursor *cursor, Context *ctx){
+        this->registerTrait("proto", [](Item *subject, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx){
             if(subject->type == ItemTypes::NIL){
-                return subject;
+                return std::make_shared<Item>();
             }
             auto func = static_cast<Function*>(subject);
-            return static_cast<Item*>(new String( func->binary ? "[]" : func->body ));
+            return std::static_pointer_cast<Item>(std::make_shared<String>(String(  func->binary ? "[]" : func->body  )));
+            
         });                       
                            
     }
@@ -764,14 +670,14 @@ struct Function : Item {
         this->body = body;
         this->params = params;
         this->type = ItemTypes::FUNCTION;
-        this->fn = [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
-            return (Item*)NULL;
+        this->fn = [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
+            return std::shared_ptr<Item>(NULL);
         };
         this->binary = false;
         this->variadic = variadic;
     }
 
-    void set(const std::vector<std::string> &params, const std::function<Item*(const std::vector<Item*> &params, Cursor *cursor, Context *ctx)> &fn, bool variadic){
+    void set(const std::vector<std::string> &params, const std::function<std::shared_ptr<Item> (const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx)> &fn, bool variadic){
         this->params = params;
         this->type = ItemTypes::FUNCTION;
         this->fn = fn;
@@ -799,36 +705,37 @@ struct ItemContextPair {
 
 static std::string ItemToText(Item *item);
 struct Context : Item {
-    std::unordered_map<std::string, Item*> vars;
-    Context *head;
+    std::unordered_map<std::string, std::shared_ptr<Item>> vars;
+    std::shared_ptr<Context> head;
 
-    Item *get(const std::string &name){
+    std::shared_ptr<Item> get(const std::string &name){
         auto it = vars.find(name);
         if(it == vars.end()){
-            return this->head ? this->head->get(name) : NULL;
+            return this->head ? this->head->get(name) : std::shared_ptr<Item>(NULL);
         }
         return it->second;
     }
 
-    Item *copy(bool deep = true) const {
+    std::shared_ptr<Item> copy(bool deep = true) const {
 
-        auto item = new Context();
+        auto item = std::make_shared<Context>(Context());
         item->type = this->type;  
         item->head = this->head;    
 
         for(auto &it : this->vars){
-            item->vars[it.first] = it.second;
+            item->vars[it.first] = deep ? it.second->copy() : it.second;
         }        
 
         return item;
     }
 
-    void setTop(Context *nctx){
+    void setTop(std::shared_ptr<Context> &nctx){
         auto ctop = this->get("top");
         if(ctop){
             return;
         }
-        this->set("top", nctx);
+        auto ctx = std::static_pointer_cast<Item>(nctx);
+        this->set("top", ctx);
     }
 
     ItemContextPair getWithContext(const std::string &name){
@@ -836,23 +743,20 @@ struct Context : Item {
         if(it == vars.end()){
             return this->head ? this->head->getWithContext(name) : ItemContextPair();
         }
-        return ItemContextPair(it->second, this, it->first);
+        return ItemContextPair(it->second.get(), this, it->first);
     }    
 
-    ItemContextPair getWithContext(Item *item){
+    ItemContextPair getWithContext(std::shared_ptr<Item> &item){
         for(auto &it : this->vars){
-            if(it.second == item){
-                return ItemContextPair(it.second, this, it.first);
+            if(it.second.get() == item.get()){
+                return ItemContextPair(it.second.get(), this, it.first);
             }
         }
         return this->head ? this->head->getWithContext(item) : ItemContextPair();
     }        
 
-    Item *set(const std::string &name, Item *item){
+    std::shared_ptr<Item> set(const std::string &name, const std::shared_ptr<Item> &item){
         auto v = get(name);
-        if(v){
-            v->deconstruct();
-        }
         this->vars[name] = item;
         return item;
     }
@@ -862,27 +766,17 @@ struct Context : Item {
         this->head = NULL;
     }
 
-    Context(Context *ctx){
+    Context(std::shared_ptr<Context> &ctx){
         this->type = ItemTypes::CONTEXT;        
         this->head = ctx;
     }    
 
-    ~Context(){
-        for(auto &it : vars){
-            it.second->deconstruct();
-        }
-    }
 
     bool clear(bool deep = true){
         if(this->type == ItemTypes::NIL){
             return false;
         }
-        if(deep){
-            for(auto &it : this->vars){
-                auto &item = it.second;
-                item->decRefC();
-            }
-        }
+
         return true;
     }
 
@@ -900,7 +794,7 @@ struct Context : Item {
         }
 
         for(auto &it : this->vars){
-            std::cout << it.first << getSpace(it.first.length()) << " -> " << getSpace(0) << ItemToText(it.second) << std::endl;
+            std::cout << it.first << getSpace(it.first.length()) << " -> " << getSpace(0) << ItemToText(it.second.get()) << std::endl;
         }
     }
 
@@ -914,16 +808,14 @@ static std::string ItemToText(Item *item){
         };
         case ItemTypes::INTERRUPT: {
             auto interrupt = static_cast<Interrupt*>(item);
-            return "[INT-"+InterruptTypes::str(interrupt->intType)+(interrupt->hasPayload() ? " "+ItemToText(interrupt->getPayload())+"" : "")+"]";
+            return "[INT-"+InterruptTypes::str(interrupt->intType)+(interrupt->hasPayload() ? " "+ItemToText(interrupt->getPayload().get())+"" : "")+"]";
         };                
         case ItemTypes::NUMBER: {
-            auto r = Tools::removeTrailingZeros(*static_cast<double*>(item->data));
+            auto r = Tools::removeTrailingZeros(static_cast<Number*>(item)->n);
             return r;
         };
         case ItemTypes::STRING: {
-            std::string output;
-            static_cast<String*>(item)->read(output, 0);
-            return "'"+output+"'";
+            return "'"+static_cast<String*>(item)->data+"'";
         };        
         case ItemTypes::FUNCTION: {
             auto fn = static_cast<Function*>(item);        
@@ -937,7 +829,7 @@ static std::string ItemToText(Item *item){
             for(auto &it : proto->vars){
                 auto name = it.first;
                 auto item = it.second;
-                output += ItemToText(item)+ModifierTypes::str(ModifierTypes::NAMER)+name;
+                output += ItemToText(item.get())+ModifierTypes::str(ModifierTypes::NAMER)+name;
                 if(c < n-1){
                     output += " ";
                 }
@@ -948,10 +840,10 @@ static std::string ItemToText(Item *item){
         case ItemTypes::LIST: {
             std::string output = "[";
             auto list = static_cast<List*>(item);
-            for(int i = 0; i < list->size; ++i){
+            for(int i = 0; i < list->data.size(); ++i){
                 auto item = list->get(i);
-                output += ItemToText(item);
-                if(i < list->size-1){
+                output += ItemToText(item.get());
+                if(i < list->data.size()-1){
                     output += " ";
                 }
             }
@@ -984,7 +876,7 @@ struct ModifierPair {
 struct ModifierEffect {
     bool expand;
     bool ctxSwitch;
-    Context *toCtx;
+    std::shared_ptr<Context> toCtx;
     std::string named;
     ModifierEffect(){
 
@@ -1190,14 +1082,14 @@ std::vector<Token> compileTokens(const std::vector<Token> &tokens, int from, int
 }
 
 bool FunctionConstraints::test(List *list, std::string &errormsg){
-    std::vector<Item*> items;
-    for(int i = 0; i < list->size; ++i){
-        items.push_back(list->get(i));
+    std::vector<std::shared_ptr<Item>> items;
+    for(int i = 0; i < list->data.size(); ++i){
+        items.push_back(list->data[i]);
     }
     return this->test(items, errormsg);
 }
 
-bool FunctionConstraints::test(const std::vector<Item*> &items, std::string &errormsg){
+bool FunctionConstraints::test(const std::vector<std::shared_ptr<Item>> &items, std::string &errormsg){
     if(!enabled || items.size() == 0){
         return true;
     }
@@ -1279,10 +1171,10 @@ bool FunctionConstraints::test(const std::vector<Item*> &items, std::string &err
 }
 
 
-static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx);
+static std::shared_ptr<Item> eval(const std::vector<Token> &tokens, Cursor *cursor, std::shared_ptr<Context> &ctx);
 
 
-static Item *processPreInterpretModifiers(Item *item, std::vector<ModifierPair> modifiers, Cursor *cursor, Context *ctx, ModifierEffect &effects){
+static std::shared_ptr<Item> processPreInterpretModifiers(std::shared_ptr<Item> &item, std::vector<ModifierPair> modifiers, Cursor *cursor, std::shared_ptr<Context> &ctx, ModifierEffect &effects){
     effects.reset();
     for(int i = 0; i < modifiers.size(); ++i){
         auto &mod = modifiers[i];
@@ -1321,14 +1213,14 @@ static Item *processPreInterpretModifiers(Item *item, std::vector<ModifierPair> 
                     return item;
                 }
                 if(mod.subject.size() > 0){
-                    auto subsequent = static_cast<Context*>(item)->get(mod.subject);
+                    auto subsequent = std::static_pointer_cast<Context>(item)->get(mod.subject);
                     if(!subsequent){
                         cursor->setError("'"+ModifierTypes::str(ModifierTypes::SCOPE)+"':"+mod.subject+"': Undefined symbol or imperative.");
                         return item;
                     }
                     item = subsequent;
                 }else{
-                    effects.toCtx = static_cast<Context*>(item);
+                    effects.toCtx = std::static_pointer_cast<Context>(item);
                     effects.ctxSwitch = true;
                 }
             } break;   
@@ -1346,12 +1238,12 @@ static Item *processPreInterpretModifiers(Item *item, std::vector<ModifierPair> 
 }
 
 // Interpret from STRING
-static Item *interpret(const std::string &_input, Cursor *cursor, Context *ctx){
+static std::shared_ptr<Item> interpret(const std::string &_input, Cursor *cursor, std::shared_ptr<Context> &ctx){
     std::string input = _input;
     auto literals = parseTokens(input, ' ', cursor);
     // printList(literals);
     if(cursor->error){
-        return new Item();
+        return std::make_shared<Item>(Item());
     }    
 
     // printList(literals);
@@ -1370,51 +1262,53 @@ static Item *interpret(const std::string &_input, Cursor *cursor, Context *ctx){
 }
 
 // Interpret from single TOKEN without dropping modifiers. Should be only used by `eval`
-static Item *interpret(const Token &token, Cursor *cursor, Context *ctx){
+static std::shared_ptr<Item>  interpret(const Token &token, Cursor *cursor, std::shared_ptr<Context> &ctx){
     auto literals = parseTokens(token.first, ' ', cursor);
     if(cursor->error){
-        return new Item();
+        return std::make_shared<Item>(Item());
     }
     auto tokens = buildTokens(literals, cursor);
     return eval(tokens, cursor, ctx);
 }
 
-static Item *processIteration(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx);
-static void processPostInterpretExpandListOrContext(Item* solved, ModifierEffect &effects, std::vector<Item*> &items, Cursor *cursor, Context *ctx);
+static std::shared_ptr<Item> processIteration(const std::vector<Token> &tokens, Cursor *cursor, std::shared_ptr<Context> &ctx);
+static void processPostInterpretExpandListOrContext(std::shared_ptr<Item> &solved, ModifierEffect &effects, std::vector<std::shared_ptr<Item>> &items, Cursor *cursor, const std::shared_ptr<Context> &ctx);
 
-static Item *runFunction(Function *fn, const std::vector<Item*> items, Cursor *cursor, Context *ctx);
-static Item *runFunction(Function *fn, const std::vector<Token> &tokens, Cursor *cursor, Context *ctx);
 
-static Item *runFunction(Function *fn, const std::vector<Token> &tokens, Cursor *cursor, Context *ctx){
-    std::vector<Item*> items;
+static std::shared_ptr<Item> runFunction(std::shared_ptr<Function> &fn, const std::vector<std::shared_ptr<Item>> items, Cursor *cursor, std::shared_ptr<Context> &ctx);
+static std::shared_ptr<Item> runFunction(std::shared_ptr<Function> &fn, const std::vector<Token> &tokens, Cursor *cursor, std::shared_ptr<Context> &ctx);
+
+static std::shared_ptr<Item> runFunction(std::shared_ptr<Function> &fn, const std::vector<Token> &tokens, Cursor *cursor, std::shared_ptr<Context> &ctx){
+    std::vector<std::shared_ptr<Item>> items;
     for(int i = 0; i < tokens.size(); ++i){
         ModifierEffect effects;
-        auto solved = processPreInterpretModifiers(interpret(tokens[i], cursor, ctx), tokens[i].modifiers, cursor, ctx, effects);                     
+        auto interp = interpret(tokens[i], cursor, ctx);
+        auto solved = processPreInterpretModifiers(interp, tokens[i].modifiers, cursor, ctx, effects);                     
         if(cursor->error){
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
-        processPostInterpretExpandListOrContext(solved, effects, items, cursor, NULL);
+        processPostInterpretExpandListOrContext(solved, effects, items, cursor, std::shared_ptr<Context>((Context*)NULL));
         if(cursor->error){
-            return new Item();
+            return std::make_shared<Item>(Item());
         } 
     }
     return runFunction(fn, items, cursor, ctx);
 }
 
 
-static Item *runFunction(Function *fn, const std::vector<Item*> items, Cursor *cursor, Context *ctx){
+static std::shared_ptr<Item> runFunction(std::shared_ptr<Function> &fn, const std::vector<std::shared_ptr<Item>> items, Cursor *cursor, std::shared_ptr<Context> &ctx){
     if(fn->binary){
         return fn->fn(items, cursor, ctx);  
     }else{
-        Context *tctx = new Context(ctx);
+        auto tctx = std::make_shared<Context>(Context(ctx));
         tctx->setTop(ctx);
         if(fn->variadic){
-            auto list = new List(items, false);
-            tctx->set("...", list);
+            auto list = std::make_shared<List>(List(items, false));
+            tctx->set("...", std::static_pointer_cast<Item>(list));
         }else{
             if(items.size() != fn->params.size()){
-                cursor->setError("'"+ItemToText(fn)+"': Expects exactly "+(std::to_string(fn->params.size()))+" arguments");
-                return new Item();
+                cursor->setError("'"+ItemToText(fn.get())+"': Expects exactly "+(std::to_string(fn->params.size()))+" arguments");
+                return std::make_shared<Item>(Item());
             }
             for(int i = 0; i < items.size(); ++i){
                 tctx->set(fn->params[i], items[i]);
@@ -1424,19 +1318,16 @@ static Item *runFunction(Function *fn, const std::vector<Item*> items, Cursor *c
     }
 }
 
-static void processPostInterpretExpandListOrContext(Item* solved, ModifierEffect &effects, std::vector<Item*> &items, Cursor *cursor, Context *ctx){
+static void processPostInterpretExpandListOrContext(std::shared_ptr<Item> &solved, ModifierEffect &effects, std::vector<std::shared_ptr<Item>> &items, Cursor *cursor, const std::shared_ptr<Context> &ctx){
     if(effects.expand && solved->type == ItemTypes::LIST){
-        auto list = static_cast<List*>(solved);
-        for(int j = 0; j < list->size; ++j){
+        auto list = std::static_pointer_cast<List>(solved);
+        for(int j = 0; j < list->data.size(); ++j){
             items.push_back(list->get(j));
         }
-        // We don't deconstruct the list since we're just moving the items to the return here
-        // list->clear(true); 
-        // delete list;
     }else
     if(effects.expand && solved->type == ItemTypes::CONTEXT){
         if(effects.expand && solved->type == ItemTypes::CONTEXT){
-            auto proto = static_cast<Context*>(solved);
+            auto proto = std::static_pointer_cast<Context>(solved);
             for(auto &it : proto->vars){
                 if(ctx == NULL){
                     items.push_back(it.second);
@@ -1444,8 +1335,6 @@ static void processPostInterpretExpandListOrContext(Item* solved, ModifierEffect
                     ctx->set(it.first, it.second);
                 }
             }
-            // solved->clear(false); 
-            // delete solved;
         }  
     }else
     if(effects.expand && solved->type != ItemTypes::CONTEXT && solved->type != ItemTypes::LIST){
@@ -1456,16 +1345,17 @@ static void processPostInterpretExpandListOrContext(Item* solved, ModifierEffect
     } 
 }
 
-static Item *processIteration(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx){
-    std::vector<Item*> items;
+static std::shared_ptr<Item> processIteration(const std::vector<Token> &tokens, Cursor *cursor, std::shared_ptr<Context> &ctx){
+    std::vector<std::shared_ptr<Item>> items;
     for(int i = 0; i < tokens.size(); ++i){
         ModifierEffect effects;
-        auto solved = processPreInterpretModifiers(interpret(tokens[i], cursor, ctx), tokens[i].modifiers, cursor, ctx, effects);
+        auto interp = interpret(tokens[i], cursor, ctx);
+        auto solved = processPreInterpretModifiers(interp, tokens[i].modifiers, cursor, ctx, effects);
         if(cursor->error){
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
         if(solved->type == ItemTypes::INTERRUPT){
-            auto interrupt =  static_cast<Interrupt*>(solved);
+            auto interrupt =  std::static_pointer_cast<Interrupt>(solved);
             if(interrupt->intType == InterruptTypes::SKIP){
                 if(interrupt->hasPayload()){
                     items.push_back(interrupt->getPayload());
@@ -1473,20 +1363,20 @@ static Item *processIteration(const std::vector<Token> &tokens, Cursor *cursor, 
                 continue;
             }else
             if(interrupt->intType == InterruptTypes::STOP){
-                return interrupt;
+                return std::static_pointer_cast<Item>(interrupt);
             }
         }   
         processPostInterpretExpandListOrContext(solved, effects, items, cursor, NULL);
         if(cursor->error){
-            return new Item();
+            return std::make_shared<Item>(Item());
         }                           
     }          
-    return tokens.size() == 1 ? items[0] : new List(items);    
+    return tokens.size() == 1 ? items[0] : std::make_shared<List>(List(items));    
 }
 
-static bool checkCond(Item *item){
+static bool checkCond(std::shared_ptr<Item> &item){
     if(item->type == ItemTypes::NUMBER){
-        return *static_cast<__CV_NUMBER_NATIVE_TYPE*>(item->data) <= 0 ? false : true;
+        return std::static_pointer_cast<Number>(item)->n <= 0 ? false : true;
     }else
     if(item->type != ItemTypes::NIL){
         return true;
@@ -1495,7 +1385,7 @@ static bool checkCond(Item *item){
     }
 };
 
-static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx){
+static std::shared_ptr<Item> eval(const std::vector<Token> &tokens, Cursor *cursor, std::shared_ptr<Context> &ctx){
 
     auto first = tokens[0];
     auto imp = first.first;
@@ -1504,12 +1394,13 @@ static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx
         auto params = compileTokens(tokens, 1, tokens.size()-1);
         if(params.size() > 2 || params.size() < 2){
             cursor->setError("'set': Expects exactly 2 arguments: <NAME> <VALUE>.");
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
         ModifierEffect effects;
-        auto solved = processPreInterpretModifiers(interpret(params[1], cursor, ctx), params[1].modifiers, cursor, ctx, effects);
+        auto interp = interpret(params[1], cursor, ctx);
+        auto solved = processPreInterpretModifiers(interp, params[1].modifiers, cursor, ctx, effects);
         if(cursor->error){
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
         auto f = ctx->getWithContext(params[0].first);
         if(f.item){
@@ -1520,54 +1411,56 @@ static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx
         }
     }else
     if(imp == "skip" || imp == "stop"){
-        auto interrupt = new Interrupt(imp == "skip" ? InterruptTypes::SKIP : InterruptTypes::STOP);
+        auto interrupt = std::make_shared<Interrupt>(Interrupt(imp == "skip" ? InterruptTypes::SKIP : InterruptTypes::STOP));
         if(tokens.size() > 1){
             auto params = compileTokens(tokens, 1, tokens.size()-1);
             auto solved = processIteration(params, cursor, ctx);
             if(solved->type == ItemTypes::INTERRUPT){
-                // delete interrupt
                 return solved;
             }else{
                 interrupt->setPayload(solved);
             }
         }
-        return interrupt;
+        return std::static_pointer_cast<Item>(interrupt);
     }else
     if(imp == "if"){
         if(tokens.size() > 4){
             cursor->setError("'if': Expects no more than 3 arguments: <CONDITION> <[CODE[0]...CODE[n]]> (ELSE-OPT)<[CODE[0]...CODE[n]]>.");
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
         if(tokens.size() < 3){
             cursor->setError("'if': Expects no less than 2 arguments: <CONDITION> <[CODE[0]...CODE[n]]> (ELSE-OPT)<[CODE[0]...CODE[n]]>.");
-            return new Item();
+            return std::make_shared<Item>(Item());
         }        
 
         auto params = compileTokens(tokens, 1, tokens.size()-1);
         auto cond = params[0];
         auto trueBranch = params[1];
-        auto tctx = new Context(ctx);
+        auto tctx = std::make_shared<Context>(Context(ctx));
         tctx->setTop(ctx);
 
         ModifierEffect origEff;
-        auto condV = processPreInterpretModifiers(interpret(cond, cursor, tctx), cond.modifiers, cursor, tctx, origEff);
+        auto interp = interpret(cond, cursor, tctx);
+        auto condV = processPreInterpretModifiers(interp, cond.modifiers, cursor, tctx, origEff);
         if(cursor->error){
-            return new Item();
+            return std::make_shared<Item>(Item());
         } 
         if(checkCond(condV)){
             ModifierEffect effects;
-            auto solved = processPreInterpretModifiers(interpret(trueBranch, cursor, tctx), trueBranch.modifiers, cursor, tctx, effects);
+            auto interp = interpret(trueBranch, cursor, tctx);
+            auto solved = processPreInterpretModifiers(interp, trueBranch.modifiers, cursor, tctx, effects);
             if(cursor->error){
-                return new Item();
+                return std::make_shared<Item>(Item());
             }
             return solved;      
         }else
         if(params.size() == 3){
             auto falseBranch = params[2];
             ModifierEffect effects;
-            auto solved = processPreInterpretModifiers(interpret(falseBranch, cursor, tctx), falseBranch.modifiers, cursor, tctx, effects);
+            auto interp = interpret(falseBranch, cursor, tctx);
+            auto solved = processPreInterpretModifiers(interp, falseBranch.modifiers, cursor, tctx, effects);
             if(cursor->error){
-                return new Item();
+                return std::make_shared<Item>(Item());
             }
             return solved;            
         }else{
@@ -1577,28 +1470,30 @@ static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx
     if(imp == "do"){
         if(tokens.size() > 3 || tokens.size() < 3){
             cursor->setError("'do': Expects exactly 2 arguments: <CONDITION> <[CODE[0]...CODE[n]]>.");
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
         auto params = compileTokens(tokens, 1, tokens.size()-1);
         auto cond = params[0];
         auto code = params[1];
-        auto tctx = new Context(ctx);
+        auto tctx = std::make_shared<Context>(Context(ctx));
         tctx->setTop(ctx);
 
         ModifierEffect origEff;
-        auto condV = processPreInterpretModifiers(interpret(cond, cursor, tctx), cond.modifiers, cursor, tctx, origEff);
+        auto interp = interpret(cond, cursor, tctx);
+        auto condV = processPreInterpretModifiers(interp, cond.modifiers, cursor, tctx, origEff);
         if(cursor->error){
-            return new Item();
+            return std::make_shared<Item>(Item());
         }  
-        Item *last = NULL;
+        auto last = std::shared_ptr<Item>(NULL);
         while(checkCond(condV)){
             ModifierEffect effects;
-            auto solved = processPreInterpretModifiers(interpret(code, cursor, tctx), code.modifiers, cursor, tctx, effects);
+            auto interp = interpret(code, cursor, tctx);
+            auto solved = processPreInterpretModifiers(interp, code.modifiers, cursor, tctx, effects);
             if(cursor->error){
-                return new Item();
+                return std::make_shared<Item>(Item());
             }
             if(solved->type == ItemTypes::INTERRUPT){
-                auto interrupt =  static_cast<Interrupt*>(solved);
+                auto interrupt =  std::static_pointer_cast<Interrupt>(solved);
                 if(interrupt->intType == InterruptTypes::SKIP){
                     continue;
                 }else
@@ -1608,43 +1503,46 @@ static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx
             }         
             last = solved;
             // Next iteration
-            condV = processPreInterpretModifiers(interpret(cond, cursor, tctx), cond.modifiers, cursor, tctx, origEff);
+            auto reinterp = interpret(cond, cursor, tctx);
+            condV = processPreInterpretModifiers(reinterp, cond.modifiers, cursor, tctx, origEff);
             if(cursor->error){
-                return new Item();
+                return std::make_shared<Item>(Item());
             }            
         }             
-        return last ? last : new Item();
+        return last ? last : std::make_shared<Item>(Item());
     }else
     if(imp == "iter"){
         if(tokens.size() > 3 || tokens.size() < 3){
             cursor->setError("'iter': Expects exactly 2 arguments: <ITERABLE> <[CODE[0]...CODE[n]]>.");
-            return new Item();
+            return std::make_shared<Item>(Item());
         }        
         auto params = compileTokens(tokens, 1, tokens.size()-1);
         auto code = params[1];
-        auto tctx = new Context(ctx);
+        auto tctx = std::make_shared<Context>(Context(ctx));
         tctx->setTop(ctx);
         ModifierEffect origEff;
-        auto iterable = processPreInterpretModifiers(interpret(params[0], cursor, tctx), params[0].modifiers, cursor, tctx, origEff);
+        auto interp = interpret(params[0], cursor, tctx);
+        auto iterable = processPreInterpretModifiers(interp, params[0].modifiers, cursor, tctx, origEff);
         if(cursor->error){
-            return new Item();
+            return std::make_shared<Item>(Item());
         }            
         if(iterable->type == ItemTypes::LIST){
-            std::vector<Item*> items;
-            auto list = static_cast<List*>(iterable);
-            for(int i = 0; i < list->size; ++i){
+            std::vector<std::shared_ptr<Item>> items;
+            auto list = std::static_pointer_cast<List>(iterable);
+            for(int i = 0; i < list->data.size(); ++i){
                 auto item = list->get(i);
                 // We use the namer to name every iteration's current variable
                 if(origEff.named.size() > 0){
                     tctx->set(origEff.named, item);
                 }                
                 ModifierEffect effects;
-                auto solved = processPreInterpretModifiers(interpret(code, cursor, tctx), code.modifiers, cursor, tctx, effects);
+                auto interp = interpret(code, cursor, tctx);
+                auto solved = processPreInterpretModifiers(interp, code.modifiers, cursor, tctx, effects);
                 if(cursor->error){
-                    return new Item();
+                    return std::make_shared<Item>(Item());
                 }                   
                 if(solved->type == ItemTypes::INTERRUPT){
-                    auto interrupt =  static_cast<Interrupt*>(solved);
+                    auto interrupt =  std::static_pointer_cast<Interrupt>(solved);
                     if(interrupt->intType == InterruptTypes::SKIP){
                         if(interrupt->hasPayload()){
                             items.push_back(interrupt->getPayload());
@@ -1657,14 +1555,14 @@ static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx
                 }           
                 processPostInterpretExpandListOrContext(solved, effects, items, cursor, NULL);
                 if(cursor->error){
-                    return new Item();
+                    return std::make_shared<Item>(Item());
                 }                               
             }
-            return static_cast<Item*>(new List(items));
+            return std::static_pointer_cast<Item>(std::make_shared<List>(List(items)));
         }else
         if(iterable->type == ItemTypes::CONTEXT){
-            std::vector<Item*> items;
-            auto list = static_cast<Context*>(iterable);
+            std::vector<std::shared_ptr<Item>> items;
+            auto list = std::static_pointer_cast<Context>(iterable);
             for(auto &it : list->vars){
                 auto item = it.second;
                 // We use the namer to name every iteration's current variable
@@ -1672,12 +1570,13 @@ static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx
                     tctx->set(origEff.named, item);
                 }                
                 ModifierEffect effects;
-                auto solved = processPreInterpretModifiers(interpret(code, cursor, tctx), code.modifiers, cursor, tctx, effects);
+                auto interp = interpret(code, cursor, tctx);
+                auto solved = processPreInterpretModifiers(interp, code.modifiers, cursor, tctx, effects);
                 if(cursor->error){
-                    return new Item();
+                    return std::make_shared<Item>(Item());
                 }             
                 if(solved->type == ItemTypes::INTERRUPT){
-                    auto interrupt =  static_cast<Interrupt*>(solved);
+                    auto interrupt =  std::static_pointer_cast<Interrupt>(solved);
                     if(interrupt->intType == InterruptTypes::SKIP){
                         if(interrupt->hasPayload()){
                             items.push_back(interrupt->getPayload());
@@ -1690,48 +1589,52 @@ static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx
                 }               
                 processPostInterpretExpandListOrContext(solved, effects, items, cursor, NULL);
                 if(cursor->error){
-                    return new Item();
+                    return std::make_shared<Item>(Item());
                 } 
             }
-            return static_cast<Item*>(new List(items));
+            return std::static_pointer_cast<Item>(std::make_shared<List>(List(items)));
         }else{
             cursor->setError("'iter': Expects argument(0) to be iterable.");
-            return new Item();            
+            return std::make_shared<Item>(Item());        
         }
     }else
     if(imp == "fn"){
         auto params = compileTokens(tokens, 1, tokens.size()-1);
         if(params.size() > 2 || params.size() < 2){
             cursor->setError("'fn': Expects exactly 2 arguments: <[ARGS[0]...ARGS[n]]> <[CODE[0]...CODE[n]]>.");
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
         bool isVariadic = false;
         auto argNames = parseTokens(params[0].first, ' ', cursor);
         if(cursor->error){
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
         if(argNames.size() == 1 && argNames[0] == "..."){
             isVariadic = true;
         }
         auto code = params[1];
-        return static_cast<Item*>(new Function(isVariadic ? std::vector<std::string>({}) : argNames, code.first, isVariadic));
+
+        return std::static_pointer_cast<Item>(  std::make_shared<Function>(isVariadic ? std::vector<std::string>({}) : argNames, code.first, isVariadic)  );
     }else
     if(imp == "ct"){
         auto params = compileTokens(tokens, 1, tokens.size()-1);
-        Context *pctx = new Context(ctx);
+        auto pctx = std::make_shared<Context>(Context(ctx));
         for(int i = 0; i < params.size(); ++i){
             ModifierEffect effects;
-            auto solved = processPreInterpretModifiers(interpret(params[i], cursor, pctx), params[i].modifiers, cursor, pctx, effects);
+            auto interp = interpret(params[i], cursor, pctx);
+            auto solved = processPreInterpretModifiers(interp, params[i].modifiers, cursor, pctx, effects);
             if(cursor->error){
-                return new Item();
+                return std::make_shared<Item>(Item());
             }                
-            std::vector<Item*> items;
+            std::vector<std::shared_ptr<Item>> items;
             processPostInterpretExpandListOrContext(solved, effects, items, cursor, pctx);
             if(cursor->error){
-                return new Item();
+                return std::make_shared<Item>(Item());
             }  
             for(int j = 0; j < items.size(); ++j){
-                pctx->set("lst-"+std::to_string(j), items[j]);
+                if(effects.named.size() == 0){
+                    pctx->set("v-"+std::to_string(j), items[j]);
+                }
             }
         }
         return pctx;
@@ -1739,7 +1642,7 @@ static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx
         auto var = ctx->get(imp);
         // Is it a function?
         if(var && var->type == ItemTypes::FUNCTION){
-            auto fn = static_cast<Function*>(var);
+            auto fn = std::static_pointer_cast<Function>(var);
             return runFunction(fn, compileTokens(tokens, 1, tokens.size()-1), cursor, ctx);
         }else   
         // Is it just a variable?
@@ -1751,39 +1654,42 @@ static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx
         // Is it a natural type?
         if(tokens.size() == 1){
             if(!var && Tools::isNumber(imp)){
-                auto n = new Number(std::stod(imp));
+                auto n = std::make_shared<Number>(Number(std::stod(imp)));
                 ModifierEffect effects;
-                auto result = processPreInterpretModifiers(n, first.modifiers, cursor, ctx, effects);
+                auto casted = std::static_pointer_cast<Item>(n);
+                auto result = processPreInterpretModifiers(casted, first.modifiers, cursor, ctx, effects);
                 if(cursor->error){
-                    return new Item();
+                    return std::make_shared<Item>(Item());
                 }                      
                 return result;
             }else
             if(!var && Tools::isString(imp)){
                 ModifierEffect effects;
-                auto n = new String(imp.substr(1, imp.length() - 2));
-                auto result = processPreInterpretModifiers(n, first.modifiers, cursor, ctx, effects);
+                auto n = std::make_shared<String>(String(imp.substr(1, imp.length() - 2)));
+                auto casted = std::static_pointer_cast<Item>(n);
+                auto result = processPreInterpretModifiers(casted, first.modifiers, cursor, ctx, effects);
                 return result;
             }else
             if(!var && Tools::isList(imp)){
                 ModifierEffect effects;
-                auto result = processPreInterpretModifiers(interpret(first, cursor, ctx), first.modifiers,cursor, ctx, effects);
+                auto interp = interpret(first, cursor, ctx);
+                auto result = processPreInterpretModifiers(interp, first.modifiers,cursor, ctx, effects);
                 if(cursor->error){
-                    return new Item();
+                    return std::make_shared<Item>(Item());
                 }                   
                 return result;
             }else
             if(imp == "nil"){
                 ModifierEffect effects;
-                auto n = new Item();
+                auto n = std::make_shared<Item>(Item());
                 auto result = processPreInterpretModifiers(n, first.modifiers, cursor, ctx, effects);
                 if(cursor->error){
-                    return new Item();
+                    return std::make_shared<Item>(Item());
                 }                      
                 return result;
             }else{
                 cursor->setError("'"+imp+"': Undefined symbol or imperative."); // TODO: Check if it's running as relaxed
-                return new Item();
+                return std::make_shared<Item>(Item());
             }
         }else
         // List or in-line context switch?
@@ -1792,9 +1698,10 @@ static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx
             // Super rad inline-contex switching d:)
             if(fmods.type == ModifierTypes::SCOPE){
                 ModifierEffect effects;
-                auto solved = processPreInterpretModifiers(interpret(tokens[0], cursor, ctx), tokens[0].modifiers, cursor, ctx, effects);
+                auto interp = interpret(tokens[0], cursor, ctx);
+                auto solved = processPreInterpretModifiers(interp, tokens[0].modifiers, cursor, ctx, effects);
                 if(cursor->error){
-                    return new Item();
+                    return std::make_shared<Item>(Item());
                 } 
                 auto inlineCode = compileTokens(tokens, 1, tokens.size()-1);
                 return eval(inlineCode, cursor, effects.toCtx); // Check if toCtx is null? Shouldn't be possible tho
@@ -1805,10 +1712,10 @@ static Item* eval(const std::vector<Token> &tokens, Cursor *cursor, Context *ctx
         }
     }
 
-    return new Item();
+    return std::make_shared<Item>(Item());
 }
 
-bool typicalVariadicArithmeticCheck(const std::string &name, const std::vector<Item*> &params, Cursor *cursor, int max = -1){
+bool typicalVariadicArithmeticCheck(const std::string &name, const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, int max = -1){
     FunctionConstraints consts;
     consts.setMinParams(2);
     if(max != -1){
@@ -1825,64 +1732,64 @@ bool typicalVariadicArithmeticCheck(const std::string &name, const std::vector<I
     return true;
 };
 
-static void addStandardOperators(Context *ctx){
+static void addStandardOperators(std::shared_ptr<Context> &ctx){
 
     /*
 
         ARITHMETIC OPERATORS
 
     */
-    ctx->set("+", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+    ctx->set("+", std::make_shared<Function>(Function({}, [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
         if(!typicalVariadicArithmeticCheck("+", params, cursor)){
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
-        __CV_NUMBER_NATIVE_TYPE r = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data);
+        __CV_NUMBER_NATIVE_TYPE r = std::static_pointer_cast<Number>(params[0])->n;
         for(int i = 1; i < params.size(); ++i){
-            r += *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data);
+            r += std::static_pointer_cast<Number>(params[i])->n;
         }
-        return static_cast<Item*>(new Number(r));
-    }, true));
-    ctx->set("-", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        return std::static_pointer_cast<Item>(std::make_shared<Number>(Number(r)));
+    }, true)));
+    ctx->set("-", std::make_shared<Function>(Function({}, [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
         if(!typicalVariadicArithmeticCheck("-", params, cursor)){
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
-        __CV_NUMBER_NATIVE_TYPE r = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data);
+        __CV_NUMBER_NATIVE_TYPE r = std::static_pointer_cast<Number>(params[0])->n;
         for(int i = 1; i < params.size(); ++i){
-            r -= *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data);
+            r -= std::static_pointer_cast<Number>(params[i])->n;
         }
-        return static_cast<Item*>(new Number(r));
-    }, true));
-    ctx->set("*", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        return std::static_pointer_cast<Item>(std::make_shared<Number>(Number(r)));
+    }, true)));
+    ctx->set("*", std::make_shared<Function>(Function({}, [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
         if(!typicalVariadicArithmeticCheck("*", params, cursor)){
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
-        __CV_NUMBER_NATIVE_TYPE r = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data);
+        __CV_NUMBER_NATIVE_TYPE r = std::static_pointer_cast<Number>(params[0])->n;
         for(int i = 1; i < params.size(); ++i){
-            r *= *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data);
+            r *= std::static_pointer_cast<Number>(params[i])->n;
         }
-        return static_cast<Item*>(new Number(r));
-    }, true));  
-    ctx->set("/", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        return std::static_pointer_cast<Item>(std::make_shared<Number>(Number(r)));
+    }, true)));  
+    ctx->set("/", std::make_shared<Function>(Function({}, [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
         if(!typicalVariadicArithmeticCheck("/", params, cursor)){
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
-        __CV_NUMBER_NATIVE_TYPE r = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data);
+        __CV_NUMBER_NATIVE_TYPE r = std::static_pointer_cast<Number>(params[0])->n;
         for(int i = 1; i < params.size(); ++i){
-            r /= *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data);
+            r /= std::static_pointer_cast<Number>(params[i])->n;
         }
-        return static_cast<Item*>(new Number(r));
-    }, true));
-    ctx->set("pow", new Function({"a", "b"}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        return std::static_pointer_cast<Item>(std::make_shared<Number>(Number(r)));
+    }, true)));
+    ctx->set("pow", std::make_shared<Function>(Function({"a", "b"}, [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
         if(!typicalVariadicArithmeticCheck("pow", params, cursor, 2)){
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
-        __CV_NUMBER_NATIVE_TYPE r = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data);
+        __CV_NUMBER_NATIVE_TYPE r = std::static_pointer_cast<Number>(params[0])->n;
         for(int i = 1; i < params.size(); ++i){
-            r =  std::pow(r, *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data));
+            r =  std::pow(r, std::static_pointer_cast<Number>(params[i])->n);
         }
-        return static_cast<Item*>(new Number(r));
-    }, false)); 
-    ctx->set("sqrt", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        return std::static_pointer_cast<Item>(std::make_shared<Number>(Number(r)));
+    }, false))); 
+    ctx->set("sqrt", std::make_shared<Function>(Function({}, [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
         FunctionConstraints consts;
         consts.setMinParams(1);
         consts.setExpectType(ItemTypes::NUMBER);
@@ -1891,25 +1798,25 @@ static void addStandardOperators(Context *ctx){
         std::string errormsg;
         if(!consts.test(params, errormsg)){
             cursor->setError("'sqrt': "+errormsg);
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
         if(params.size() == 1){
-            return static_cast<Item*>(new Number(std::sqrt(*static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data))));
+            return std::static_pointer_cast<Item>(std::make_shared<Number>(Number(  std::sqrt(std::static_pointer_cast<Number>(params[0])->n)   )));
         }else{
-            std::vector<Item*> result;
+            std::vector<std::shared_ptr<Item>> result;
             for(int i = 0; i < params.size(); ++i){
                 result.push_back(
-                    static_cast<Item*>(new Number(std::sqrt(*static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data))))
+                    std::static_pointer_cast<Item>(std::make_shared<Number>(Number(  std::sqrt(std::static_pointer_cast<Number>(params[i])->n)   )))
                 );
             }
-            return static_cast<Item*>(new List(result, false));
+            return std::static_pointer_cast<Item>(std::make_shared<List>(List(result, false)));
         }
-    }, true));    
+    }, true)));    
        
     /* 
         QUICK MATH
     */ 
-    ctx->set("++", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+    ctx->set("++", std::make_shared<Function>(Function({}, [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
         FunctionConstraints consts;
         consts.setMinParams(1);
         consts.allowMisMatchingTypes = false;        
@@ -1919,22 +1826,22 @@ static void addStandardOperators(Context *ctx){
         std::string errormsg;
         if(!consts.test(params, errormsg)){
             cursor->setError("'++': "+errormsg);
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
 
         if(params.size() == 1){
-            ++(*static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data));
+            ++std::static_pointer_cast<Number>(params[0])->n;
             return params[0];
         }else{   
             for(int i = 0; i < params.size(); ++i){
-                ++(*static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data));
+                ++std::static_pointer_cast<Number>(params[i])->n;
             }
         }
 
-        return static_cast<Item*>(new List(params, false));
-    }, true));
+        return std::static_pointer_cast<Item>(std::make_shared<List>(List(params, false)));
+    }, true)));
 
-    ctx->set("--", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+    ctx->set("--", std::make_shared<Function>(Function({}, [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
         FunctionConstraints consts;
         consts.setMinParams(1);
         consts.allowMisMatchingTypes = false;        
@@ -1944,23 +1851,23 @@ static void addStandardOperators(Context *ctx){
         std::string errormsg;
         if(!consts.test(params, errormsg)){
             cursor->setError("'--': "+errormsg);
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
 
         if(params.size() == 1){
-            --(*static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data));
+            --std::static_pointer_cast<Number>(params[0])->n;
             return params[0];
         }else{   
             for(int i = 0; i < params.size(); ++i){
-                --(*static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data));
+                --std::static_pointer_cast<Number>(params[i])->n;
             }
         }
 
-        return static_cast<Item*>(new List(params, false));
-    }, true));    
+        return std::static_pointer_cast<Item>(std::make_shared<List>(List(params, false)));
+    }, true)));    
 
 
-    ctx->set("//", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+    ctx->set("//", std::make_shared<Function>(Function({}, [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
         FunctionConstraints consts;
         consts.setMinParams(1);
         consts.allowMisMatchingTypes = false;        
@@ -1970,22 +1877,22 @@ static void addStandardOperators(Context *ctx){
         std::string errormsg;
         if(!consts.test(params, errormsg)){
             cursor->setError("'//': "+errormsg);
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
 
         if(params.size() == 1){
-            *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data) /= 2;
+            std::static_pointer_cast<Number>(params[0])->n /= 2;
             return params[0];
         }else{   
             for(int i = 0; i < params.size(); ++i){
-                *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data) /= 2;
+                std::static_pointer_cast<Number>(params[i])->n /= 2;
             }
         }
 
-        return static_cast<Item*>(new List(params, false));
-    }, true));    
+        return std::static_pointer_cast<Item>(std::make_shared<List>(List(params, false)));
+    }, true)));    
 
-    ctx->set("**", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+    ctx->set("**", std::make_shared<Function>(Function({}, [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
         FunctionConstraints consts;
         consts.setMinParams(1);
         consts.allowMisMatchingTypes = false;        
@@ -1995,49 +1902,51 @@ static void addStandardOperators(Context *ctx){
         std::string errormsg;
         if(!consts.test(params, errormsg)){
             cursor->setError("'**': "+errormsg);
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
 
         if(params.size() == 1){
-            *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data) *= *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data);
+            std::static_pointer_cast<Number>(params[0])->n *= std::static_pointer_cast<Number>(params[0])->n;
             return params[0];
         }else{   
             for(int i = 0; i < params.size(); ++i){
-                *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data) *= *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data);
+                std::static_pointer_cast<Number>(params[i])->n *= std::static_pointer_cast<Number>(params[i])->n;
             }
         }
 
-        return static_cast<Item*>(new List(params, false));
-    }, true));
+        return std::static_pointer_cast<Item>(std::make_shared<List>(List(params, false)));
+    }, true)));
 
 
     /*
         LISTS
     */
-    ctx->set("..", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
-        if(!typicalVariadicArithmeticCheck("..", params, cursor)){
-            return new Item();
+    ctx->set("l-range", std::make_shared<Function>(Function({}, [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
+        if(!typicalVariadicArithmeticCheck("l-range", params, cursor)){
+            return std::make_shared<Item>(Item());
         }
 
-        __CV_NUMBER_NATIVE_TYPE s = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data);
-        __CV_NUMBER_NATIVE_TYPE e = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[1]->data);
+        auto s = std::static_pointer_cast<Number>(params[0])->n;
+        auto e = std::static_pointer_cast<Number>(params[1])->n;
         
-        std::vector<Item*> result;
+        std::vector<std::shared_ptr<Item>> result;
         if(s == e){
-            return static_cast<Item*>(new List(result));
+            return std::static_pointer_cast<Item>(std::make_shared<List>(List(result, false)));
         }
 
         bool inc = e > s;
-        __CV_NUMBER_NATIVE_TYPE step = Tools::positive(params.size() == 3 ? *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[2]->data) : 1);
+        __CV_NUMBER_NATIVE_TYPE step = Tools::positive(params.size() == 3 ? std::static_pointer_cast<Number>(params[2])->n : 1);
 
         for(__CV_NUMBER_NATIVE_TYPE i = s; (inc ? i <= e : i >= e); i += (inc ? step : -step)){
-            result.push_back(new Number(i));
+            result.push_back(
+                std::static_pointer_cast<Item>(std::make_shared<Number>(i))
+            );
         }
 
-        return static_cast<Item*>(new List(result));
-    }, true));
+        return std::static_pointer_cast<Item>(std::make_shared<List>(List(result, false)));
+    }, true)));
     
-    ctx->set("l-sort", new Function({"c", "l"}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+    ctx->set("l-sort", std::make_shared<Function>(Function({"c", "l"}, [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
         FunctionConstraints consts;
         consts.setMinParams(2);
         consts.setMaxParams(2);
@@ -2051,20 +1960,20 @@ static void addStandardOperators(Context *ctx){
         std::string errormsg;
         if(!consts.test(params, errormsg)){
             cursor->setError("'l-sort': "+errormsg);
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
 
-        auto criteria = static_cast<String*>(params[0]);
+        auto criteria = std::static_pointer_cast<String>(params[0]);
 
-        auto order = criteria->get();
+        auto &order = criteria->data;
         if(order != "DESC" && order != "ASC"){
             cursor->setError("'l-sort': criteria can only be 'DESC' or 'ASC'.");
-            return new Item();
+            return std::make_shared<Item>(Item());
         }        
 
-        auto list = static_cast<List*>(params[1]);
-        std::vector<Item*> items;
-        for(int i = 0; i < list->size; ++i){
+        auto list = std::static_pointer_cast<List>(params[1]);
+        std::vector<std::shared_ptr<Item>> items;
+        for(int i = 0; i < list->data.size(); ++i){
             items.push_back(list->get(i));
         }        
 
@@ -2074,19 +1983,19 @@ static void addStandardOperators(Context *ctx){
         constsList.allowNil = false;
         if(!constsList.test(items, errormsg)){
             cursor->setError("'l-sort': "+errormsg);
-            return new Item();
+            return std::make_shared<Item>(Item());
         }        
 
-        std::sort(items.begin(), items.end(), [&](Item *a, Item *b){
-            return order == "DESC" ?     *static_cast<__CV_NUMBER_NATIVE_TYPE*>(a->data) > *static_cast<__CV_NUMBER_NATIVE_TYPE*>(b->data) :
-                                        *static_cast<__CV_NUMBER_NATIVE_TYPE*>(a->data) < *static_cast<__CV_NUMBER_NATIVE_TYPE*>(b->data);
+        std::sort(items.begin(), items.end(), [&](std::shared_ptr<Item> &a, std::shared_ptr<Item> &b){
+            return order == "DESC" ?     std::static_pointer_cast<Number>(a)->n > std::static_pointer_cast<Number>(b)->n :
+                                        std::static_pointer_cast<Number>(a)->n < std::static_pointer_cast<Number>(b)->n;
         });
 
-        return static_cast<Item*>(new List(items));
-    }, false));    
+        return std::static_pointer_cast<Item>(std::make_shared<List>(List(items, false)));
+    }, false)));    
 
 
-    ctx->set("l-filter", new Function({"c", "l"}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+    ctx->set("l-filter", std::make_shared<Function>(Function({"c", "l"}, [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
         FunctionConstraints consts;
         consts.setMinParams(2);
         consts.setMaxParams(2);
@@ -2098,34 +2007,32 @@ static void addStandardOperators(Context *ctx){
         std::string errormsg;
         if(!consts.test(params, errormsg)){
             cursor->setError("'l-filter': "+errormsg);
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
 
-        auto criteria = static_cast<Function*>(params[0]);
+        auto criteria = std::static_pointer_cast<Function>(params[0]);
 
         if(criteria->variadic || criteria->params.size() != 1){
             cursor->setError("'l-filter': criteria's function must receive exactly 1 argument(a).");
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
 
-        auto list = static_cast<List*>(params[1]);
-        std::vector<Item*> items;
-        for(int i = 0; i < list->size; ++i){
-            auto result = runFunction(criteria, std::vector<Item*>{list->get(i)}, cursor, ctx);
+        auto list = std::static_pointer_cast<List>(params[1]);
+        std::vector<std::shared_ptr<Item>> items;
+        for(int i = 0; i < list->data.size(); ++i){
+            auto result = runFunction(criteria, std::vector<std::shared_ptr<Item>>{list->get(i)}, cursor, ctx);
             if(checkCond(result)){
                 continue;
             }
             items.push_back(list->get(i));
         }        
 
+        return std::static_pointer_cast<Item>(std::make_shared<List>(List(items, false)));
 
-        
-
-        return static_cast<Item*>(new List(items));
-    }, false));  
+    }, false)));  
 
 
-    ctx->set("l-flat", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+    ctx->set("l-flat", std::make_shared<Function>(Function({}, [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
         FunctionConstraints consts;
         consts.allowMisMatchingTypes = true;        
         consts.allowNil = true;
@@ -2133,21 +2040,22 @@ static void addStandardOperators(Context *ctx){
         std::string errormsg;
         if(!consts.test(params, errormsg)){
             cursor->setError("'l-flat': "+errormsg);
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
 
 
-        std::vector<Item*> finalList;
+        std::vector<std::shared_ptr<Item>> finalList;
 
-        std::function<void(Item *item)> recursive = [&](Item *item){
+        std::function<void(std::shared_ptr<Item> &item)> recursive = [&](const std::shared_ptr<Item> &item){
             if(item->type == ItemTypes::LIST){
-                auto list = static_cast<List*>(item);
-                for(int i = 0; i < list->size; ++i){
-                    recursive(list->get(i));
+                auto list = std::static_pointer_cast<List>(item);
+                for(int i = 0; i < list->data.size(); ++i){
+                    auto item = list->get(i);
+                    recursive(item);
                 }
             }else
             if(item->type == ItemTypes::CONTEXT){
-                auto ctx = static_cast<Context*>(item);
+                auto ctx = std::static_pointer_cast<Context>(item);
                 for(auto &it : ctx->vars){
                     recursive(it.second);
                 }
@@ -2158,17 +2066,18 @@ static void addStandardOperators(Context *ctx){
 
 
         for(int i = 0; i < params.size(); ++i){
-            recursive(params[i]);
+            auto item = params[i];
+            recursive(item);
         }
 
 
 
-        return static_cast<Item*>(new List(finalList));
-    }, true));   
+        return std::static_pointer_cast<Item>(std::make_shared<List>(List(finalList, false)));
+    }, true)));   
 
 
 
-    ctx->set("splice", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+    ctx->set("splice", std::make_shared<Function>(Function({}, [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
         FunctionConstraints consts;
         consts.setMinParams(2);
         consts.allowNil = false;
@@ -2179,18 +2088,18 @@ static void addStandardOperators(Context *ctx){
         std::string errormsg;
         if(!consts.test(params, errormsg)){
             cursor->setError("'splice': "+errormsg);
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
 
-        auto getAllItems = [](Item *item){
-            std::unordered_map<std::string, Item*> all;
+        auto getAllItems = [](std::shared_ptr<Item> &item){
+            std::unordered_map<std::string, std::shared_ptr<Item>> all;
             if(item->type == ItemTypes::LIST){
-                auto list = static_cast<List*>(item);
-                for(int i = 0; i < list->size; ++i){
+                auto list = std::static_pointer_cast<List>(item);
+                for(int i = 0; i < list->data.size(); ++i){
                     all[std::to_string(i)] = list->get(i);
                 }
             }else{
-                auto ctx = static_cast<Context*>(item);
+                auto ctx = std::static_pointer_cast<Context>(item);
                 for(auto &it : ctx->vars){
                     all[it.first] = it.second;
                 }
@@ -2201,29 +2110,31 @@ static void addStandardOperators(Context *ctx){
         auto first = params[0];
         // First item decides the spliced result
         if(first->type == ItemTypes::LIST){
-            std::vector<Item*> compiled;
+            std::vector<std::shared_ptr<Item>> compiled;
             for(int i = 0; i < params.size(); ++i){
-                auto all = getAllItems(params[i]);
+                auto current = params[i];
+                auto all = getAllItems(current);
                 for(auto &it : all){
                     compiled.push_back(it.second);
                 }
             }
-            return static_cast<Item*>(new List(compiled));
+            return std::static_pointer_cast<Item>(std::make_shared<List>(List(compiled, false)));
         }else{
-            auto ctx = new Context();
+            auto ctx = std::make_shared<Context>(Context());
             for(int i = 0; i < params.size(); ++i){
-                auto all = getAllItems(params[i]);
+                auto current = params[i];
+                auto all = getAllItems(current);
                 for(auto &it : all){
                     ctx->set(it.first, it.second);
                 }
             }
-            return static_cast<Item*>(ctx);
+            return std::static_pointer_cast<Item>(ctx);
         }
 
-        return new Item();
-    }, true));    
+        return std::make_shared<Item>(Item());
+    }, true)));    
 
-    ctx->set("l-push", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+    ctx->set("l-push", std::make_shared<Function>(Function({}, [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
         FunctionConstraints consts;
         consts.setMinParams(2);
         consts.allowMisMatchingTypes = true;
@@ -2232,15 +2143,15 @@ static void addStandardOperators(Context *ctx){
         std::string errormsg;
         if(!consts.test(params, errormsg)){
             cursor->setError("'l-push': "+errormsg);
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
 
-        std::vector<Item*> items;
+        std::vector<std::shared_ptr<Item>> items;
         auto last = params[params.size()-1];
 
         if(last->type == ItemTypes::LIST){
-            auto list = static_cast<List*>(last);
-            for(int i = 0; i < list->size; ++i){
+            auto list = std::static_pointer_cast<List>(last);
+            for(int i = 0; i < list->data.size(); ++i){
                 items.push_back(list->get(i));
             }
         }else{
@@ -2251,11 +2162,11 @@ static void addStandardOperators(Context *ctx){
             items.push_back(params[i]);
         }
 
-        return static_cast<Item*>(new List(items, false));
+        return std::static_pointer_cast<Item>(std::make_shared<List>(List(items, false)));
 
-    }, true)); 
+    }, true))); 
     
-    ctx->set("l-pop", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+    ctx->set("l-pop", std::make_shared<Function>(Function({}, [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
         FunctionConstraints consts;
         consts.setMinParams(2);
         consts.allowMisMatchingTypes = true;
@@ -2264,15 +2175,15 @@ static void addStandardOperators(Context *ctx){
         std::string errormsg;
         if(!consts.test(params, errormsg)){
             cursor->setError("'<<': "+errormsg);
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
 
-        std::vector<Item*> items;
+        std::vector<std::shared_ptr<Item>> items;
         auto first = params[0];
 
         if(first->type == ItemTypes::LIST){
-            auto list = static_cast<List*>(first);
-            for(int i = 0; i < list->size; ++i){
+            auto list = std::static_pointer_cast<List>(first);
+            for(int i = 0; i < list->data.size(); ++i){
                 items.push_back(list->get(i));
             }
         }else{
@@ -2283,11 +2194,11 @@ static void addStandardOperators(Context *ctx){
             items.push_back(params[i]);
         }
 
-        return static_cast<Item*>(new List(items, false));
+        return std::static_pointer_cast<Item>(std::make_shared<List>(List(items, false)));
 
-    }, true));     
+    }, true)));     
 
-    ctx->set("l-sub", new Function({"l", "p", "n"}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+    ctx->set("l-sub", std::make_shared<Function>(Function({"l", "p", "n"}, [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
         FunctionConstraints consts;
         consts.setMinParams(2);
         consts.setMaxParams(3);
@@ -2300,31 +2211,31 @@ static void addStandardOperators(Context *ctx){
         std::string errormsg;
         if(!consts.test(params, errormsg)){
             cursor->setError("'"+name+"': "+errormsg);
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
 
-        int index = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[1]->data);
-        auto list = static_cast<List*>(params[0]);
-        int n = params.size() > 2 ? *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[2]->data) : 1;
+        int index = std::static_pointer_cast<Number>(params[1])->n;
+        auto list = std::static_pointer_cast<List>(params[0]);
+        int n = params.size() > 2 ? std::static_pointer_cast<Number>(params[2])->n : 1;
 
-        if(index+n < 0 || index+n > list->size){
-            cursor->setError("'"+name+"': position("+std::to_string(index+n)+") is out of range("+std::to_string(list->size)+")");
-            return new Item();
+        if(index+n < 0 || index+n > list->data.size()){
+            cursor->setError("'"+name+"': position("+std::to_string(index+n)+") is out of range("+std::to_string(list->data.size())+")");
+            return std::make_shared<Item>(Item());
         }      
 
-        std::vector<Item*> result;
-        for(int i = 0; i < list->size; ++i){
+        std::vector<std::shared_ptr<Item>> result;
+        for(int i = 0; i < list->data.size(); ++i){
             if(i >= index && i < index+n){
                 result.push_back(list->get(i));
             }
         }
 
-        return static_cast<Item*>(new List(result, false));
+        return std::static_pointer_cast<Item>(std::make_shared<List>(List(result, false)));
 
-    }, false));
+    }, false)));
 
 
-    ctx->set("l-cut", new Function({"l", "p", "n"}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+    ctx->set("l-cut", std::make_shared<Function>(Function({"l", "p", "n"}, [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
         FunctionConstraints consts;
         consts.setMinParams(2);
         consts.setMaxParams(3);
@@ -2337,31 +2248,32 @@ static void addStandardOperators(Context *ctx){
         std::string errormsg;
         if(!consts.test(params, errormsg)){
             cursor->setError("'"+name+"': "+errormsg);
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
 
-        int index = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[1]->data);
-        auto list = static_cast<List*>(params[0]);
-        int n = params.size() > 2 ? *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[2]->data) : 1;
+        int index = std::static_pointer_cast<Number>(params[1])->n;
+        auto list = std::static_pointer_cast<List>(params[0]);
+        int n = params.size() > 2 ? std::static_pointer_cast<Number>(params[2])->n : 1;
 
-        if(index+n < 0 || index+n > list->size){
-            cursor->setError("'"+name+"': position("+std::to_string(index+n)+") is out of range("+std::to_string(list->size)+")");
-            return new Item();
+        if(index+n < 0 || index+n > list->data.size()){
+            cursor->setError("'"+name+"': position("+std::to_string(index+n)+") is out of range("+std::to_string(list->data.size())+")");
+            return std::make_shared<Item>(Item());
         }      
 
-        std::vector<Item*> result;
-        for(int i = 0; i < list->size; ++i){
+        std::vector<std::shared_ptr<Item>> result;
+        for(int i = 0; i < list->data.size(); ++i){
             if(i >= index && i < index+n){
                 continue;
             }
             result.push_back(list->get(i));
         }
 
-        return static_cast<Item*>(new List(result, false));
+        return std::static_pointer_cast<Item>(std::make_shared<List>(List(result, false)));
 
-    }, false));      
 
-    ctx->set("l-reverse", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+    }, false)));      
+
+    ctx->set("l-reverse", std::make_shared<Function>(Function({}, [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
         FunctionConstraints consts;
         consts.setMinParams(1);
         consts.setExpectType(ItemTypes::LIST);
@@ -2371,38 +2283,40 @@ static void addStandardOperators(Context *ctx){
         std::string errormsg;
         if(!consts.test(params, errormsg)){
             cursor->setError("'l-reverse': "+errormsg);
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
 
-        auto reverse = [&](List *lst){
-            std::vector<Item*> result;
-            for(int i = 0; i < lst->size; ++i){
-                result.push_back(lst->get(lst->size-1 - i));
+        auto reverse = [&](std::shared_ptr <List> &lst){
+            std::vector<std::shared_ptr<Item>> result;
+            for(int i = 0; i < lst->data.size(); ++i){
+                result.push_back(lst->get(lst->data.size()-1 - i));
             }
-            return new List(result);
+            return std::make_shared<List>(List(result, false));
         };
 
         if(params.size() == 1){
-            return static_cast<Item*>(reverse(static_cast<List*>(params[0])));
+            auto item = std::static_pointer_cast<List>(params[0]);
+            return std::static_pointer_cast<Item>(reverse(item));
         }else{
-            std::vector<Item*> items;
+            std::vector<std::shared_ptr<Item>> items;
             for(int i = 0; i < params.size(); ++i){
+                auto item = std::static_pointer_cast<List>(params[i]);
                 items.push_back(
-                    static_cast<Item*>(reverse(static_cast<List*>(params[i])))
+                    std::static_pointer_cast<Item>(reverse(item))
                 );
             }
-            return static_cast<Item*>(new List(items, false));
+            return std::static_pointer_cast<Item>(std::make_shared<List>(List(items, false)));
         }
 
 
 
-    }, true));        
+    }, true)));        
 
 
     /*
         STRING
     */
-    ctx->set("s-reverse", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+    ctx->set("s-reverse", std::make_shared<Function>(Function({}, [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
         FunctionConstraints consts;
         consts.setMinParams(1);
         consts.setExpectType(ItemTypes::LIST);
@@ -2412,34 +2326,36 @@ static void addStandardOperators(Context *ctx){
         std::string errormsg;
         if(!consts.test(params, errormsg)){
             cursor->setError("'l-reverse': "+errormsg);
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
 
-        auto reverse = [&](String *str){
+        auto reverse = [&](std::shared_ptr<String> &str){
             std::string result;
-            for(int i = 0; i < str->size; ++i){
-                result += *(char*)((size_t)str->data + str->size-1 - i);
+            for(int i = 0; i < str->data.size(); ++i){
+                result += str->data[str->data.size()-1 - i];
             }
             return result;
         };
 
         if(params.size() == 1){
-            return static_cast<Item*>(new String(reverse(static_cast<String*>(params[0]))));
+            auto casted = std::static_pointer_cast<String>(params[0]);
+            return std::static_pointer_cast<Item>(std::make_shared<String>(String(reverse(casted))));
         }else{
-            std::vector<Item*> items;
+            std::vector<std::shared_ptr<Item>> items;
             for(int i = 0; i < params.size(); ++i){
+                auto casted = std::static_pointer_cast<String>(params[i]);
                 items.push_back(
-                    static_cast<Item*>(new String(reverse(static_cast<String*>(params[i]))))
+                    std::static_pointer_cast<Item>(std::make_shared<String>(String(reverse(casted))))
                 );
             }
-            return static_cast<Item*>(new List(items, false));
+            return std::static_pointer_cast<Item>(std::make_shared<List>(List(items, false)));
         }
 
 
 
-    }, true));  
+    }, true)));  
 
-    ctx->set("s-join", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+    ctx->set("s-join", std::make_shared<Function>(Function({}, [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
         FunctionConstraints consts;
         // consts.setMinParams(2);
         consts.allowMisMatchingTypes = false;
@@ -2450,17 +2366,17 @@ static void addStandardOperators(Context *ctx){
         std::string errormsg;
         if(!consts.test(params, errormsg)){
             cursor->setError("'"+name+"': "+errormsg);
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
         std::string result;
         for(int i = 0; i < params.size(); ++i){
-            auto str = static_cast<String*>(params[i]);
+            auto str = std::static_pointer_cast<String>(params[i]);
             result += str->get();
         }
-        return static_cast<Item*>(new String(result));
-    }, true));   
+        return std::static_pointer_cast<Item>(std::make_shared<String>(String(result)));
+    }, true)));   
 
-    ctx->set("s-cut", new Function({"s", "p", "n"}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+    ctx->set("s-cut", std::make_shared<Function>(Function({"s", "p", "n"}, [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
         FunctionConstraints consts;
         consts.setMinParams(2);
         consts.setMaxParams(3);
@@ -2474,34 +2390,34 @@ static void addStandardOperators(Context *ctx){
         std::string errormsg;
         if(!consts.test(params, errormsg)){
             cursor->setError("'"+name+"': "+errormsg);
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
 
 
 
-        int index = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[1]->data);
-        auto str = static_cast<String*>(params[0]);
-        int n = params.size() > 2 ? *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[2]->data) : 1;
+        int index = std::static_pointer_cast<Number>(params[1])->n;
+        auto str = std::static_pointer_cast<String>(params[0]);
+        int n = params.size() > 2 ? std::static_pointer_cast<Number>(params[2])->n : 1;
 
-        if(index+n < 0 || index+n > str->size){
-            cursor->setError("'"+name+"': position("+std::to_string(index+n)+") is out of range("+std::to_string(str->size)+")");
-            return new Item();
+        if(index+n < 0 || index+n > str->data.size()){
+            cursor->setError("'"+name+"': position("+std::to_string(index+n)+") is out of range("+std::to_string(str->data.size())+")");
+            return std::make_shared<Item>(Item());
         }      
 
         std::string result;
-        for(int i = 0; i < str->size; ++i){
+        for(int i = 0; i < str->data.size(); ++i){
             if(i >= index && i < index+n){
                 continue;
             }
-            result += *(char*)((size_t)str->data + i);
+            result += str->data[i];
         }
 
-        return static_cast<Item*>(new String(result));
+        return std::static_pointer_cast<Item>(std::make_shared<String>(String(result)));
 
-    }, false));       
+    }, false)));       
 
 
-    ctx->set("s-sub", new Function({"s", "p", "n"}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+    ctx->set("s-sub", std::make_shared<Function>(Function({"s", "p", "n"}, [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
         FunctionConstraints consts;
         consts.setMinParams(2);
         consts.setMaxParams(3);
@@ -2515,102 +2431,105 @@ static void addStandardOperators(Context *ctx){
         std::string errormsg;
         if(!consts.test(params, errormsg)){
             cursor->setError("'"+name+"': "+errormsg);
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
 
 
-        int index = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[1]->data);
-        auto str = static_cast<String*>(params[0]);
-        int n = params.size() > 2 ? *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[2]->data) : 1;
+        int index = std::static_pointer_cast<Number>(params[1])->n;
+        auto str = std::static_pointer_cast<String>(params[0]);
+        int n = params.size() > 2 ? std::static_pointer_cast<Number>(params[2])->n : 1;
 
-        if(index+n < 0 || index+n > str->size){
-            cursor->setError("'"+name+"': position("+std::to_string(index+n)+") is out of range("+std::to_string(str->size)+")");
-            return new Item();
+        if(index+n < 0 || index+n > str->data.size()){
+            cursor->setError("'"+name+"': position("+std::to_string(index+n)+") is out of range("+std::to_string(str->data.size())+")");
+            return std::make_shared<Item>(Item());
         }      
 
         std::string result;
-        for(int i = 0; i < str->size; ++i){
+        for(int i = 0; i < str->data.size(); ++i){
             if(i >= index && i < index+n){
-                result += *(char*)((size_t)str->data + i);
+                result += str->data[i];
             }
         }
 
-        return static_cast<Item*>(new String(result));
+        return std::static_pointer_cast<Item>(std::make_shared<String>(String(result)));
 
-    }, false));     
+    }, false)));     
 
 
     /*
         LOGIC
     */
-    ctx->set("or", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+    ctx->set("or", std::make_shared<Function>(Function({}, [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
         FunctionConstraints consts;
         consts.setMinParams(1);
         std::string errormsg;
         if(!consts.test(params, errormsg)){
             cursor->setError("'or': "+errormsg);
-            return static_cast<Item*>(new Item());
+            return std::make_shared<Item>(Item());
         }
 
         for(int i = 0; i < params.size(); ++i){
-            if( (params[i]->type == ItemTypes::NUMBER && *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data) != 0) ||
+            if( (params[i]->type == ItemTypes::NUMBER && std::static_pointer_cast<Number>(params[i])->n != 0) ||
                 (params[i]->type != ItemTypes::NIL && params[i]->type != ItemTypes::NUMBER)){
-                return static_cast<Item*>(new Number(1));
+                return std::static_pointer_cast<Item>(std::make_shared<Number>(Number(1)));
             }
         }
 
-        return static_cast<Item*>(new Number(0));
-    }, true));        
-    ctx->set("and", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+        return std::static_pointer_cast<Item>(std::make_shared<Number>(Number(0)));
+    }, true)));        
+
+    ctx->set("and", std::make_shared<Function>(Function({}, [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
         FunctionConstraints consts;
         consts.setMinParams(1);
         std::string errormsg;
         if(!consts.test(params, errormsg)){
             cursor->setError("'and': "+errormsg);
-            return static_cast<Item*>(new Item());
+            return std::make_shared<Item>(Item());
         }
 
         for(int i = 0; i < params.size(); ++i){
-            if( (params[i]->type == ItemTypes::NUMBER && *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data) == 0) || (params[i]->type == ItemTypes::NIL) ){
-                return static_cast<Item*>(new Number(0));
+            if( (params[i]->type == ItemTypes::NUMBER && std::static_pointer_cast<Number>(params[i])->n == 0) || (params[i]->type == ItemTypes::NIL) ){
+                return std::static_pointer_cast<Item>(std::make_shared<Number>(Number(0)));
             }
         }
 
-        return static_cast<Item*>(new Number(1));
-    }, true));    
+        return std::static_pointer_cast<Item>(std::make_shared<Number>(Number(1)));
+    }, true)));    
 
-    ctx->set("not", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+    ctx->set("not", std::make_shared<Function>(Function({}, [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
         FunctionConstraints consts;
         consts.setMinParams(1);
         std::string errormsg;
         if(!consts.test(params, errormsg)){
             cursor->setError("'not': "+errormsg);
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
-        auto val = [](Item *item){
+        auto val = [](std::shared_ptr<Item> &item){
             if(item->type == ItemTypes::NUMBER){
-                return *static_cast<__CV_NUMBER_NATIVE_TYPE*>(item->data) == 0 ? new Number(1) : new Number(0);
+                return std::static_pointer_cast<Number>(item)->n == 0 ? std::make_shared<Number>(Number(1)) : std::make_shared<Number>(Number(0));
             }else
             if(item->type == ItemTypes::NIL){
-                return new Number(1);
+                return std::make_shared<Number>(Number(1));
             }else{
-                return new Number(0);   
+                return std::make_shared<Number>(Number(0));
             }
         };
         if(params.size() == 1){
-            return static_cast<Item*>(val(params[0]));
+            auto item = params[0];
+            return std::static_pointer_cast<Item>(val(item));
         }else{
-            std::vector<Item*> results;
+            std::vector<std::shared_ptr<Item>> results;
             for(int i = 0; i < params.size(); ++i){
-                results.push_back(val(params[i]));
+                auto item = params[i];
+                results.push_back(std::static_pointer_cast<Item>(val(item)));
             }
-            return static_cast<Item*>(new List(results));
+            return std::static_pointer_cast<Item>(std::make_shared<List>(List(results)));
         }
-        return new Item();
-    }, true));                  
+        return std::make_shared<Item>(Item());
+    }, true)));                  
 
 
-    ctx->set("eq", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+    ctx->set("eq", std::make_shared<Function>(Function({}, [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
         FunctionConstraints consts;
         consts.setMinParams(2);
         consts.allowMisMatchingTypes = false;
@@ -2618,19 +2537,20 @@ static void addStandardOperators(Context *ctx){
         std::string errormsg;
         if(!consts.test(params, errormsg)){
             cursor->setError("'eq': "+errormsg);
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
         auto last = params[0];
         for(int i = 1; i < params.size(); ++i){
-            if(!last->isEq(params[i])){
-                return static_cast<Item*>(new Number(0));
+            auto item = params[i];
+            if(!last->isEq(item)){
+                return std::static_pointer_cast<Item>(std::make_shared<Number>(Number(0)));
             }
         }				
-        return static_cast<Item*>(new Number(1));
-    }, true));     
+        return std::static_pointer_cast<Item>(std::make_shared<Number>(Number(1)));
+    }, true)));     
 
 
-    ctx->set("neq", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+    ctx->set("neq", std::make_shared<Function>(Function({}, [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
         FunctionConstraints consts;
         consts.setMinParams(2);
         consts.allowMisMatchingTypes = false;
@@ -2638,7 +2558,7 @@ static void addStandardOperators(Context *ctx){
         std::string errormsg;
         if(!consts.test(params, errormsg)){
             cursor->setError("'neq': "+errormsg);
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
         for(int i = 0; i < params.size(); ++i){
             auto p1 = params[i];
@@ -2648,15 +2568,15 @@ static void addStandardOperators(Context *ctx){
                 }
                 auto p2 = params[j];
                 if(p1->isEq(p2)){
-                    return static_cast<Item*>(new Number(0));
+                    return std::static_pointer_cast<Item>(std::make_shared<Number>((Number(0))));
                 }
             }
         }				
-        return static_cast<Item*>(new Number(1));
-    }, true));      
+        return std::static_pointer_cast<Item>(std::make_shared<Number>((Number(1))));
+    }, true)));      
 
 
-    ctx->set("gt", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+    ctx->set("gt", std::make_shared<Function>(Function({}, [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
         FunctionConstraints consts;
         consts.setMinParams(2);
         consts.allowNil = false;
@@ -2665,20 +2585,20 @@ static void addStandardOperators(Context *ctx){
         std::string errormsg;
         if(!consts.test(params, errormsg)){
             cursor->setError("'gt': "+errormsg);
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
-        __CV_NUMBER_NATIVE_TYPE last = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data);
+        auto last = std::static_pointer_cast<Number>(params[0])->n;
         for(int i = 1; i < params.size(); ++i){
-            if(last <=  *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data)){
-                return static_cast<Item*>(new Number(0));
+            if(last <= std::static_pointer_cast<Number>(params[i])->n){
+                return std::static_pointer_cast<Item>(std::make_shared<Number>((Number(0))));
             }
-            last = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data);
+            last = std::static_pointer_cast<Number>(params[i])->n;
         }				
-        return static_cast<Item*>(new Number(1));
-    }, true));    
+        return std::static_pointer_cast<Item>(std::make_shared<Number>((Number(1))));
+    }, true)));    
 
 
-    ctx->set("gte", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+    ctx->set("gte", std::make_shared<Function>(Function({}, [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
         FunctionConstraints consts;
         consts.setMinParams(2);
         consts.allowNil = false;
@@ -2687,20 +2607,20 @@ static void addStandardOperators(Context *ctx){
         std::string errormsg;
         if(!consts.test(params, errormsg)){
             cursor->setError("'gte': "+errormsg);
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
-        __CV_NUMBER_NATIVE_TYPE last = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data);
+        auto last = std::static_pointer_cast<Number>(params[0])->n;
         for(int i = 1; i < params.size(); ++i){
-            if(last <  *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data)){
-                return static_cast<Item*>(new Number(0));
+            if(last <  std::static_pointer_cast<Number>(params[i])->n){
+                return std::static_pointer_cast<Item>(std::make_shared<Number>(Number(0)));
             }
-            last = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data);
+            last = std::static_pointer_cast<Number>(params[i])->n;
         }				
-        return static_cast<Item*>(new Number(1));
-    }, true));         
+        return std::static_pointer_cast<Item>(std::make_shared<Number>(Number(1)));
+    }, true)));         
 
 
-    ctx->set("lt", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+    ctx->set("lt", std::make_shared<Function>(Function({}, [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
         FunctionConstraints consts;
         consts.setMinParams(2);
         consts.allowNil = false;
@@ -2709,19 +2629,19 @@ static void addStandardOperators(Context *ctx){
         std::string errormsg;
         if(!consts.test(params, errormsg)){
             cursor->setError("'lt': "+errormsg);
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
-        __CV_NUMBER_NATIVE_TYPE last = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data);
+        auto last = std::static_pointer_cast<Number>(params[0])->n;
         for(int i = 1; i < params.size(); ++i){
-            if(last >=  *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data)){
-                return static_cast<Item*>(new Number(0));
+            if(last >=  std::static_pointer_cast<Number>(params[i])->n){
+                return std::static_pointer_cast<Item>(std::make_shared<Number>(Number(0)));
             }
-            last = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data);
+            last = std::static_pointer_cast<Number>(params[i])->n;
         }				
-        return static_cast<Item*>(new Number(1));
-    }, true));    
+        return std::static_pointer_cast<Item>(std::make_shared<Number>(Number(1)));
+    }, true)));    
 
-    ctx->set("lte", new Function({}, [](const std::vector<Item*> &params, Cursor *cursor, Context *ctx){
+    ctx->set("lte", std::make_shared<Function>(Function({}, [](const std::vector<std::shared_ptr<Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx){
         FunctionConstraints consts;
         consts.setMinParams(2);
         consts.allowNil = false;
@@ -2730,44 +2650,46 @@ static void addStandardOperators(Context *ctx){
         std::string errormsg;
         if(!consts.test(params, errormsg)){
             cursor->setError("'gte': "+errormsg);
-            return new Item();
+            return std::make_shared<Item>(Item());
         }
-        __CV_NUMBER_NATIVE_TYPE last = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[0]->data);
+        auto last = std::static_pointer_cast<Number>(params[0])->n;
         for(int i = 1; i < params.size(); ++i){
-            if(last >  *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data)){
-                return static_cast<Item*>(new Number(0));
+            if(last >  std::static_pointer_cast<Number>(params[i])->n){
+                return std::static_pointer_cast<Item>(std::make_shared<Number>(Number(0)));
             }
-            last = *static_cast<__CV_NUMBER_NATIVE_TYPE*>(params[i]->data);
+            last = std::static_pointer_cast<Number>(params[i])->n;
         }				
-        return static_cast<Item*>(new Number(1));
-    }, true));    
+        return std::static_pointer_cast<Item>(std::make_shared<Number>(Number(1)));
+    }, true)));    
          
 }
 
 
 int main(){
 
-    Context ctx;
+    auto ctx = std::make_shared<Context>(Context());
     Cursor cursor;
 
-    addStandardOperators(&ctx);
+    addStandardOperators(ctx);
     // Context nctx;
     // nctx.set("a", new Number(25));
     // ctx.set("test", &nctx);
 
-    // auto r = interpret(":", &cursor, &ctx);
+    auto r = interpret("set a [ct 99~n]", &cursor, ctx);
+    r = interpret("a: ++ n", &cursor, ctx);
+    // auto r = interpret("set a 'hola como estas?'|list", &cursor, ctx);
+    // auto r = interpret("+ 1 2 3 4", &cursor, ctx);
 
-    // auto r = interpret("set a 'hola como estas?'|list", &cursor, &ctx);
-    auto r = interpret("s-join ['hola como estas?'|list]^", &cursor, &ctx);
+    // auto r = interpret("s-join ['hola como estas?'|list]^", &cursor, ctx);
     // auto r = interpret("[1 2 [3 4 5]|n]", &cursor, &ctx);
     // auto r = interpret("[1 [28 28]^ 3]^ [4 5 6]^ [7 8 [99 99]^]^]", &cursor, &ctx);
 
-    std::cout << ItemToText(r) << std::endl;
+    std::cout << ItemToText(r.get()) << std::endl;
     // return 0;
     if(cursor.error){
         std::cout << cursor.message << std::endl;
     }
-    ctx.debug();
+    ctx->debug();
 
     // ctx.deconstruct();
 
