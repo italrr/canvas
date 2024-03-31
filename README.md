@@ -20,7 +20,7 @@ Short summary:
 - Parallelism and concurrency are first class citizens
 - Honestly? Downright different (Hopefully within reason). This project still needs to be proven, so don't expect anything serious for now.
 
-**canvas** expression structure
+Typical **canvas** _imperative_ expression structure
 ```
 [OPERATOR(OPTIONAL MODIFIER) ARGUMENTS]
 ```
