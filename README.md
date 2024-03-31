@@ -39,11 +39,11 @@ Modifiers are (sometimes complex) abstractions that can be used to drive the con
     - `5~n`
     - `[ct 2.5~n 15~r]`
     - `[l-range 1 10]~range`
-- `:`: **The Scope**. It allows switching contexts. Either directly accessing a specific variable within that context or complety switch the currently context in the flow. Examples:
+- `:`: **The Scope**. It allows switching contexts. Either directly accessing a specific variable within that context or complety switch the current context in the flow. Examples:
     - `set test [ct 10~n]` -> `test:n`: Should print 10.
     - `set test [ct 10~n]` -> `test: + 1 1`: Should increase `n` within `test` to 11.
 - `|`: **The Trait**. It allows accessing/executing traits inate to specific types. See below.
-- `^`: **The Expander** or simply Expand. It's a handy modifier that basically takes a list and expands it to make it so everything item it contains will take a space within the current execution. For example, when operator `+` will sum all arguments you give it. What if you want to sum all numbers within a List? That's where Expand comes in. See:
+- `^`: **The Expander** or simply Expand. It's a handy modifier that basically takes a list and expands it to make it so every item it contains will take a space within the current execution. For example, when operator `+` will sum all arguments you give it. What if you want to sum all numbers within a List? That's where Expand comes in. See:
     ```
         set a [1 2 3]
         set b [+ a^]
