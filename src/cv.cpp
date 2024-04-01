@@ -225,6 +225,7 @@ CV::Trait::Trait(){
 */
 CV::Item::Item(){
     registerTraits();
+    this->copyable = true;
     this->type = CV::ItemTypes::NIL;
 }
 
@@ -300,15 +301,6 @@ bool CV::Item::isEq(std::shared_ptr<CV::Item> &item){
 std::shared_ptr<CV::Item> CV::Item::copy(bool deep){
     return std::make_shared<CV::Item>(CV::Item());
 }
-
- bool CV::Item::clear(bool deep){
-    if(this->type == CV::ItemTypes::NIL){
-        return false;
-    }
-
-    return true;
-}
-
 
 /*
 
@@ -479,7 +471,7 @@ std::shared_ptr<CV::Item> CV::List::copy(bool deep){
     this->accessMutex.lock();
     std::vector<std::shared_ptr<Item>> toCopy;
     for(int i = 0; i < this->data.size(); ++i){
-        toCopy.push_back(deep ? this->data[i]->copy() : this->data[i]);
+        toCopy.push_back(deep && this->data[i]->copyable ? this->data[i]->copy() : this->data[i]);
     }            
     this->accessMutex.unlock();
     return std::static_pointer_cast<CV::Item>(std::make_shared<CV::List>(toCopy));
@@ -489,10 +481,7 @@ void CV::List::set(const std::vector<std::shared_ptr<CV::Item>> &list, bool toCo
     this->accessMutex.lock();
     this->type = CV::ItemTypes::LIST;
     for(int i = 0; i < list.size(); ++i){
-        // problem is copying top
-        std::cout << ItemToText(list[i].get()) << std::endl;
-        this->data.push_back(toCopy ? list[i]->copy() : list[i]);
-        std::cout << "HUH?" << std::endl;
+        this->data.push_back(toCopy && list[i]->copyable ? list[i]->copy() : list[i]);
     }        
     this->accessMutex.unlock();
 }
@@ -503,14 +492,6 @@ std::shared_ptr<CV::Item> CV::List::get(size_t index){
     this->accessMutex.unlock();
     return v;
 }
-
-bool CV::List::clear(bool deep){
-    if(this->type == CV::ItemTypes::NIL){
-        return false;
-    }
-    return true;
-}   
-
 
 /*
 
@@ -825,7 +806,7 @@ std::shared_ptr<CV::Item> CV::Context::copy(bool deep){
     auto item = std::make_shared<CV::Context>(this->head);
     item->type = this->type;
     for(auto &it : this->vars){
-        item->vars[it.first] = deep ? it.second->copy() : it.second;
+        item->vars[it.first] = deep && it.second->copyable ? it.second->copy() : it.second;
     }        
     this->accessMutex.unlock();
     return item;
@@ -897,15 +878,6 @@ CV::Context::Context(std::shared_ptr<CV::Context> &ctx){
     this->head = ctx;
     this->setTop(ctx);
 }    
-
-
-bool CV::Context::clear(bool deep){
-    if(this->type == CV::ItemTypes::NIL){
-        return false;
-    }
-
-    return true;
-}
 
 void CV::Context::debug(){
     std::cout << "\n\n==================CONTEXT DEBUG==================" << std::endl;
@@ -1293,19 +1265,31 @@ static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV
                 }
                 // ANY_NUMBER type trait
                 if(CV::Tools::isNumber(name) && item->hasTrait(CV::TraitType::ANY_NUMBER)){
-                    return item->runTrait(CV::TraitType::ANY_NUMBER, name, cursor, ctx, effects);    
+                    auto result = item->runTrait(CV::TraitType::ANY_NUMBER, name, cursor, ctx, effects);  
+                    if(cursor->error){
+                        return std::make_shared<CV::Item>(CV::Item());
+                    }                         
+                    item = result;
                 }else
                 // ANY_STRING type trait
                 if(!CV::Tools::isNumber(name) && item->hasTrait(CV::TraitType::ANY_STRING)){
-                    return item->runTrait(CV::TraitType::ANY_STRING, name, cursor, ctx, effects);    
+                    auto result = item->runTrait(CV::TraitType::ANY_STRING, name, cursor, ctx, effects);    
+                    if(cursor->error){
+                        return std::make_shared<CV::Item>(CV::Item());
+                    }                       
+                    item = result;
                 }else                
                 // Regular trait
                 if(!item->hasTrait(name)){
                     cursor->setError("'"+CV::ModifierTypes::str(CV::ModifierTypes::SCOPE)+"': Trait '"+name+"' doesn't belong to '"+CV::ItemTypes::str(item->type)+"' type.");
                     return item;                      
+                }else{
+                    auto result = item->runTrait(name, "", cursor, ctx, effects);
+                    if(cursor->error){
+                        return std::make_shared<CV::Item>(CV::Item());
+                    }                       
+                    item = result;
                 }
-                auto result = item->runTrait(name, "", cursor, ctx, effects);
-                item = result;
             } break;            
             case CV::ModifierTypes::LINKER: {
 
@@ -1461,11 +1445,9 @@ static void processPostInterpretExpandListOrContext(std::shared_ptr<CV::Item> &s
 
 static std::shared_ptr<CV::Item> processIteration(const std::vector<CV::Token> &tokens, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, bool postEval){
     std::vector<std::shared_ptr<CV::Item>> items;
-    std::cout << "xd1" << std::endl;
     for(int i = 0; i < tokens.size(); ++i){
         CV::ModifierEffect effects;
         auto solved = eval({tokens[i]}, cursor, ctx, postEval);
-        std::cout << "xd2" << std::endl;
         if(cursor->error){
             return std::make_shared<CV::Item>(CV::Item());
         }
@@ -1481,16 +1463,12 @@ static std::shared_ptr<CV::Item> processIteration(const std::vector<CV::Token> &
                 return std::static_pointer_cast<CV::Item>(interrupt);
             }
         }   
-        std::cout << "xd3" << std::endl;
         processPostInterpretExpandListOrContext(solved, effects, items, cursor, NULL);
-        std::cout << "xd4" << std::endl;
         if(cursor->error){
             return std::make_shared<CV::Item>(CV::Item());
         }                           
     }
-    std::cout << "no way" << std::endl;
     auto r = tokens.size() == 1 ? items[0] : std::make_shared<CV::List>(items);
-    std::cout << "nheh" << std::endl;
     return r;
 }
 
@@ -1918,9 +1896,7 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
                 return eval(inlineCode, cursor, effects.toCtx); // Check if toCtx is null? Shouldn't be possible tho
             }else{
             // List it is
-                std::cout << "no way XD" << std::endl;
                 auto r = processIteration(tokens, cursor, ctx, false);
-                std::cout << "oskerr" << std::endl;
                 return r;
             }
         }

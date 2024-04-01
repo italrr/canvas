@@ -76,6 +76,7 @@ int main(int argc, char* argv[]){
 	CV::Cursor cursor;
 	bool useColors = dashC->valid;
 	auto ctx = std::make_shared<CV::Context>();
+	ctx->copyable = false; // top contexts shouldn't be copied (only referenced)
 	CV::AddStandardOperators(ctx);
 	io::registerLibrary(ctx);
 

@@ -269,7 +269,7 @@
             uint8_t type;
             std::unordered_map<std::string, Trait> traits;
             std::unordered_map<uint8_t, Trait> traitsAny;
-            
+            bool copyable;
             std::mutex accessMutex; 
 
             Item(const Item &other){
@@ -298,7 +298,6 @@
             virtual bool isEq(std::shared_ptr<Item> &item);
             virtual std::shared_ptr<Item> copy(bool deep = true);
 
-            virtual bool clear(bool deep = true);
         };
 
         struct Interrupt : Item {
@@ -379,7 +378,6 @@
 
             size_t size();
 
-            bool clear(bool deep = true);      
 
         };
 
@@ -500,7 +498,6 @@
             Context();
             Context(std::shared_ptr<Context> &ctx);
 
-            bool clear(bool deep = true);
 
             void debug();
 
