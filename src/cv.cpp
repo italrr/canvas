@@ -2,6 +2,7 @@
 #include <iostream>
 #include <algorithm>
 #include <cmath>
+#include <mutex> 
 
 #include "CV.hpp"
 namespace CV {
@@ -116,37 +117,58 @@ namespace CV {
 */
 CV::Trait::Trait(){
     this->type = CV::TraitType::SPECIFIC;
-    this->action = [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    this->action = [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         return std::shared_ptr<CV::Item>(NULL);
     };
 }
 
+/* 
+
+    ITEM
+
+*/
 CV::Item::Item(){
     registerTraits();
     this->type = CV::ItemTypes::NIL;
 }
 
-void CV::Item::registerTrait(uint8_t type, const std::function<std::shared_ptr<CV::Item>(Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx)> &action){
+void CV::Item::registerTraits(){
+    this->registerTrait("copy", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+        if(subject->type == CV::ItemTypes::NIL){
+            return std::make_shared<Item>();
+        }
+        effects.postEval = false;
+        return std::static_pointer_cast<CV::Item>(subject->copy(true));
+    });
+    this->registerTrait("type", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+        if(subject->type == CV::ItemTypes::NIL){
+            return std::make_shared<Item>();
+        }
+        return std::static_pointer_cast<CV::Item>( std::make_shared<CV::String>(CV::String(  CV::ItemTypes::str(subject->type)  )));
+    });    
+}
+
+void CV::Item::registerTrait(uint8_t type, const std::function<std::shared_ptr<CV::Item>(Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects)> &action){
     Trait trait;
     trait.action = action;
     trait.type = type;
     this->traitsAny[type] = trait;
 }    
 
-void CV::Item::registerTrait(const std::string &name, const std::function<std::shared_ptr<CV::Item>(Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx)> &action){
+void CV::Item::registerTrait(const std::string &name, const std::function<std::shared_ptr<CV::Item>(Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects)> &action){
     Trait trait;
     trait.name = name;
     trait.action = action;
     this->traits[name] = trait;
 }
 
-std::shared_ptr<CV::Item> CV::Item::runTrait(const std::string &name, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+std::shared_ptr<CV::Item> CV::Item::runTrait(const std::string &name, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
     auto &trait = this->traits.find(name)->second;
-    return trait.action( this, value, cursor, ctx);
+    return trait.action( this, value, cursor, ctx, effects);
 }
 
-std::shared_ptr<CV::Item> CV::Item::runTrait(uint8_t type, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
-    return this->traitsAny.find(type)->second.action(this, value, cursor, ctx);
+std::shared_ptr<CV::Item> CV::Item::runTrait(uint8_t type, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    return this->traitsAny.find(type)->second.action(this, value, cursor, ctx, effects);
 }    
 
 bool CV::Item::hasTrait(const std::string &name){
@@ -230,25 +252,25 @@ bool CV::Number::isEq(std::shared_ptr<CV::Item> &item){
 }    
 
 void CV::Number::registerTraits(){
-    this->registerTrait("is-neg", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    this->registerTrait("is-neg", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(CV::Number(static_cast<Number*>(subject)->n < 0)));
     });
-    this->registerTrait("inv", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    this->registerTrait("inv", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(CV::Number(static_cast<Number*>(subject)->n * -1)));
     });    
-    this->registerTrait("is-odd", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    this->registerTrait("is-odd", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(CV::Number( (int)static_cast<Number*>(subject)->n % 2 != 0)));
     });   
-    this->registerTrait("is-even", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    this->registerTrait("is-even", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
@@ -284,7 +306,7 @@ CV::List::List(const std::vector<std::shared_ptr<CV::Item>> &list, bool toCopy){
 }
 
 void CV::List::registerTraits(){
-    this->registerTrait(CV::TraitType::ANY_NUMBER, [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    this->registerTrait(CV::TraitType::ANY_NUMBER, [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
@@ -296,14 +318,14 @@ void CV::List::registerTraits(){
         }
         return list->get(index); 
     });        
-    this->registerTrait("n", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    this->registerTrait("n", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
         auto list = static_cast<List*>(subject); 
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(CV::Number(list->data.size())));
     });
-    this->registerTrait("reverse", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    this->registerTrait("reverse", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
@@ -359,7 +381,7 @@ CV::String::String(const std::string &str){
 }    
 
 void CV::String::registerTraits(){ 
-    this->registerTrait(CV::TraitType::ANY_NUMBER, [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    this->registerTrait(CV::TraitType::ANY_NUMBER, [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
@@ -371,14 +393,14 @@ void CV::String::registerTraits(){
         }
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::String>(CV::String(  std::string("")+str->data[index]  )));
     });           
-    this->registerTrait("n", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    this->registerTrait("n", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
         auto str = static_cast<String*>(subject);
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(CV::Number( str->data.size() )));
     });
-    this->registerTrait("list", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    this->registerTrait("list", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
@@ -392,7 +414,7 @@ void CV::String::registerTraits(){
 
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::List>(CV::List(result)));
     });        
-    this->registerTrait("reverse", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    this->registerTrait("reverse", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
@@ -496,8 +518,21 @@ CV::Function::Function(const std::vector<std::string> &params, const std::functi
 }    
 
 
+std::shared_ptr<CV::Item> CV::Function::copy(bool deep) const {
+    auto fn = std::make_shared<Function>(Function());
+    fn->params = this->params;
+    fn->body = this->body;
+    fn->binary = this->binary;
+    fn->variadic = this->variadic;
+    fn->threaded = this->threaded;
+    fn->async = this->async;
+    fn->type = this->type;
+    fn->fn = this->fn;
+    return std::static_pointer_cast<Item>(fn);
+}
+
 void CV::Function::registerTraits(){
-    this->registerTrait("is-variadic", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    this->registerTrait("is-variadic", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
@@ -505,7 +540,7 @@ void CV::Function::registerTraits(){
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(CV::Number( func->variadic )));
     });
 
-    this->registerTrait("is-binary", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    this->registerTrait("is-binary", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
@@ -513,7 +548,27 @@ void CV::Function::registerTraits(){
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(CV::Number( func->binary )));
     }); 
 
-    this->registerTrait("n-args", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    this->registerTrait("async", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+        if(subject->type == CV::ItemTypes::NIL){
+            return std::make_shared<Item>();
+        }
+        auto copy = std::static_pointer_cast<Function>(static_cast<Function*>(subject)->copy());
+        copy->async = true;
+        copy->threaded = false;
+        return std::static_pointer_cast<CV::Item>(copy);
+    }); 
+
+    this->registerTrait("untether", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+        if(subject->type == CV::ItemTypes::NIL){
+            return std::make_shared<Item>();
+        }
+        auto copy = std::static_pointer_cast<Function>(static_cast<Function*>(subject)->copy());
+        copy->async = false;
+        copy->threaded = true;
+        return std::static_pointer_cast<CV::Item>(copy);
+    });     
+
+    this->registerTrait("n-args", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
@@ -521,7 +576,7 @@ void CV::Function::registerTraits(){
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(CV::Number( func->params.size()  )));            
     });   
 
-    this->registerTrait("proto", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    this->registerTrait("proto", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
@@ -551,6 +606,11 @@ void CV::Function::set(const std::vector<std::string> &params, const std::functi
     this->variadic = variadic;
 }
 
+/*
+
+CONTEXT
+
+*/
 std::shared_ptr<CV::Item> CV::Context::get(const std::string &name){
     auto it = vars.find(name);
     if(it == vars.end()){
@@ -876,7 +936,7 @@ bool CV::FunctionConstraints::test(List *list, std::string &errormsg){
 }
 
 bool CV::FunctionConstraints::test(const std::vector<std::shared_ptr<CV::Item>> &items, std::string &errormsg){
-    if(!enabled || items.size() == 0){
+    if(!enabled){
         return true;
     }
 
@@ -884,7 +944,6 @@ bool CV::FunctionConstraints::test(const std::vector<std::shared_ptr<CV::Item>> 
         errormsg = "Provided ("+std::to_string(items.size())+") argument(s). Expected no more than ("+std::to_string(maxParams)+") arguments.";
         return false;
     }
-
     if(useMinParams && items.size() < minParams){
         errormsg = "Provided ("+std::to_string(items.size())+") argument(s). Expected no less than ("+std::to_string(minParams)+") arguments.";
         return false;
@@ -957,7 +1016,7 @@ bool CV::FunctionConstraints::test(const std::vector<std::shared_ptr<CV::Item>> 
 }
 
 
-static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx);
+static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, bool postEval = true);
 
 
 static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV::Item> &item, std::vector<CV::ModifierPair> modifiers, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
@@ -973,22 +1032,27 @@ static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV
                 }
                 // ANY_NUMBER type trait
                 if(CV::Tools::isNumber(name) && item->hasTrait(CV::TraitType::ANY_NUMBER)){
-                    return item->runTrait(CV::TraitType::ANY_NUMBER, name, cursor, ctx);    
+                    return item->runTrait(CV::TraitType::ANY_NUMBER, name, cursor, ctx, effects);    
                 }else
                 // ANY_STRING type trait
                 if(!CV::Tools::isNumber(name) && item->hasTrait(CV::TraitType::ANY_STRING)){
-                    return item->runTrait(CV::TraitType::ANY_STRING, name, cursor, ctx);    
+                    return item->runTrait(CV::TraitType::ANY_STRING, name, cursor, ctx, effects);    
                 }else                
                 // Regular trait
                 if(!item->hasTrait(name)){
                     cursor->setError("'"+CV::ModifierTypes::str(CV::ModifierTypes::SCOPE)+"': Trait '"+name+"' doesn't belong to '"+CV::ItemTypes::str(item->type)+"' type");
                     return item;                      
                 }
-                item = item->runTrait(name, "", cursor, ctx);
+                auto result = item->runTrait(name, "", cursor, ctx, effects);
+                // std::cout << CV::ItemToText(result.get()) << std::endl;
+                item = result;
             } break;            
             case CV::ModifierTypes::LINKER: {
 
             } break;
+            case CV::ModifierTypes::UNTETHERED: {
+
+            } break;            
             case CV::ModifierTypes::NAMER: {
                 effects.named = mod.subject;
                 ctx->set(mod.subject, item);
@@ -1044,7 +1108,7 @@ std::shared_ptr<CV::Item> CV::interpret(const CV::Token &token, CV::Cursor *curs
     return eval(tokens, cursor, ctx);
 }
 
-static std::shared_ptr<CV::Item> processIteration(const std::vector<CV::Token> &tokens, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx);
+static std::shared_ptr<CV::Item> processIteration(const std::vector<CV::Token> &tokens, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, bool postEval);
 static void processPostInterpretExpandListOrContext(std::shared_ptr<CV::Item> &solved, CV::ModifierEffect &effects, std::vector<std::shared_ptr<CV::Item>> &items, CV::Cursor *cursor, const std::shared_ptr<CV::Context> &ctx);
 
 
@@ -1118,12 +1182,14 @@ static void processPostInterpretExpandListOrContext(std::shared_ptr<CV::Item> &s
     } 
 }
 
-static std::shared_ptr<CV::Item> processIteration(const std::vector<CV::Token> &tokens, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+static std::shared_ptr<CV::Item> processIteration(const std::vector<CV::Token> &tokens, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, bool postEval){
     std::vector<std::shared_ptr<CV::Item>> items;
     for(int i = 0; i < tokens.size(); ++i){
         CV::ModifierEffect effects;
-        auto interp = interpret(tokens[i], cursor, ctx);
-        auto solved = processPreInterpretModifiers(interp, tokens[i].modifiers, cursor, ctx, effects);
+
+        // std::cout << tokens[i].literal() << std::endl;
+
+        auto solved = eval({tokens[i]}, cursor, ctx, postEval);
         if(cursor->error){
             return std::make_shared<CV::Item>(CV::Item());
         }
@@ -1158,20 +1224,25 @@ static bool checkCond(std::shared_ptr<CV::Item> &item){
     }
 };
 
-static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx,  bool postEval){
 
     auto first = tokens[0];
     auto imp = first.first;
 
     if(imp == "set"){
+
+        if(first.modifiers.size() > 0){
+            cursor->setError("'"+imp+"': Innate constructors don't have modifiers.");
+            return std::make_shared<CV::Item>(CV::Item());
+        }
+                
         auto params = compileTokens(tokens, 1, tokens.size()-1);
         if(params.size() > 2 || params.size() < 2){
             cursor->setError("'set': Expects exactly 2 arguments: <NAME> <VALUE>.");
             return std::make_shared<CV::Item>(CV::Item());
         }
         CV::ModifierEffect effects;
-        auto interp = interpret(params[1], cursor, ctx);
-        auto solved = processPreInterpretModifiers(interp, params[1].modifiers, cursor, ctx, effects);
+        auto solved = eval({params[1]}, cursor, ctx, false);
         if(cursor->error){
             return std::make_shared<CV::Item>(CV::Item());
         }
@@ -1184,10 +1255,16 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
         }
     }else
     if(imp == "skip" || imp == "stop"){
+
+        if(first.modifiers.size() > 0){
+            cursor->setError("'"+imp+"': Innate constructors don't have modifiers.");
+            return std::make_shared<CV::Item>(CV::Item());
+        }
+
         auto interrupt = std::make_shared<CV::Interrupt>(CV::Interrupt(imp == "skip" ? CV::InterruptTypes::SKIP : CV::InterruptTypes::STOP));
         if(tokens.size() > 1){
             auto params = compileTokens(tokens, 1, tokens.size()-1);
-            auto solved = processIteration(params, cursor, ctx);
+            auto solved = processIteration(params, cursor, ctx, postEval);
             if(solved->type == CV::ItemTypes::INTERRUPT){
                 return solved;
             }else{
@@ -1197,12 +1274,18 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
         return std::static_pointer_cast<CV::Item>(interrupt);
     }else
     if(imp == "if"){
+
+        if(first.modifiers.size() > 0){
+            cursor->setError("'"+imp+"': Innate constructors don't have modifiers.");
+            return std::make_shared<CV::Item>(CV::Item());
+        }
+
         if(tokens.size() > 4){
-            cursor->setError("'if': Expects no more than 3 arguments: <CONDITION> <[CODE[0]...CODE[n]]> (ELSE-OPT)<[CODE[0]...CODE[n]]>.");
+            cursor->setError("'"+imp+"': Expects no more than 3 arguments: <CONDITION> <[CODE[0]...CODE[n]]> (ELSE-OPT)<[CODE[0]...CODE[n]]>.");
             return std::make_shared<CV::Item>(CV::Item());
         }
         if(tokens.size() < 3){
-            cursor->setError("'if': Expects no less than 2 arguments: <CONDITION> <[CODE[0]...CODE[n]]> (ELSE-OPT)<[CODE[0]...CODE[n]]>.");
+            cursor->setError("'"+imp+"': Expects no less than 2 arguments: <CONDITION> <[CODE[0]...CODE[n]]> (ELSE-OPT)<[CODE[0]...CODE[n]]>.");
             return std::make_shared<CV::Item>(CV::Item());
         }        
 
@@ -1241,8 +1324,14 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
         }
     }else
     if(imp == "do"){
+
+        if(first.modifiers.size() > 0){
+            cursor->setError("'"+imp+"': Innate constructors don't have modifiers.");
+            return std::make_shared<CV::Item>(CV::Item());
+        }
+
         if(tokens.size() > 3 || tokens.size() < 3){
-            cursor->setError("'do': Expects exactly 2 arguments: <CONDITION> <[CODE[0]...CODE[n]]>.");
+            cursor->setError("'"+imp+"': Expects exactly 2 arguments: <CONDITION> <[CODE[0]...CODE[n]]>.");
             return std::make_shared<CV::Item>(CV::Item());
         }
         auto params = compileTokens(tokens, 1, tokens.size()-1);
@@ -1285,8 +1374,14 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
         return last ? last : std::make_shared<CV::Item>(CV::Item());
     }else
     if(imp == "iter"){
+        
+        if(first.modifiers.size() > 0){
+            cursor->setError("'"+imp+"': Innate constructors don't have modifiers.");
+            return std::make_shared<CV::Item>(CV::Item());
+        }
+
         if(tokens.size() > 3 || tokens.size() < 3){
-            cursor->setError("'iter': Expects exactly 2 arguments: <ITERABLE> <[CODE[0]...CODE[n]]>.");
+            cursor->setError("'"+imp+"': Expects exactly 2 arguments: <ITERABLE> <[CODE[0]...CODE[n]]>.");
             return std::make_shared<CV::Item>(CV::Item());
         }        
         auto params = compileTokens(tokens, 1, tokens.size()-1);
@@ -1372,9 +1467,15 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
         }
     }else
     if(imp == "fn"){
+
+        if(first.modifiers.size() > 0){
+            cursor->setError("'"+imp+"': Innate constructors don't have modifiers.");
+            return std::make_shared<CV::Item>(CV::Item());
+        }
+
         auto params = compileTokens(tokens, 1, tokens.size()-1);
         if(params.size() > 2 || params.size() < 2){
-            cursor->setError("'fn': Expects exactly 2 arguments: <[ARGS[0]...ARGS[n]]> <[CODE[0]...CODE[n]]>.");
+            cursor->setError("'"+imp+"': Expects exactly 2 arguments: <[ARGS[0]...ARGS[n]]> <[CODE[0]...CODE[n]]>.");
             return std::make_shared<CV::Item>(CV::Item());
         }
         bool isVariadic = false;
@@ -1390,39 +1491,53 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
         return std::static_pointer_cast<CV::Item>(  std::make_shared<CV::Function>(isVariadic ? std::vector<std::string>({}) : argNames, code.first, isVariadic)  );
     }else
     if(imp == "ct"){
+
+        if(first.modifiers.size() > 0){
+            cursor->setError("'"+imp+"': Innate constructors don't have modifiers.");
+            return std::make_shared<CV::Item>(CV::Item());
+        }
+
         auto params = compileTokens(tokens, 1, tokens.size()-1);
         auto pctx = std::make_shared<CV::Context>(CV::Context(ctx));
-        for(int i = 0; i < params.size(); ++i){
-            CV::ModifierEffect effects;
-            auto interp = interpret(params[i], cursor, pctx);
-            auto solved = processPreInterpretModifiers(interp, params[i].modifiers, cursor, pctx, effects);
-            if(cursor->error){
-                return std::make_shared<CV::Item>(CV::Item());
-            }                
-            std::vector<std::shared_ptr<CV::Item>> items;
-            processPostInterpretExpandListOrContext(solved, effects, items, cursor, pctx);
-            if(cursor->error){
-                return std::make_shared<CV::Item>(CV::Item());
-            }  
-            for(int j = 0; j < items.size(); ++j){
-                if(effects.named.size() == 0){
-                    pctx->set("v-"+std::to_string(j), items[j]);
+        CV::ModifierEffect effects;
+        auto casted = std::static_pointer_cast<CV::Item>(pctx);
+        auto solved = processPreInterpretModifiers(casted, first.modifiers, cursor, pctx, effects);
+
+        if(solved->type == CV::ItemTypes::CONTEXT){
+            for(int i = 0; i < params.size(); ++i){
+                CV::ModifierEffect effects;
+                auto interp = interpret(params[i], cursor, pctx);
+                auto solved = processPreInterpretModifiers(interp, params[i].modifiers, cursor, pctx, effects);
+                if(cursor->error){
+                    return std::make_shared<CV::Item>(CV::Item());
+                }                
+                std::vector<std::shared_ptr<CV::Item>> items;
+                processPostInterpretExpandListOrContext(solved, effects, items, cursor, pctx);
+                if(cursor->error){
+                    return std::make_shared<CV::Item>(CV::Item());
+                }  
+                for(int j = 0; j < items.size(); ++j){
+                    if(effects.named.size() == 0){
+                        pctx->set("v-"+std::to_string(j), items[j]);
+                    }
                 }
             }
         }
-        return pctx;
+        return solved;
     }else{
         auto var = ctx->get(imp);
+        CV::ModifierEffect effects;        
+        if(var){
+            var = processPreInterpretModifiers(var, first.modifiers, cursor, ctx, effects);
+        }
         // Is it a function?
-        if(var && var->type == CV::ItemTypes::FUNCTION){
+        if(var && var->type == CV::ItemTypes::FUNCTION && postEval && effects.postEval){
             auto fn = std::static_pointer_cast<CV::Function>(var);
             return runFunction(fn, compileTokens(tokens, 1, tokens.size()-1), cursor, ctx);
         }else   
         // Is it just a variable?
         if(var && tokens.size() == 1){
-            CV::ModifierEffect effects;
-            auto r = processPreInterpretModifiers(var, first.modifiers, cursor, ctx, effects);
-            return r;
+            return var;
         }else
         // Is it a natural type?
         if(tokens.size() == 1){
@@ -1480,7 +1595,7 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
                 return eval(inlineCode, cursor, effects.toCtx); // Check if toCtx is null? Shouldn't be possible tho
             }else{
             // List it is
-                return processIteration(tokens, cursor, ctx);
+                return processIteration(tokens, cursor, ctx, false);
             }
         }
     }

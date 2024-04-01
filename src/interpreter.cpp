@@ -36,11 +36,6 @@ std::shared_ptr<ExecArg> getParam(std::vector<std::string> &params, const std::s
 	return v;
 }
 
-static void printCVEntry(bool nl = true){
-	std::string text = std::string("canvas[~] v%.0f.%.0f.%.0f %s [%s]")+(nl ? "\n" : "");
-	printf(text.c_str(), CANVAS_LANG_VERSION[0], CANVAS_LANG_VERSION[1], CANVAS_LANG_VERSION[2], CV::SupportedArchitecture::name(CV::ARCH).c_str(), CV::SupportedPlatform::name(CV::PLATFORM).c_str());
-}
-
 int main(int argc, char* argv[]){
 
 	std::vector<std::string> params;
@@ -55,6 +50,12 @@ int main(int argc, char* argv[]){
 	
 	auto dashV = getParam(params, "-v", true);
 	auto dashVersion = getParam(params, "--version", true);
+
+	auto printCVEntry = [&](bool nl = true){
+		std::string text = std::string("canvas[~] v%.0f.%.0f.%.0f %s [%s]")+(nl ? "\n" : "")+(dashRelax->valid ? "\n>>> RELAXED MODE <<<": "");
+		printf(text.c_str(), CANVAS_LANG_VERSION[0], CANVAS_LANG_VERSION[1], CANVAS_LANG_VERSION[2], CV::SupportedArchitecture::name(CV::ARCH).c_str(), CV::SupportedPlatform::name(CV::PLATFORM).c_str());
+	};
+
 
 	if(dashV->valid || dashVersion->valid){
 		printCVEntry();
@@ -98,7 +99,7 @@ int main(int argc, char* argv[]){
 		printCVEntry(false);
 		while(true){
 			std::cout << std::endl;
-			std::string input;
+			std::string input = "";
 			std::cout << "CV> ";
 			std::getline (std::cin, input);
 
@@ -109,6 +110,7 @@ int main(int argc, char* argv[]){
 					if(!dashRelax->valid){
 						std::exit(1);
 					}
+					cursor.clear();
 				}
 			}
 		}
@@ -120,7 +122,7 @@ int main(int argc, char* argv[]){
 		}
 		std::cout << CV::ItemToText(CV::interpret(cmd, &cursor, ctx).get());
 		if(cursor.error){
-			std::cout <<  cursor.message << std::endl;
+			std::cout << "\n" << cursor.message << std::endl;
 			std::exit(1);
 		}
 		std::exit(0);		

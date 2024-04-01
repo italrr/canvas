@@ -4,6 +4,7 @@
     #include <string>
     #include <functional>
     #include <memory>
+    #include <mutex>     
     #include <unordered_map>
     #include <inttypes.h>    
     #include <vector>
@@ -86,8 +87,11 @@
             int line;
             std::string message;
             Cursor(){
-                error = false;
+                clear();
                 line = 1;
+            }
+            void clear(){
+                error = false;
                 message = "";
             }
             void setError(const std::string &v, int line = -1){
@@ -107,6 +111,7 @@
                 SCOPE,
                 LINKER,
                 EXPAND,
+                UNTETHERED,
                 TRAIT
             };
             static uint8_t getToken(char mod){
@@ -119,6 +124,9 @@
                 if(mod == '<'){
                     return ModifierTypes::LINKER;
                 }else
+                if(mod == '!'){
+                    return ModifierTypes::UNTETHERED;
+                }else                
                 if(mod == '|'){
                     return ModifierTypes::TRAIT;
                 }else        
@@ -136,6 +144,9 @@
                     case ModifierTypes::SCOPE: {
                         return ":";
                     };   
+                    case ModifierTypes::UNTETHERED: {
+                        return "!";
+                    };                       
                     case ModifierTypes::TRAIT: {
                         return "|";
                     };              
@@ -212,10 +223,6 @@
             }
         }
 
-
-
-
-
         namespace TraitType {
             enum TraitType : uint8_t {
                 ANY_NUMBER,
@@ -224,15 +231,43 @@
             };
         }
 
-
         struct Item;
         struct Context;
         struct ItemContextPair;
-        
+
+        struct ModifierPair {
+            uint8_t type;
+            std::string subject;
+            ModifierPair(){
+                type = ModifierTypes::UNDEFINED;
+            }
+            ModifierPair(uint8_t type, const std::string &subject){
+                this->type = type;
+                this->subject = subject;
+
+            }
+        };
+
+        struct ModifierEffect {
+            bool expand;
+            bool ctxSwitch;
+            bool postEval;
+            std::shared_ptr<Context> toCtx;
+            std::string named;
+            ModifierEffect(){
+                this->reset();
+            }
+            void reset(){
+                this->postEval = true;
+                this->expand = false;
+                this->ctxSwitch = false;
+            }
+        };
+
         struct Trait {
             std::string name;
             uint8_t type;
-            std::function<std::shared_ptr<Item>(Item *subject, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx)> action;
+            std::function<std::shared_ptr<Item>(Item *subject, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx, CV::ModifierEffect &effects)> action;
             Trait();
         };
 
@@ -244,19 +279,19 @@
 
             Item();
 
-            void registerTrait(uint8_t type, const std::function<std::shared_ptr<Item>(Item *subject, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx)> &action);
+            void registerTrait(uint8_t type, const std::function<std::shared_ptr<Item>(Item *subject, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx, CV::ModifierEffect &effects)> &action);
             
-            void registerTrait(const std::string &name, const std::function<std::shared_ptr<Item>(Item *subject, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx)> &action);
+            void registerTrait(const std::string &name, const std::function<std::shared_ptr<Item>(Item *subject, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx, CV::ModifierEffect &effects)> &action);
             
-            std::shared_ptr<Item> runTrait(const std::string &name, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx);
+            std::shared_ptr<Item> runTrait(const std::string &name, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx, CV::ModifierEffect &effects);
 
-            std::shared_ptr<Item> runTrait(uint8_t type, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx);   
+            std::shared_ptr<Item> runTrait(uint8_t type, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx, CV::ModifierEffect &effects);   
 
             bool hasTrait(const std::string &name);
 
             bool hasTrait(uint8_t type);
                 
-            virtual void registerTraits(){ }
+            virtual void registerTraits();
 
             virtual bool isEq(std::shared_ptr<Item> &item);
             virtual std::shared_ptr<Item> copy(bool deep = true) const;
@@ -348,9 +383,11 @@
             std::string body;
             std::vector<std::string> params;
             bool binary;
+            bool threaded;
+            bool async;
             bool variadic;
             std::function< std::shared_ptr<CV::Item> (const std::vector<std::shared_ptr<CV::Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx) > fn;
-
+            std::shared_ptr<CV::Item> copy(bool deep = true) const;
             Function();
             Function(const std::vector<std::string> &params, const std::string &body, bool variadic = false);
             Function(const std::vector<std::string> &params, const std::function<std::shared_ptr<CV::Item> (const std::vector<std::shared_ptr<CV::Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx)> &fn, bool variadic = false);
@@ -428,33 +465,6 @@
 
         };        
 
-
-        struct ModifierPair {
-            uint8_t type;
-            std::string subject;
-            ModifierPair(){
-                type = ModifierTypes::UNDEFINED;
-            }
-            ModifierPair(uint8_t type, const std::string &subject){
-                this->type = type;
-                this->subject = subject;
-
-            }
-        };
-
-        struct ModifierEffect {
-            bool expand;
-            bool ctxSwitch;
-            std::shared_ptr<Context> toCtx;
-            std::string named;
-            ModifierEffect(){
-
-            }
-            void reset(){
-                this->expand = false;
-                this->ctxSwitch = false;
-            }
-        };
 
         struct Token {
             std::string first;
