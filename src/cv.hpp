@@ -87,21 +87,9 @@
             bool error;
             int line;
             std::string message;
-            Cursor(){
-                clear();
-                line = 1;
-            }
-            void clear(){
-                error = false;
-                message = "";
-            }
-            void setError(const std::string &v, int line = -1){
-                if(line != -1){
-                    this->line = line;
-                }
-                this->error = true;
-                this->message = v;
-            }
+            Cursor();
+            void clear();
+            void setError(const std::string &v, int line = -1);
         };
 
 
@@ -254,14 +242,18 @@
             bool ctxSwitch;
             bool postEval;
             std::shared_ptr<Context> toCtx;
+            std::string ctxTargetName;
             std::string named;
             ModifierEffect(){
                 this->reset();
             }
             void reset(){
+                this->toCtx = NULL;
+                this->ctxTargetName = "";
                 this->postEval = true;
                 this->expand = false;
                 this->ctxSwitch = false;
+                this->named = "";
             }
         };
 
@@ -518,14 +510,17 @@
             Item *item;
             Context *context;
             std::string name;
+            bool error;
             ItemContextPair(){
                 item = NULL;   
                 context = NULL;
+                error = false;
             }
-            ItemContextPair(Item *item, Context *ctx, const std::string &name){
+            ItemContextPair(Item *item, Context *ctx, const std::string &name, bool error = false){
                 this->item = item;
                 this->context = ctx;
                 this->name = name;
+                this->error = error;
             }
         };         
 
@@ -594,7 +589,7 @@
         void AddStandardOperators(std::shared_ptr<CV::Context> &ctx);
         std::shared_ptr<CV::Item> interpret(const std::string &input, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx);
         std::shared_ptr<CV::Item>  interpret(const CV::Token &token, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx);
-        std::string ItemToText(CV::Item *item);
+        std::string ItemToText(CV::Item *item, bool useColors = false);
 
 
     }

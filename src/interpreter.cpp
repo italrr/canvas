@@ -72,6 +72,7 @@ int main(int argc, char* argv[]){
 		return 0;
 	}
 	CV::Cursor cursor;
+	bool useColors = true;
 	auto ctx = std::make_shared<CV::Context>();
 	CV::AddStandardOperators(ctx);
 	io::registerLibrary(ctx);
@@ -116,7 +117,7 @@ int main(int argc, char* argv[]){
 			std::getline (std::cin, input);
 
 			if(input.size() > 0){
-				std::cout << CV::ItemToText(CV::interpret(input, &cursor, ctx).get()) << std::endl;
+				std::cout << CV::ItemToText(CV::interpret(input, &cursor, ctx).get(), useColors) << std::endl;
 				if(cursor.error){
 					std::cout <<  cursor.message << std::endl;
 					if(!relaxed){
@@ -137,7 +138,7 @@ int main(int argc, char* argv[]){
 			return 0;
 		}
 		auto result = CV::interpret(cmd, &cursor, ctx);
-		std::cout << CV::ItemToText(result.get());
+		std::cout << CV::ItemToText(result.get(), useColors);
 		if(cursor.error){
 			std::cout << "\n" << cursor.message << std::endl;
 			std::exit(1);

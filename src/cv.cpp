@@ -1,13 +1,79 @@
 #include <algorithm>
 #include <iostream>
-#include <algorithm>
+#include <unordered_map>
 #include <cmath>
 #include <mutex> 
+#include <io.h>
 
 #include "CV.hpp"
 
+static bool useColorOnText = false;
+
+
 namespace CV {
     namespace Tools {
+
+        namespace Color {
+            enum Color : int {
+                BLACK,
+                RED,
+                GREEN,
+                YELLOW,
+                BLUE,
+                MAGENTA,
+                CYAN,
+                WHITE,
+                RESET
+            };
+        }
+
+        namespace UnixColor {
+
+            static const std::unordered_map<int, std::string> TextColorCodes = {
+                {0, "\e[0;30m"},
+                {1, "\e[0;31m"},
+                {2, "\e[0;32m"},
+                {3, "\e[0;33m"},
+                {4, "\e[0;34m"},
+                {5, "\e[0;35m"},
+                {6, "\e[0;36m"},
+                {7, "\e[0;37m"},
+                {8, "\e[0m"},
+            };
+
+            static const std::unordered_map<int, std::string> BoldTextColorCodes = {
+                {0, "\e[1;30m"},
+                {1, "\e[1;31m"},
+                {2, "\e[1;32m"},
+                {3, "\e[1;33m"},
+                {4, "\e[1;34m"},
+                {5, "\e[1;35m"},
+                {6, "\e[1;36m"},
+                {7, "\e[1;37m"},
+                {8, "\e[0m"},
+            };        
+
+            static const std::unordered_map<int, std::string> BackgroundColorCodes = {
+                {0, "\e[40m"},
+                {1, "\e[41m"},
+                {2, "\e[42m"},
+                {3, "\e[43m"},
+                {4, "\e[44m"},
+                {5, "\e[45m"},
+                {6, "\e[46m"},
+                {7, "\e[47m"},
+                {8, "\e[0m"},
+            };     
+        }   
+
+        static std::string setTextColor(int color, bool bold = false){
+            return useColorOnText ? (bold ? UnixColor::BoldTextColorCodes.find(color)->second : UnixColor::TextColorCodes.find(color)->second) : "";
+        }
+
+        static std::string setBackgroundColor(int color){
+            return useColorOnText ? (UnixColor::BackgroundColorCodes.find(color)->second) : "";
+
+        }        
 
         static void printList(const std::vector<std::string> &list){ // for debugging
             std::cout << "START" << std::endl;
@@ -110,6 +176,35 @@ namespace CV {
         }  
     }
 }
+
+
+
+
+
+
+CV::Cursor::Cursor(){
+    clear();
+    line = 1;
+}
+
+void CV::Cursor::clear(){
+    error = false;
+    message = "";
+}
+
+void CV::Cursor::setError(const std::string &v, int line){
+    if(line != -1){
+        this->line = line;
+    }
+    this->error = true;
+    this->message = Tools::setTextColor(Tools::Color::RED) +
+                    v +
+                    Tools::setTextColor(Tools::Color::RESET);
+}
+
+
+
+
 
 /*
 
@@ -722,9 +817,8 @@ std::shared_ptr<CV::Item> CV::Context::get(const std::string &name){
 
 std::shared_ptr<CV::Item> CV::Context::copy(bool deep){
     this->accessMutex.lock();
-    auto item = std::make_shared<CV::Context>();
+    auto item = std::make_shared<CV::Context>(this->head);
     item->type = this->type;
-    item->head = this->head;
     for(auto &it : this->vars){
         item->vars[it.first] = deep ? it.second->copy() : it.second;
     }        
@@ -735,6 +829,10 @@ std::shared_ptr<CV::Item> CV::Context::copy(bool deep){
 void CV::Context::setTop(std::shared_ptr<CV::Context> &nctx){
     auto ctop = this->get("top");
     if(ctop.get()){
+        return;
+    }
+    if(ctop.get() == this){
+        // Avoid redundancy
         return;
     }
     this->set("top", nctx);
@@ -792,6 +890,7 @@ CV::Context::Context(){
 CV::Context::Context(std::shared_ptr<CV::Context> &ctx){
     this->type = CV::ItemTypes::CONTEXT;        
     this->head = ctx;
+    this->setTop(ctx);
 }    
 
 
@@ -821,29 +920,38 @@ void CV::Context::debug(){
     }
 }
 
-std::string CV::ItemToText(CV::Item *item){
+std::string CV::ItemToText(CV::Item *item, bool useColors){
+    useColorOnText = useColors;
     switch(item->type){
         default:
         case CV::ItemTypes::NIL: {
-            return "nil";
+            return Tools::setTextColor(Tools::Color::BLUE)+"nil"+Tools::setTextColor(Tools::Color::RESET);
         };
         case CV::ItemTypes::INTERRUPT: {
             auto interrupt = static_cast<CV::Interrupt*>(item);
-            return "[INT-"+CV::InterruptTypes::str(interrupt->intType)+(interrupt->hasPayload() ? " "+CV::ItemToText(interrupt->getPayload().get())+"" : "")+"]";
+            return Tools::setTextColor(Tools::Color::YELLOW)+"[INT-"+CV::InterruptTypes::str(interrupt->intType)+(interrupt->hasPayload() ? " "+CV::ItemToText(interrupt->getPayload().get())+"" : "")+"]"+Tools::setTextColor(Tools::Color::RESET);
         };                
         case CV::ItemTypes::NUMBER: {
             auto r = Tools::removeTrailingZeros(static_cast<CV::Number*>(item)->get());
-            return r;
+            return  Tools::setTextColor(Tools::Color::CYAN) +
+                    r +
+                    Tools::setTextColor(Tools::Color::RESET);
         };
         case CV::ItemTypes::STRING: {
-            return "'"+static_cast<CV::String*>(item)->get()+"'";
+            return Tools::setTextColor(Tools::Color::GREEN)+"'"+static_cast<CV::String*>(item)->get()+"'"+Tools::setTextColor(Tools::Color::RESET);
         };        
         case CV::ItemTypes::FUNCTION: {
-            auto fn = static_cast<CV::Function*>(item);        
-            return "[fn ["+(fn->variadic ? "..." : Tools::compileList(fn->getParams()))+"] ["+(fn->binary ? "BINARY" : fn->getBody() )+"]]";
+            auto fn = static_cast<CV::Function*>(item);      
+
+            std::string start = Tools::setTextColor(Tools::Color::MAGENTA)+"["+Tools::setTextColor(Tools::Color::RESET);
+            std::string end = Tools::setTextColor(Tools::Color::MAGENTA)+"]"+Tools::setTextColor(Tools::Color::RESET);
+            std::string name = Tools::setTextColor(Tools::Color::YELLOW, true)+"fn"+Tools::setTextColor(Tools::Color::RESET);
+            std::string binary = Tools::setTextColor(Tools::Color::BLUE, true)+"BINARY"+Tools::setTextColor(Tools::Color::RESET);
+
+            return start+name+" "+start+(fn->variadic ? "..." : Tools::compileList(fn->getParams()))+end+" "+start+(fn->binary ? binary : fn->getBody() )+end+end;
         };
         case CV::ItemTypes::CONTEXT: {
-            std::string output = "[ct ";
+            std::string output = Tools::setTextColor(Tools::Color::MAGENTA)+"["+Tools::setTextColor(Tools::Color::YELLOW, true)+"ct "+Tools::setTextColor(Tools::Color::RESET);
             auto proto = static_cast<CV::Context*>(item);
             int n = proto->vars.size();
             int c = 0;
@@ -851,29 +959,30 @@ std::string CV::ItemToText(CV::Item *item){
             for(auto &it : proto->vars){
                 auto name = it.first;
                 auto item = it.second;
-                output += CV::ItemToText(item.get())+CV::ModifierTypes::str(CV::ModifierTypes::NAMER)+name;
+                auto body = name == "top" ? Tools::setTextColor(Tools::Color::YELLOW, true)+"<TOP>"+Tools::setTextColor(Tools::Color::MAGENTA) : CV::ItemToText(item.get(), useColors);
+                output += body+CV::ModifierTypes::str(CV::ModifierTypes::NAMER)+Tools::setTextColor(Tools::Color::GREEN)+name+Tools::setTextColor(Tools::Color::RESET);
                 if(c < n-1){
                     output += " ";
                 }
-                ++c;                
+                ++c;
             }
             proto->accessMutex.unlock();
-            return output + "]";            
+            return output + Tools::setTextColor(Tools::Color::MAGENTA)+"]"+Tools::setTextColor(Tools::Color::RESET);     
         };
         case CV::ItemTypes::LIST: {
-            std::string output = "[";
+            std::string output = Tools::setTextColor(Tools::Color::MAGENTA)+"["+Tools::setTextColor(Tools::Color::RESET);
             auto list = static_cast<CV::List*>(item);
 
             list->accessMutex.lock();
             for(int i = 0; i < list->data.size(); ++i){
                 auto item = list->data[i];
-                output += CV::ItemToText(item.get());
+                output += CV::ItemToText(item.get(), useColors);
                 if(i < list->data.size()-1){
                     output += " ";
                 }
             }
             list->accessMutex.unlock();
-            return output + "]";
+            return output + Tools::setTextColor(Tools::Color::MAGENTA)+"]"+Tools::setTextColor(Tools::Color::RESET);
         };         
     }
 }
@@ -1206,9 +1315,11 @@ static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV
                 if(mod.subject.size() > 0){
                     auto subsequent = std::static_pointer_cast<CV::Context>(item)->get(mod.subject);
                     if(!subsequent){
-                        cursor->setError("'"+CV::ModifierTypes::str(CV::ModifierTypes::SCOPE)+"':"+mod.subject+"': Undefined constructor, or operator within this context or above.");
+                        cursor->setError("'"+CV::ModifierTypes::str(CV::ModifierTypes::SCOPE)+"':'"+mod.subject+"': Undefined constructor, or operator within this context or above.");
                         return item;
                     }
+                    effects.toCtx = std::static_pointer_cast<CV::Context>(item);
+                    effects.ctxTargetName = mod.subject;
                     item = subsequent;
                 }else{
                     effects.toCtx = std::static_pointer_cast<CV::Context>(item);
@@ -1378,19 +1489,19 @@ static bool checkCond(std::shared_ptr<CV::Item> &item){
     }
 };
 
-static CV::ItemContextPair findTokenOrigin(CV::Token &token, CV::Context *ctx){
+static CV::ItemContextPair findTokenOrigin(CV::Token &token, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
     auto findName = token.first;
-    if(token.hasModifier(CV::ModifierTypes::SCOPE)){
-        auto container = token.first;
-        auto f = ctx->get(container);
-        if(f.get() && f->type == CV::ItemTypes::CONTEXT){
-            auto nctx = std::static_pointer_cast<CV::Context>(f);
-            auto varname = token.getModifier(CV::ModifierTypes::SCOPE).subject;
-            auto found = nctx->get(varname);
-            if(found.get()){
-                return CV::ItemContextPair(found.get(), nctx.get(), varname);
-            }else{
-                return CV::ItemContextPair(NULL, nctx.get(), varname);
+    // If token has modifiers, then we proceed to process them
+    if(token.modifiers.size() > 0){
+        auto var = ctx->get(token.first);
+        if(var.get()){
+            CV::ModifierEffect effects;
+            auto solved = processPreInterpretModifiers(var, token.modifiers, cursor, ctx, effects);
+            if(cursor->error){
+                return CV::ItemContextPair(NULL, NULL, "", true);
+            }
+            if(effects.toCtx && effects.ctxTargetName.size() > 0){
+                return CV::ItemContextPair(solved.get(), effects.toCtx.get(), effects.ctxTargetName, false);
             }
         }
     }
@@ -1417,7 +1528,12 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
         if(cursor->error){
             return std::make_shared<CV::Item>(CV::Item());
         }
-        auto f = findTokenOrigin(params[0], ctx.get());
+        auto f = findTokenOrigin(params[0], cursor, ctx);
+        
+        //Woops?
+        if(f.error){
+            return std::make_shared<CV::Item>(CV::Item());
+        }else
         // Replace existing item
         if(f.item){
             return f.context->set(f.name, solved);
