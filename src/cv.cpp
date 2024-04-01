@@ -821,6 +821,11 @@ static std::vector<std::string> parseTokens(std::string input, char sep, CV::Cur
     // Parse
     for(int i = 0; i < input.size(); ++i){
         char c = input[i];
+        if(i < input.size()-1 && c == '\\' && input[i+1] == '\'' && onString){
+            buffer += '\'';
+            ++i;
+            continue;
+        }else            
         if(c == '\'' && !onComment){
             onString = !onString;
             buffer += c;
@@ -832,7 +837,7 @@ static std::vector<std::string> parseTokens(std::string input, char sep, CV::Cur
             buffer += '\n';
             ++i;
             continue;
-        }else        
+        }else                
         if(c == '\n' && !onString){
             onComment = false;
             continue;
@@ -918,12 +923,17 @@ std::vector<CV::Token> buildTokens(const std::vector<std::string> &literals, CV:
         // Simple can be inserted right away
         }else{
             auto token = parseTokenWModifier(literals[i]);
-            if(token.first == "" && i > 0){ // This means this modifier belongs to the token before this one
-                auto &prev = tokens[tokens.size()-1];
-                for(int j = 0; j < token.modifiers.size(); ++j){
-                    prev.modifiers.push_back(token.modifiers[j]);
+            if(token.first == ""){ // This means this modifier belongs to the token before this one
+                if(i > 0){
+                    auto &prev = tokens[tokens.size()-1];
+                    for(int j = 0; j < token.modifiers.size(); ++j){
+                        prev.modifiers.push_back(token.modifiers[j]);
+                    }
+                    continue;
+                }else{
+                    cursor->setError("Provided statement trailing modifier. Modifiers can only accompony something.");
+                    return {};
                 }
-                continue;
             }else{
                 tokens.push_back(token);
             }
@@ -1079,7 +1089,7 @@ static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV
                 if(mod.subject.size() > 0){
                     auto subsequent = std::static_pointer_cast<CV::Context>(item)->get(mod.subject);
                     if(!subsequent){
-                        cursor->setError("'"+CV::ModifierTypes::str(CV::ModifierTypes::SCOPE)+"':"+mod.subject+"': Undefined symbol or imperative.");
+                        cursor->setError("'"+CV::ModifierTypes::str(CV::ModifierTypes::SCOPE)+"':"+mod.subject+"': Undefined constructor or operator.");
                         return item;
                     }
                     item = subsequent;
@@ -1104,11 +1114,13 @@ static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV
 // Interpret from STRING
 std::shared_ptr<CV::Item> CV::interpret(const std::string &input, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
     auto literals = parseTokens(input, ' ', cursor);
-    // printList(literals);
     if(cursor->error){
         return std::make_shared<CV::Item>(CV::Item());
     }    
     auto tokens = buildTokens(literals, cursor);
+    if(cursor->error){
+        return std::make_shared<CV::Item>(CV::Item());
+    }   
     return eval(tokens, cursor, ctx);
 }
 
@@ -1119,6 +1131,9 @@ std::shared_ptr<CV::Item> CV::interpret(const CV::Token &token, CV::Cursor *curs
         return std::make_shared<CV::Item>(CV::Item());
     }
     auto tokens = buildTokens(literals, cursor);
+    if(cursor->error){
+        return std::make_shared<CV::Item>(CV::Item());
+    }       
     return eval(tokens, cursor, ctx);
 }
 
@@ -1590,7 +1605,7 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
                 }                      
                 return result;
             }else{
-                cursor->setError("'"+imp+"': Undefined symbol or imperative."); // TODO: Check if it's running as relaxed
+                cursor->setError("'"+imp+"': Undefined constructor or operator."); // TODO: Check if it's running as relaxed
                 return std::make_shared<CV::Item>(CV::Item());
             }
         }else

@@ -23,8 +23,7 @@
                 CV::FunctionConstraints consts;
                 consts.setMinParams(1);
                 consts.allowNil = false;
-                consts.allowMisMatchingTypes = false;
-                consts.setExpectType(CV::ItemTypes::STRING);
+                consts.allowMisMatchingTypes = true;
 
                 std::string errormsg;
                 if(!consts.test(params, errormsg)){
@@ -33,8 +32,12 @@
                 }
 
                 for(int i = 0; i < params.size(); ++i){
-                    auto str = std::static_pointer_cast<CV::String>(params[i]);
-                    ___WRITE_STDOUT(str->data);
+                    if(params[i]->type == CV::ItemTypes::STRING){
+                        auto str = std::static_pointer_cast<CV::String>(params[i]);
+                        ___WRITE_STDOUT(str->data);
+                    }else{
+                        ___WRITE_STDOUT(CV::ItemToText(params[i].get()));
+                    }
                 }
 
                 return std::make_shared<CV::Item>(CV::Item());
