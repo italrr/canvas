@@ -487,8 +487,11 @@
 
             std::vector<CV::JobHandle> jobs;
 
-            Context(const Context &other){ };
+            Context(const Context &other){
+                this->type = CV::ItemTypes::CONTEXT;        
+             };
             Context& operator=(const Context& other){
+                this->type = CV::ItemTypes::CONTEXT;        
                 return *this;
             };
 

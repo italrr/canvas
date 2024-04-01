@@ -72,9 +72,11 @@ int main(int argc, char* argv[]){
 		return 0;
 	}
 	CV::Cursor cursor;
-	auto ctx = std::make_shared<CV::Context>(CV::Context());
+	auto ctx = std::make_shared<CV::Context>();
 	CV::AddStandardOperators(ctx);
 	io::registerLibrary(ctx);
+
+	// std::cout << CV::ItemToText(ctx.get()) << std::endl;
 
 	if(dashFile.get() && dashFile->valid){
 		// std::ifstream file(dashFile->val);
@@ -134,7 +136,8 @@ int main(int argc, char* argv[]){
 			printCVEntry();
 			return 0;
 		}
-		std::cout << CV::ItemToText(CV::interpret(cmd, &cursor, ctx).get());
+		auto result = CV::interpret(cmd, &cursor, ctx);
+		std::cout << CV::ItemToText(result.get());
 		if(cursor.error){
 			std::cout << "\n" << cursor.message << std::endl;
 			std::exit(1);
