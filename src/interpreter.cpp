@@ -46,6 +46,8 @@ int main(int argc, char* argv[]){
 		params.push_back(std::string(argv[i]));
 	}
 
+
+	auto dashC = getParam(params, "-c", true);
 	auto dashFile = getParam(params, "-f");
 
 	auto dashRepl = getParam(params, "--repl", true);
@@ -72,7 +74,7 @@ int main(int argc, char* argv[]){
 		return 0;
 	}
 	CV::Cursor cursor;
-	bool useColors = true;
+	bool useColors = dashC->valid;
 	auto ctx = std::make_shared<CV::Context>();
 	CV::AddStandardOperators(ctx);
 	io::registerLibrary(ctx);
