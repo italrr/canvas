@@ -27,13 +27,15 @@ std::shared_ptr<ExecArg> getParam(std::vector<std::string> &params, const std::s
 			if(i < params.size()-1 && !single){
 				v->val = params[i + 1];
 				v->valid = true;
+				params.erase(params.begin() + i, params.begin() + i + 1);
 			}else{
 				v->valid = single;
+				params.erase(params.begin() + i);
 			}
 			return v;
 		}
 	}
-	
+
 	return v;
 }
 
@@ -45,24 +47,30 @@ int main(int argc, char* argv[]){
 	}
 
 	auto dashFile = getParam(params, "-f");
-	auto dashRepl = getParam(params, "-r", true);
+
+	auto dashRepl = getParam(params, "--repl", true);
+
 	auto dashRelax = getParam(params, "--relaxed", true);
+	auto dashR = getParam(params, "-r", true);
+
 	auto dashInteractive = getParam(params, "-i", true);
+	auto dashI = getParam(params, "--interactive", true);
 	
-	auto dashV = getParam(params, "-v", true);
 	auto dashVersion = getParam(params, "--version", true);
+	auto dashV = getParam(params, "-v", true);
+
+
+	const bool relaxed = dashRelax->valid || dashR->valid;
 
 	auto printCVEntry = [&](bool nl = true){
-		std::string text = std::string("canvas[~] v%.0f.%.0f.%.0f %s [%s]")+(nl ? "\n" : "")+(dashRelax->valid ? "\n>>> RELAXED MODE <<<": "");
+		std::string text = std::string("canvas[~] v%.0f.%.0f.%.0f %s [%s]")+(nl || relaxed ? "\n" : "")+(relaxed ? ">>>>> RELAXED MODE <<<<<\n": "");
 		printf(text.c_str(), CANVAS_LANG_VERSION[0], CANVAS_LANG_VERSION[1], CANVAS_LANG_VERSION[2], CV::SupportedArchitecture::name(CV::ARCH).c_str(), CV::SupportedPlatform::name(CV::PLATFORM).c_str());
 	};
-
 
 	if(dashV->valid || dashVersion->valid){
 		printCVEntry();
 		return 0;
 	}
-
 	CV::Cursor cursor;
 	auto ctx = std::make_shared<CV::Context>(CV::Context());
 	CV::AddStandardOperators(ctx);
@@ -109,7 +117,7 @@ int main(int argc, char* argv[]){
 				std::cout << CV::ItemToText(CV::interpret(input, &cursor, ctx).get()) << std::endl;
 				if(cursor.error){
 					std::cout <<  cursor.message << std::endl;
-					if(!dashRelax->valid){
+					if(!relaxed){
 						std::exit(1);
 					}
 					cursor.clear();
@@ -121,6 +129,10 @@ int main(int argc, char* argv[]){
 		for(int i = 1; i < params.size(); ++i){
 			cmd += params[i];
 			if(i < params.size()-1) cmd += " ";
+		}
+		if(cmd.size() == 0){
+			printCVEntry();
+			return 0;
 		}
 		std::cout << CV::ItemToText(CV::interpret(cmd, &cursor, ctx).get());
 		if(cursor.error){

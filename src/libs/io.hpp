@@ -27,14 +27,14 @@
 
                 std::string errormsg;
                 if(!consts.test(params, errormsg)){
-                    cursor->setError("'out': "+errormsg);
+                    cursor->setError("'"+LIBNAME+":out': "+errormsg);
                     return std::make_shared<CV::Item>(CV::Item());
                 }
 
                 for(int i = 0; i < params.size(); ++i){
                     if(params[i]->type == CV::ItemTypes::STRING){
                         auto str = std::static_pointer_cast<CV::String>(params[i]);
-                        ___WRITE_STDOUT(str->data);
+                        ___WRITE_STDOUT(str->get());
                     }else{
                         ___WRITE_STDOUT(CV::ItemToText(params[i].get()));
                     }

@@ -277,6 +277,15 @@
             uint8_t type;
             std::unordered_map<std::string, Trait> traits;
             std::unordered_map<uint8_t, Trait> traitsAny;
+            
+            std::mutex accessMutex; 
+
+            Item(const Item &other){
+
+            };
+            Item& operator=(const Item& other){
+                return *this;
+            };
 
             Item();
 
@@ -295,7 +304,7 @@
             virtual void registerTraits();
 
             virtual bool isEq(std::shared_ptr<Item> &item);
-            virtual std::shared_ptr<Item> copy(bool deep = true) const;
+            virtual std::shared_ptr<Item> copy(bool deep = true);
 
             virtual bool clear(bool deep = true);
         };
@@ -304,9 +313,16 @@
             uint8_t intType;
             std::shared_ptr<Item> payload;
 
+
+            Interrupt(const Interrupt &other){
+            };
+            Interrupt& operator=(const Interrupt& other){
+                return *this;                   
+            };
+
             Interrupt(uint8_t intType);
 
-            std::shared_ptr<Item> copy(bool deep = true) const; 
+            std::shared_ptr<Item> copy(bool deep = true); 
 
             bool hasPayload();
 
@@ -320,6 +336,16 @@
         struct Number : Item {
             __CV_NUMBER_NATIVE_TYPE n;
 
+            Number(const Number &other){
+                // this->type = other.type;
+                // this->n = other.n;
+            };
+            Number& operator=(const Number& other){
+                // this->type = other.type;
+                // this->n = other.n;                
+                return *this;
+            };
+
             Number();
             Number(__CV_NUMBER_NATIVE_TYPE v);
 
@@ -327,7 +353,7 @@
 
             void registerTraits();
 
-            std::shared_ptr<Item> copy(bool deep = true) const;
+            std::shared_ptr<Item> copy(bool deep = true);
 
             void set(const __CV_NUMBER_NATIVE_TYPE v);
             
@@ -341,17 +367,25 @@
 
             std::vector<std::shared_ptr<Item>> data;
 
+            List(const List &other){
+            };
+            List& operator=(const List& other){
+                return *this;
+            };
+
             List();
 
             List(const std::vector<std::shared_ptr<Item>> &list, bool toCopy = true);
 
             void registerTraits();
 
-            std::shared_ptr<Item> copy(bool deep = true) const;
+            std::shared_ptr<Item> copy(bool deep = true);
 
             void set(const std::vector<std::shared_ptr<Item>> &list, bool toCopy = true);
 
-            std::shared_ptr<Item> get(size_t index) const;
+            std::shared_ptr<Item> get(size_t index);
+
+            size_t size();
 
             bool clear(bool deep = true);      
 
@@ -360,8 +394,17 @@
 
 
         struct String : Item {
-            
             std::string data;
+            
+
+            String(const String &other){
+            };
+            String& operator=(const String& other){
+                return *this;
+            };
+
+
+            size_t size();
 
             String();
             String(const std::string &str);  
@@ -370,11 +413,11 @@
 
             bool isEq(std::shared_ptr<CV::Item> &item);
 
-            std::shared_ptr<CV::Item> copy(bool deep = true) const;
+            std::shared_ptr<CV::Item> copy(bool deep = true);
 
             void set(const std::string &str);
 
-            std::string &get();
+            std::string get();
 
         };
 
@@ -387,8 +430,20 @@
             bool threaded;
             bool async;
             bool variadic;
+
+
+            std::vector<std::string> getParams();
+            std::string getBody();
+
+            Function(const Function &other){
+            };
+
+            Function& operator=(const Function& other){
+                return *this;
+            };
+
             std::function< std::shared_ptr<CV::Item> (const std::vector<std::shared_ptr<CV::Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx) > fn;
-            std::shared_ptr<CV::Item> copy(bool deep = true) const;
+            std::shared_ptr<CV::Item> copy(bool deep = true);
             Function();
             Function(const std::vector<std::string> &params, const std::string &body, bool variadic = false);
             Function(const std::vector<std::string> &params, const std::function<std::shared_ptr<CV::Item> (const std::vector<std::shared_ptr<CV::Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx)> &fn, bool variadic = false);
@@ -405,19 +460,43 @@
             bool threaded;
             bool running;
             std::thread thread;
+
+            JobHandle(const JobHandle &other){
+                this->params = other.params;
+                this->func = other.func;
+                this->async = other.async;
+                this->threaded = other.threaded;
+                this->running = other.running;
+            };
+            JobHandle& operator=(const JobHandle& other){
+                this->params = other.params;
+                this->func = other.func;
+                this->async = other.async;
+                this->threaded = other.threaded;
+                this->running = other.running;     
+                return *this;
+            };
+
         };
 
 
         struct Context : Item {
+
             std::unordered_map<std::string, std::shared_ptr<CV::Item>> vars;
             std::shared_ptr<Context> head;
 
             std::vector<CV::JobHandle> jobs;
+
+            Context(const Context &other){ };
+            Context& operator=(const Context& other){
+                return *this;
+            };
+
             bool isDone();
 
             std::shared_ptr<CV::Item> get(const std::string &name);
 
-            std::shared_ptr<CV::Item> copy(bool deep = true) const;
+            std::shared_ptr<CV::Item> copy(bool deep = true);
 
             void setTop(std::shared_ptr<Context> &nctx);
             ItemContextPair getWithContext(const std::string &name);
@@ -489,6 +568,14 @@
                     }
                 }
                 return CV::ModifierPair();
+            }
+            bool hasModifier(uint8_t type){
+                for(int i = 0; i < modifiers.size(); ++i){
+                    if(modifiers[i].type == type){
+                        return true;
+                    }
+                }
+                return false;
             }
             std::string literal() const {
                 std::string part = "<"+this->first+">";
