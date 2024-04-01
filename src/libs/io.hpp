@@ -1,0 +1,51 @@
+#ifndef CANVAS_STD_LIBRARY_IO_HPP
+    #define CANVAS_STD_LIBRARY_IO_HPP
+    
+    #include <stdio.h>
+    
+    static void ___WRITE_STDOUT(const std::string &v){
+        int n = v.size();
+        for(int i = 0; i < v.size(); ++i){
+            putchar(v[i]);
+        }
+    }
+
+    #include "../CV.hpp"
+
+    namespace io {
+        static std::string LIBNAME = "io";
+
+
+        static void registerLibrary(std::shared_ptr<CV::Context> &ctx){
+            auto lib = std::make_shared<CV::Context>(CV::Context());
+
+            lib->set("out", std::make_shared<CV::Function>(CV::Function({}, [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+                CV::FunctionConstraints consts;
+                consts.setMinParams(1);
+                consts.allowNil = false;
+                consts.allowMisMatchingTypes = false;
+                consts.setExpectType(CV::ItemTypes::STRING);
+
+                std::string errormsg;
+                if(!consts.test(params, errormsg)){
+                    cursor->setError("'out': "+errormsg);
+                    return std::make_shared<CV::Item>(CV::Item());
+                }
+
+                for(int i = 0; i < params.size(); ++i){
+                    auto str = std::static_pointer_cast<CV::String>(params[i]);
+                    ___WRITE_STDOUT(str->data);
+                }
+
+                return std::make_shared<CV::Item>(CV::Item());
+            }, true))); 
+
+
+            ctx->set("io", lib);
+        }
+
+    } 
+    
+
+
+#endif

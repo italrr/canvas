@@ -7,6 +7,7 @@
 #include <fstream>
 
 #include "CV.hpp"
+#include "libs/io.hpp"
 
 struct ExecArg {
 	std::string name;
@@ -65,6 +66,7 @@ int main(int argc, char* argv[]){
 	CV::Cursor cursor;
 	auto ctx = std::make_shared<CV::Context>(CV::Context());
 	CV::AddStandardOperators(ctx);
+	io::registerLibrary(ctx);
 
 	if(dashFile.get() && dashFile->valid){
 		// std::ifstream file(dashFile->val);

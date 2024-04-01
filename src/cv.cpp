@@ -641,6 +641,15 @@ void CV::Context::setTop(std::shared_ptr<CV::Context> &nctx){
     this->set("top", ctx);
 }
 
+bool CV::Context::isDone(){
+    bool f = true;
+
+    // for(auto &it : )
+
+    return f;
+}
+
+
 CV::ItemContextPair CV::Context::getWithContext(const std::string &name){
     auto it = vars.find(name);
     if(it == vars.end()){
@@ -819,6 +828,11 @@ static std::vector<std::string> parseTokens(std::string input, char sep, CV::Cur
         if(c == '#' && !onString){
             onComment = !onComment;
         }else
+        if(i < input.size()-1 && c == '\\' && input[i+1] == 'n' && onString){
+            buffer += '\n';
+            ++i;
+            continue;
+        }else        
         if(c == '\n' && !onString){
             onComment = false;
             continue;

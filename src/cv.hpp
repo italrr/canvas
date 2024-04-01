@@ -5,6 +5,7 @@
     #include <functional>
     #include <memory>
     #include <mutex>     
+    #include <thread>
     #include <unordered_map>
     #include <inttypes.h>    
     #include <vector>
@@ -397,10 +398,22 @@
             
         };    
 
+        struct JobHandle {
+            std::vector<std::shared_ptr<CV::Item>> params;
+            std::shared_ptr<CV::Function> func;
+            bool async;
+            bool threaded;
+            bool running;
+            std::thread thread;
+        };
+
 
         struct Context : Item {
             std::unordered_map<std::string, std::shared_ptr<CV::Item>> vars;
             std::shared_ptr<Context> head;
+
+            std::vector<CV::JobHandle> jobs;
+            bool isDone();
 
             std::shared_ptr<CV::Item> get(const std::string &name);
 
@@ -488,11 +501,11 @@
         };
 
 
-
         void AddStandardOperators(std::shared_ptr<CV::Context> &ctx);
         std::shared_ptr<CV::Item> interpret(const std::string &input, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx);
         std::shared_ptr<CV::Item>  interpret(const CV::Token &token, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx);
         std::string ItemToText(CV::Item *item);
+
 
     }
 
