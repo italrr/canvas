@@ -15,7 +15,7 @@ Short summary:
 - No classes. And Objects are not exactly _objects_. They're called Contexts and they can be used to store variables, but one should use a different philosophy from OOP when using them.
 - Similarly to LISP, it tries to treat everything as a list.
 - Strings can only be formed with single quotes `'EXAMPLE'`
-- Unusual control flow driven by abstract concepts such as context "linking", context switching, etc.
+- Atypical but powerful control flow known as inline context switching.
 - Recursion is encouraged
 - Parallelism and concurrency are first class citizens
 - Honestly? Downright different (Hopefully within reason). This project still needs to be proven, so don't expect anything serious for now.
@@ -49,14 +49,43 @@ Modifiers are (sometimes complex) abstractions that can be used to drive the con
         set b [+ a^]
     ```
     `b` will be 6.
-- `<`: **The Linker**. It allows linking context. WIP.
 
 ## Traits
-Treaits are essentially fancy inline functions or behaviors that are embedded in types. Each type possess specific traits.
+Traits are essentially fancy inline functions or behaviors that are embedded into types. Each type possess specific traits. All types possess a `|copy` and `|type` trait.
 
-For example `[1 2 3]|n`. The List type has a trait called `n` that will return the number of items.
+```
+canvas[~] v1.2.0 X86_64 [WINDOWS]
+>>>>> RELAXED MODE <<<<<
 
-Another example `'Test'|reverse`. The String type has a `reverse` trait will essentially reverse the string. It makes a copy of the original.
+CV> [1 2 3 4]|copy
+[1 2 3 4]
+
+CV> [1 2 3 4]|type
+'LIST'
+
+CV> 'this is a test string'|type
+'STRING'
+
+CV> 'this is a test string'|length
+21
+
+CV> [1 2 3 4]|length
+4
+```
+
+For example `[1 2 3]|length`. The List type has a trait called `length` that will return the number of items.
+
+Another example `'Test'|reverse`. The String type has a `reverse` trait will essentially reverse the string. It makes a copy of the original. Traits facilitate asynchronous code. For example Jobs are essentially items returned by functions that were given the modifier `|async`
+or `|untether`. This Job item possess a special type of powerful trait called "await", that will essentially wait for the async or untether execution to finish:
+
+```
+CV> [+|async [l-range 1 20000]^]
+[JOB 3 'ASYNC' 'IDLE']
+
+CV> [+|async [l-range 1 20000]^]|await
+200010000
+```
+Normally the async/untether traits would return an object that can links the data being proceesed with other threads, but `|await` will force the current Context to wait for this Job to finish and haul its payload.
 
 
 # Introspection or Metaprogramming
