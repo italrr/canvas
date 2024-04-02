@@ -2,19 +2,21 @@
     #define CANVAS_STD_LIBRARY_IO_HPP
     
     #include <stdio.h>
-    
-    static void ___WRITE_STDOUT(const std::string &v){
-        int n = v.size();
-        for(int i = 0; i < v.size(); ++i){
-            putchar(v[i]);
-        }
-    }
 
     #include "../CV.hpp"
 
     namespace io {
         static std::string LIBNAME = "io";
+        static std::mutex accessMutex; 
 
+        static void ___WRITE_STDOUT(const std::string &v){
+            int n = v.size();
+            accessMutex.lock();
+            for(int i = 0; i < v.size(); ++i){
+                putchar(v[i]);
+            }
+            accessMutex.unlock();
+    }        
 
         static void registerLibrary(std::shared_ptr<CV::Context> &ctx){
             auto lib = std::make_shared<CV::Context>(CV::Context());

@@ -8,7 +8,6 @@
     namespace io {
         static std::string LIBNAME = "math";
 
-
         static void registerLibrary(std::shared_ptr<CV::Context> &ctx){
             auto lib = std::make_shared<CV::Context>(CV::Context());
 

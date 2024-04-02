@@ -18,6 +18,7 @@
 
         namespace Tools {
             bool isLineComplete(const std::string &input);
+            void sleep(uint64_t t);
         }
 
         namespace SupportedPlatform {
@@ -109,13 +110,7 @@
                 }else
                 if(mod == ':'){
                     return ModifierTypes::SCOPE;
-                }else
-                if(mod == '<'){
-                    return ModifierTypes::LINKER;
-                }else
-                if(mod == '!'){
-                    return ModifierTypes::UNTETHERED;
-                }else                
+                }else         
                 if(mod == '|'){
                     return ModifierTypes::TRAIT;
                 }else        
@@ -133,15 +128,9 @@
                     case ModifierTypes::SCOPE: {
                         return ":";
                     };   
-                    case ModifierTypes::UNTETHERED: {
-                        return "!";
-                    };                       
                     case ModifierTypes::TRAIT: {
                         return "|";
-                    };              
-                    case ModifierTypes::LINKER: {
-                        return "<";
-                    }; 
+                    };
                     case ModifierTypes::EXPAND: {
                         return "^";
                     };                          
@@ -160,7 +149,8 @@
                 LIST,
                 CONTEXT,
                 FUNCTION,
-                INTERRUPT
+                INTERRUPT,
+                JOB
             };
             static std::string str(uint8_t type){
                 switch(type){
@@ -185,6 +175,9 @@
                     case INTERRUPT: {
                         return "INTERRUPT";
                     };    
+                    case JOB: {
+                        return "JOB";
+                    };                      
                     default: {
                         return "UNDEFINED";
                     };         
@@ -421,7 +414,6 @@
             bool async;
             bool variadic;
 
-
             std::vector<std::string> getParams();
             std::string getBody();
 
@@ -443,27 +435,118 @@
             
         };    
 
-        struct JobHandle {
+        namespace JobStatus {
+            enum JobStatus : int {
+                IDLE,
+                RUNNING,
+                DONE
+            };
+            static std::string str(int t){
+                switch(t){
+                    case CV::JobStatus::IDLE:{
+                        return "IDLE";
+                    };
+                    case CV::JobStatus::RUNNING:{
+                        return "RUNNING";
+                    };
+                    default: {
+                        return "DONE";
+                    }
+                }
+            }            
+        }
+        namespace JobType {
+            enum JobType : int {
+                ASYNC,
+                THREAD,
+                CALLBACK
+            };
+            static std::string str(int t){
+                switch(t){
+                    case JobType::ASYNC:{
+                        return "ASYNC";
+                    };
+                    case JobType::THREAD: {
+                        return "THREAD";
+                    };
+                    case JobType::CALLBACK: {
+                        return "CALLBACK";
+                    };                    
+                    default: {
+                        return "UNDEFINED";
+                    }
+                }
+            }
+        }
+
+        struct Token {
+            std::string first;
+            std::vector<CV::ModifierPair> modifiers;
+            CV::ModifierPair getModifier(uint8_t type) const {
+                for(int i = 0; i < modifiers.size(); ++i){
+                    if(modifiers[i].type == type){
+                        return modifiers[i];
+                    }
+                }
+                return CV::ModifierPair();
+            }
+            bool hasModifier(uint8_t type){
+                for(int i = 0; i < modifiers.size(); ++i){
+                    if(modifiers[i].type == type){
+                        return true;
+                    }
+                }
+                return false;
+            }
+            std::string literal() const {
+                std::string part = "<"+this->first+">";
+                for(int i = 0; i < modifiers.size(); ++i){
+                    auto &mod = modifiers[i];
+                    part += "("+CV::ModifierTypes::str(mod.type)+mod.subject+")";
+                }
+                return part;
+            }
+        };
+
+
+        struct Job : Item {
+            __CV_NUMBER_NATIVE_TYPE id;
+            std::shared_ptr<CV::Item> payload;
             std::vector<std::shared_ptr<CV::Item>> params;
-            std::shared_ptr<CV::Function> func;
-            bool async;
-            bool threaded;
-            bool running;
+            std::shared_ptr<CV::Item> target;
+            std::shared_ptr<CV::Function> fn;
+            Cursor *cursor;
+            int jobType;
+            int status;
             std::thread thread;
 
-            JobHandle(const JobHandle &other){
+            void setStatus(int nstatus);
+            int getStatus();
+
+            std::shared_ptr<CV::Item> getPayload();
+            void setPayload(std::shared_ptr<CV::Item> &item);
+
+            void registerTraits();
+            std::shared_ptr<CV::Item> copy(bool deep = true);
+
+            Job();
+
+            void set(int type, std::shared_ptr<CV::Function> &fn, std::vector<std::shared_ptr<CV::Item>> &params);
+            void setCallBack(std::shared_ptr<CV::Item> &job, std::shared_ptr<CV::Function> &cb);
+
+            Job(const Job &other){
+                this->id = other.id;
                 this->params = other.params;
-                this->func = other.func;
-                this->async = other.async;
-                this->threaded = other.threaded;
-                this->running = other.running;
+                this->fn = other.fn;
+                this->type = other.type;
+                this->status = other.status;
             };
-            JobHandle& operator=(const JobHandle& other){
+            Job& operator=(const Job& other){
+                this->id = other.id;                
                 this->params = other.params;
-                this->func = other.func;
-                this->async = other.async;
-                this->threaded = other.threaded;
-                this->running = other.running;     
+                this->fn = other.fn;
+                this->type = other.type;                
+                this->status = other.status;
                 return *this;
             };
 
@@ -475,8 +558,13 @@
             std::unordered_map<std::string, std::shared_ptr<CV::Item>> vars;
             std::shared_ptr<Context> head;
             bool readOnly;
+            int lastJobId;
 
-            std::vector<CV::JobHandle> jobs;
+            std::vector<std::shared_ptr<CV::Job>> jobs;
+
+            std::shared_ptr<CV::Job> getJobById(__CV_NUMBER_NATIVE_TYPE id);
+            void addJob(std::shared_ptr<Job> &job);
+            
 
             Context(const Context &other){
                 this->type = CV::ItemTypes::CONTEXT;        
@@ -485,8 +573,6 @@
                 this->type = CV::ItemTypes::CONTEXT;        
                 return *this;
             };
-
-            bool isDone();
 
             std::shared_ptr<CV::Item> get(const std::string &name);
 
@@ -553,40 +639,10 @@
 
         };        
 
-
-        struct Token {
-            std::string first;
-            std::vector<CV::ModifierPair> modifiers;
-            CV::ModifierPair getModifier(uint8_t type) const {
-                for(int i = 0; i < modifiers.size(); ++i){
-                    if(modifiers[i].type == type){
-                        return modifiers[i];
-                    }
-                }
-                return CV::ModifierPair();
-            }
-            bool hasModifier(uint8_t type){
-                for(int i = 0; i < modifiers.size(); ++i){
-                    if(modifiers[i].type == type){
-                        return true;
-                    }
-                }
-                return false;
-            }
-            std::string literal() const {
-                std::string part = "<"+this->first+">";
-                for(int i = 0; i < modifiers.size(); ++i){
-                    auto &mod = modifiers[i];
-                    part += "("+CV::ModifierTypes::str(mod.type)+mod.subject+")";
-                }
-                return part;
-            }
-        };
-
-
         void AddStandardOperators(std::shared_ptr<CV::Context> &ctx);
         std::shared_ptr<CV::Item> interpret(const std::string &input, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx);
         std::shared_ptr<CV::Item>  interpret(const CV::Token &token, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx);
+        bool ContextStep(std::shared_ptr<CV::Context> &cv);
         std::string ItemToText(CV::Item *item, bool useColors = false);
 
 

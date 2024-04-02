@@ -38,6 +38,18 @@ std::shared_ptr<ExecArg> getParam(std::vector<std::string> &params, const std::s
 
 	return v;
 }
+static CV::Cursor cursor;
+static std::shared_ptr<CV::Context> ctx = std::make_shared<CV::Context>();
+static bool isBusy = false;
+
+static void RunContextIsDone(){
+	while(true){
+		isBusy = CV::ContextStep(ctx);
+		if(!isBusy){
+			CV::Tools::sleep(20);
+		}
+	}
+}
 
 int main(int argc, char* argv[]){
 
@@ -73,9 +85,8 @@ int main(int argc, char* argv[]){
 		printCVEntry();
 		return 0;
 	}
-	CV::Cursor cursor;
 	bool useColors = dashC->valid;
-	auto ctx = std::make_shared<CV::Context>();
+	
 	ctx->copyable = false; // top contexts shouldn't be copied (only referenced)
 	CV::AddStandardOperators(ctx);
 	io::registerLibrary(ctx);
@@ -113,6 +124,7 @@ int main(int argc, char* argv[]){
 	}else
 	if(dashRepl.get() && dashRepl->valid){
 		printCVEntry(false);
+		std::thread loop(&RunContextIsDone);
 		while(true){
 			std::cout << std::endl;
 			std::string input = "";
@@ -130,7 +142,10 @@ int main(int argc, char* argv[]){
 				}
 			}
 		}
+		while(isBusy) CV::Tools::sleep(20);
+		std::cout << "Bye!" << std::endl;
 	}else{
+		std::thread loop(&RunContextIsDone);
 		std::string cmd = "";
 		for(int i = 1; i < params.size(); ++i){
 			cmd += params[i];
@@ -146,7 +161,8 @@ int main(int argc, char* argv[]){
 			std::cout << "\n" << cursor.message << std::endl;
 			std::exit(1);
 		}
-		std::exit(0);		
+		while(isBusy)CV::Tools::sleep(20);
+		std::exit(0);
 	}		
 
 	return 0;
