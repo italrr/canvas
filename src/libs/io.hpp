@@ -18,8 +18,10 @@
 
         static void registerLibrary(std::shared_ptr<CV::Context> &ctx){
             auto lib = std::make_shared<CV::Context>(CV::Context());
+            lib->copyable = false;
+            lib->readOnly = true;
 
-            lib->set("out", std::make_shared<CV::Function>(CV::Function({}, [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+            lib->set("out", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
                 CV::FunctionConstraints consts;
                 consts.setMinParams(1);
                 consts.allowNil = false;
@@ -41,7 +43,7 @@
                 }
 
                 return std::make_shared<CV::Item>(CV::Item());
-            }, true))); 
+            }, true)); 
 
 
             ctx->set("io", lib);

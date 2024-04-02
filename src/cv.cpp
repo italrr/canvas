@@ -869,11 +869,13 @@ std::shared_ptr<CV::Item> CV::Context::set(const std::string &name, const std::s
 }
 
 CV::Context::Context(){
+    this->readOnly = false;
     this->type = CV::ItemTypes::CONTEXT;
     this->head = NULL;
 }
 
 CV::Context::Context(std::shared_ptr<CV::Context> &ctx){
+    this->readOnly = false;    
     this->type = CV::ItemTypes::CONTEXT;        
     this->head = ctx;
     this->setTop(ctx);
@@ -925,15 +927,15 @@ std::string CV::ItemToText(CV::Item *item, bool useColors){
         case CV::ItemTypes::FUNCTION: {
             auto fn = static_cast<CV::Function*>(item);      
 
-            std::string start = Tools::setTextColor(Tools::Color::MAGENTA)+"["+Tools::setTextColor(Tools::Color::RESET);
-            std::string end = Tools::setTextColor(Tools::Color::MAGENTA)+"]"+Tools::setTextColor(Tools::Color::RESET);
-            std::string name = Tools::setTextColor(Tools::Color::YELLOW, true)+"fn"+Tools::setTextColor(Tools::Color::RESET);
+            std::string start = Tools::setTextColor(Tools::Color::RED, true)+"["+Tools::setTextColor(Tools::Color::RESET);
+            std::string end = Tools::setTextColor(Tools::Color::RED, true)+"]"+Tools::setTextColor(Tools::Color::RESET);
+            std::string name = Tools::setTextColor(Tools::Color::RED, true)+"fn"+Tools::setTextColor(Tools::Color::RESET);
             std::string binary = Tools::setTextColor(Tools::Color::BLUE, true)+"BINARY"+Tools::setTextColor(Tools::Color::RESET);
 
             return start+name+" "+start+(fn->variadic ? "..." : Tools::compileList(fn->getParams()))+end+" "+start+(fn->binary ? binary : fn->getBody() )+end+end;
         };
         case CV::ItemTypes::CONTEXT: {
-            std::string output = Tools::setTextColor(Tools::Color::MAGENTA)+"["+Tools::setTextColor(Tools::Color::YELLOW, true)+"ct "+Tools::setTextColor(Tools::Color::RESET);
+            std::string output = Tools::setTextColor(Tools::Color::YELLOW, true)+"["+Tools::setTextColor(Tools::Color::YELLOW, true)+"ct "+Tools::setTextColor(Tools::Color::RESET);
             auto proto = static_cast<CV::Context*>(item);
             int n = proto->vars.size();
             int c = 0;
@@ -941,7 +943,7 @@ std::string CV::ItemToText(CV::Item *item, bool useColors){
             for(auto &it : proto->vars){
                 auto name = it.first;
                 auto item = it.second;
-                auto body = name == "top" ? Tools::setTextColor(Tools::Color::YELLOW, true)+"<TOP>"+Tools::setTextColor(Tools::Color::MAGENTA) : CV::ItemToText(item.get(), useColors);
+                auto body = name == "top" ? Tools::setTextColor(Tools::Color::YELLOW, true)+"[ct]"+Tools::setTextColor(Tools::Color::RESET) : CV::ItemToText(item.get(), useColors);
                 output += body+CV::ModifierTypes::str(CV::ModifierTypes::NAMER)+Tools::setTextColor(Tools::Color::GREEN)+name+Tools::setTextColor(Tools::Color::RESET);
                 if(c < n-1){
                     output += " ";
@@ -949,7 +951,7 @@ std::string CV::ItemToText(CV::Item *item, bool useColors){
                 ++c;
             }
             proto->accessMutex.unlock();
-            return output + Tools::setTextColor(Tools::Color::MAGENTA)+"]"+Tools::setTextColor(Tools::Color::RESET);     
+            return output + Tools::setTextColor(Tools::Color::YELLOW, true)+"]"+Tools::setTextColor(Tools::Color::RESET);     
         };
         case CV::ItemTypes::LIST: {
             std::string output = Tools::setTextColor(Tools::Color::MAGENTA)+"["+Tools::setTextColor(Tools::Color::RESET);
@@ -1138,7 +1140,7 @@ std::vector<CV::Token> buildTokens(const std::vector<std::string> &literals, CV:
                     }
                     continue;
                 }else{
-                    cursor->setError("Provided statement trailing modifier. Modifiers can only accompony something.");
+                    cursor->setError("Provided dangling modifier. Modifiers can only go accompanying something.");
                     return {};
                 }
             }else{
@@ -1299,6 +1301,14 @@ static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV
             } break;            
             case CV::ModifierTypes::NAMER: {
                 effects.named = mod.subject;
+                if(ctx->readOnly){
+                    cursor->setError("'"+CV::ModifierTypes::str(CV::ModifierTypes::NAMER)+"': Cannot name this variable '"+mod.subject+"' within this context as it's readonly.");
+                    return std::make_shared<CV::Item>(CV::Item());
+                }
+                if(ctx.get() == item.get()){
+                    cursor->setError("'"+CV::ModifierTypes::str(CV::ModifierTypes::NAMER)+"': Naming a context within a context is prohibited (circular referencing).");
+                    return std::make_shared<CV::Item>(CV::Item());                    
+                }
                 ctx->set(mod.subject, item);
             } break;        
             case CV::ModifierTypes::SCOPE: {
@@ -1529,12 +1539,16 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
             return std::make_shared<CV::Item>(CV::Item());
         }else
         // Replace existing item
-        if(f.item){
+        if(f.item || f.context){
+            if(f.context->readOnly){
+                cursor->setError("'"+imp+"': Context '"+params[0].first+"' is readonly.");
+                return std::make_shared<CV::Item>(CV::Item());
+            }      
+            if(f.context == solved.get()){
+                cursor->setError("'"+imp+"': Setting a context within a context is prohibited (circular referencing).");
+                return std::make_shared<CV::Item>(CV::Item());
+            }                  
             return f.context->set(f.name, solved);
-        }else
-        // Set new item into the found context (by name)
-        if(f.context){
-            return f.context->set(f.name, solved);            
         }else
         // If a scope modifier was provided but the context wasn't found, we throw an error
         if(params[0].hasModifier(CV::ModifierTypes::SCOPE)){
@@ -1542,6 +1556,14 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
             return std::make_shared<CV::Item>(CV::Item());
         // Othwerwise just define it within the current context
         }else{
+            if(ctx->readOnly){
+                cursor->setError("'"+imp+"': Cannot set variable '"+params[0].first+"' within this context as it is readonly.");
+                return std::make_shared<CV::Item>(CV::Item());
+            }
+            if(ctx.get() == solved.get()){
+                cursor->setError("'"+imp+"': Setting a context within a context is prohibited (circular referencing).");
+                return std::make_shared<CV::Item>(CV::Item());
+            }
             return ctx->set(params[0].first, solved);
         }
     }else
