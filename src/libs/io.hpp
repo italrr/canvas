@@ -12,9 +12,7 @@
         static void ___WRITE_STDOUT(const std::string &v){
             int n = v.size();
             accessMutex.lock();
-            for(int i = 0; i < v.size(); ++i){
-                putchar(v[i]);
-            }
+            std::cout << v;
             accessMutex.unlock();
     }        
 

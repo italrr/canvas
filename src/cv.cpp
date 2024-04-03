@@ -10,8 +10,13 @@
 
 static bool useColorOnText = false;
 
+static std::string FunctionToText(CV::Function *fn);
 std::shared_ptr<CV::Item> CV::interpret(const CV::Token &token, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx);
 static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV::Item> &item, std::vector<CV::ModifierPair> modifiers, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects);
+
+void CV::setUseColor(bool v){
+    useColorOnText = v;
+}
 
 namespace CV {
     namespace Tools {
@@ -879,11 +884,19 @@ static void AsyncFunction(std::shared_ptr<CV::Job> &job, std::shared_ptr<CV::Con
     job->setPayload(result);
 }
 
+static unsigned lastGenId = 0;
+static std::mutex genIdMutex;
+static unsigned genId(){
+    genIdMutex.lock();
+    unsigned id = ++lastGenId;
+    genIdMutex.unlock();
+    return id;
+}
+
 void CV::Context::addJob(std::shared_ptr<Job> &job){
     this->accessMutex.lock();
-    job->id = this->lastJobId++;
+    job->id = genId();
     this->jobs.push_back(job);
-    job->setStatus(CV::JobStatus::IDLE);
     this->accessMutex.unlock();
 }
 
@@ -907,22 +920,6 @@ bool CV::ContextStep(std::shared_ptr<CV::Context> &ctx){
     std::vector<__CV_NUMBER_NATIVE_TYPE> done;
     for(int i = 0; i < _jobs.size(); ++i){
         auto &job = _jobs[i];
-        if(job->jobType == CV::JobType::CALLBACK && job->getStatus() != CV::JobStatus::DONE){
-            if(job->target.get() && job->target->type == ItemTypes::JOB){
-                auto target = std::static_pointer_cast<CV::Job>(job->target);
-                if(target->getStatus() == CV::JobStatus::DONE){
-                    /*
-                        EVAL
-                    */
-                    auto result = runJob(job->fn, {target->getPayload()}, job->cursor, ctx, job);
-                    job->setPayload(result);
-                    job->setStatus(JobStatus::DONE);
-                }
-            }else{
-                job->cursor->setError("Callback Job '"+CV::Tools::removeTrailingZeros(job->id)+"' attached to a non-Job type");
-                job->setStatus(JobStatus::DONE);
-            }
-        }else
         if(job->getStatus() != CV::JobStatus::DONE){
             if(job->getStatus() == JobStatus::IDLE){
                 if(job->jobType == CV::JobType::THREAD){
@@ -947,6 +944,24 @@ bool CV::ContextStep(std::shared_ptr<CV::Context> &ctx){
             if(job->id == done[i]){
                 if(job->jobType == JobType::THREAD){
                     job->thread.join();
+                }
+                /*
+                    RUN CALL BACK                
+                */
+                if(job->callback.get()){
+                    auto cb = job->callback;
+                    if(cb->jobType == CV::JobType::CALLBACK){
+                        std::vector<std::shared_ptr<CV::Item>> items;
+                        if(job->hasPayload()){
+                            items.push_back(job->getPayload());
+                        }
+                        auto result = runJob(cb->fn, items, cb->cursor, ctx, cb);
+                        cb->setPayload(result);
+                        cb->setStatus(JobStatus::DONE);
+                    }else{
+                        cb->cursor->setError("Non-Callback Job '"+CV::Tools::removeTrailingZeros(cb->id)+"' attached as Callback.");
+                        cb->setStatus(JobStatus::DONE);
+                    }
                 }
                 ctx->jobs.erase(ctx->jobs.begin() + j);
                 break;
@@ -975,6 +990,13 @@ bool CV::ContextStep(std::shared_ptr<CV::Context> &ctx){
 std::shared_ptr<CV::Item> CV::Job::getPayload(){
     this->accessMutex.lock();
     auto v = this->payload;
+    this->accessMutex.unlock();
+    return v;
+}
+
+bool CV::Job::hasPayload(){
+    this->accessMutex.lock();
+    auto v = this->payload.get();
     this->accessMutex.unlock();
     return v;
 }
@@ -1015,13 +1037,19 @@ void CV::Job::set(int type, std::shared_ptr<CV::Function> &fn, std::vector<std::
     this->accessMutex.unlock();
 }
 
-void CV::Job::setCallBack(std::shared_ptr<CV::Item> &job, std::shared_ptr<CV::Function> &cb){
+std::shared_ptr<CV::Job> CV::Job::setCallBack(std::shared_ptr<CV::Function> &cb){
+    auto job = std::make_shared<CV::Job>();
+    job->accessMutex.lock();
+    job->cursor = this->cursor;
+    job->fn = cb;
+    job->jobType = CV::JobType::CALLBACK;
+    job->status = CV::JobStatus::RUNNING;
+    job->accessMutex.unlock();
+
     this->accessMutex.lock();
-    this->jobType = CV::JobType::CALLBACK;
-    this->status = CV::JobStatus::IDLE;
-    this->target = job;
-    this->fn = cb;
+    this->callback = job;
     this->accessMutex.unlock();
+    return job;
 }
 
 void CV::Job::registerTraits(){
@@ -1035,6 +1063,16 @@ void CV::Job::registerTraits(){
         }
         return job->getPayload();
     }); 
+
+    // Should overwrite the default copy
+    this->registerTrait("copy", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+        if(subject->type == CV::ItemTypes::NIL){
+            return std::make_shared<Item>();
+        }
+        cursor->setError("'Job|copy': Jobs cannot be copied.");            
+        return std::make_shared<Item>();
+    });
+
     this->registerTrait("await", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
@@ -1084,7 +1122,6 @@ std::shared_ptr<CV::Item> CV::Context::set(const std::string &name, const std::s
 }
 
 CV::Context::Context(){
-    this->lastJobId = 1;
     this->readOnly = false;
     this->type = CV::ItemTypes::CONTEXT;
     this->head = NULL;
@@ -1120,8 +1157,16 @@ void CV::Context::debug(){
     ITEM TO TEXT
 
 */
-std::string CV::ItemToText(CV::Item *item, bool useColors){
-    useColorOnText = useColors;
+static std::string FunctionToText(CV::Function *fn){
+
+    std::string start = "[";
+    std::string end = "]";
+    std::string name = "fn";
+    std::string binary = "BINARY";
+
+    return start+name+" "+start+(fn->variadic ? "..." : CV::Tools::compileList(fn->getParams()))+end+" "+start+(fn->binary ? binary : fn->getBody() )+end+end;
+}
+std::string CV::ItemToText(CV::Item *item){
     switch(item->type){
         default:
         case CV::ItemTypes::NIL: {
@@ -1129,7 +1174,7 @@ std::string CV::ItemToText(CV::Item *item, bool useColors){
         };
         case CV::ItemTypes::JOB: {
             auto job = static_cast<CV::Job*>(item);
-            return Tools::setTextColor(Tools::Color::RED)+"[JOB "+Tools::removeTrailingZeros(job->id)+" '"+JobType::str(job->jobType)+"' '"+JobStatus::str(job->status)+"']"+Tools::setTextColor(Tools::Color::RESET);
+            return Tools::setTextColor(Tools::Color::GREEN)+"[JOB "+Tools::removeTrailingZeros(job->id)+" '"+JobType::str(job->jobType)+"' '"+JobStatus::str(job->status)+"']"+Tools::setTextColor(Tools::Color::RESET);
         };  
 
         case CV::ItemTypes::INTERRUPT: {
@@ -1164,7 +1209,7 @@ std::string CV::ItemToText(CV::Item *item, bool useColors){
             for(auto &it : proto->vars){
                 auto name = it.first;
                 auto item = it.second;
-                auto body = name == "top" ? Tools::setTextColor(Tools::Color::YELLOW, true)+"[ct]"+Tools::setTextColor(Tools::Color::RESET) : CV::ItemToText(item.get(), useColors);
+                auto body = name == "top" ? Tools::setTextColor(Tools::Color::YELLOW, true)+"[ct]"+Tools::setTextColor(Tools::Color::RESET) : CV::ItemToText(item.get());
                 output += body+CV::ModifierTypes::str(CV::ModifierTypes::NAMER)+Tools::setTextColor(Tools::Color::GREEN)+name+Tools::setTextColor(Tools::Color::RESET);
                 if(c < n-1){
                     output += " ";
@@ -1181,7 +1226,7 @@ std::string CV::ItemToText(CV::Item *item, bool useColors){
             list->accessMutex.lock();
             for(int i = 0; i < list->data.size(); ++i){
                 auto item = list->data[i];
-                output += CV::ItemToText(item.get(), useColors);
+                output += CV::ItemToText(item.get());
                 if(i < list->data.size()-1){
                     output += " ";
                 }
@@ -1397,11 +1442,11 @@ bool CV::FunctionConstraints::test(const std::vector<std::shared_ptr<CV::Item>> 
     }
 
     if(useMaxParams && items.size() > maxParams){
-        errormsg = "Provided ("+std::to_string(items.size())+") argument(s). Expected no more than ("+std::to_string(maxParams)+") arguments.";
+        errormsg = "Provided ("+std::to_string(items.size())+") argument(s). Expected no more than ("+std::to_string(maxParams)+") argument(s).";
         return false;
     }
     if(useMinParams && items.size() < minParams){
-        errormsg = "Provided ("+std::to_string(items.size())+") argument(s). Expected no less than ("+std::to_string(minParams)+") arguments.";
+        errormsg = "Provided ("+std::to_string(items.size())+") argument(s). Expected no less than ("+std::to_string(minParams)+") argument(s).";
         return false;
     } 
 
@@ -1601,38 +1646,78 @@ static std::shared_ptr<CV::Item> runJob(std::shared_ptr<CV::Function> &fn, const
     if(fn->binary){
         auto v = fn->fn(items, cursor, ctx);  
         if(cursor->error){
+            std::cout << CV::Tools::setTextColor(CV::Tools::Color::GREEN)+"JOB["<< job->id << "]: "+CV::Tools::setTextColor(CV::Tools::Color::RESET) << cursor->message << std::endl;
             job->setStatus(CV::JobStatus::DONE);
             fn->accessMutex.unlock();
             return std::make_shared<CV::Item>();
         } 
-        job->setStatus(CV::JobStatus::DONE);
+        bool allowDone = true;
+        if(v->type == CV::ItemTypes::INTERRUPT){
+            auto interrupt = std::static_pointer_cast<CV::Interrupt>(v);
+            if(interrupt->intType == CV::InterruptTypes::CONTINUE){
+                allowDone = false;
+                if(interrupt->hasPayload()){
+                    v = interrupt->getPayload(); // we haul the payload upstream
+                }
+            }
+        }
+        // If the function hauls a "CONTINUE" interrupt, we keep the job from finishing
+        if(allowDone && job->jobType != CV::JobType::CALLBACK){
+            job->setStatus(CV::JobStatus::DONE);
+        }
         fn->accessMutex.unlock();
         return v;
     }else{
+        std::cout << "HUH" << std::endl;
         auto tctx = std::make_shared<CV::Context>(ctx);
-        tctx->setTop(ctx);
+    std::cout << "XD 1" << std::endl;
 
+        tctx->setTop(ctx);
+    std::cout << "XD 2" << std::endl;
         if(fn->variadic){
             auto list = std::make_shared<CV::List>(items, false);
             tctx->set("...", std::static_pointer_cast<CV::Item>(list));
         }else{
             if(items.size() != fn->params.size()){
-                cursor->setError("'"+CV::ItemToText(fn.get())+"': Expects exactly "+(std::to_string(fn->params.size()))+" arguments");
+                std::cout << "XD 3" << std::endl;
                 fn->accessMutex.unlock();
+                std::string msg = "'"+FunctionToText(fn.get())+"': Provided ("+std::to_string(items.size())+") argument(s). Expects exactly "+(std::to_string(fn->params.size()))+".";
+                std::cout << "XD 4" << std::endl;
+                cursor->setError(msg);
+                std::cout << CV::Tools::setTextColor(CV::Tools::Color::GREEN)+"JOB ["<< job->id << "]: "+CV::Tools::setTextColor(CV::Tools::Color::RESET) << cursor->message << std::endl;
+                std::cout << "XD 5" << std::endl;
+                job->setStatus(CV::JobStatus::DONE);
                 return std::make_shared<CV::Item>();
             }
             for(int i = 0; i < items.size(); ++i){
                 tctx->set(fn->params[i], items[i]);
             }
         }
-
+        std::cout << "XD 6" << std::endl;
         auto v = interpret(fn->body, cursor, tctx);
+        std::cout << "XD 7" << std::endl;
         if(cursor->error){
+            std::cout << "XD 8" << std::endl;
+            // We force print errors from 'runJob'
+            std::cout << CV::Tools::setTextColor(CV::Tools::Color::GREEN)+"JOB["<< job->id << "]: "+CV::Tools::setTextColor(CV::Tools::Color::RESET) << cursor->message << std::endl;
+            std::cout << "XD 9" << std::endl;
             job->setStatus(CV::JobStatus::DONE);
             fn->accessMutex.unlock();
             return std::make_shared<CV::Item>();
         } 
-        job->setStatus(CV::JobStatus::DONE);        
+        bool allowDone = true;
+        if(v->type == CV::ItemTypes::INTERRUPT){
+            auto interrupt = std::static_pointer_cast<CV::Interrupt>(v);
+            if(interrupt->intType == CV::InterruptTypes::CONTINUE){
+                allowDone = false;
+                if(interrupt->hasPayload()){
+                    v = interrupt->getPayload();
+                }
+            }
+        }
+        if(allowDone && job->jobType != CV::JobType::CALLBACK){ // call backs finish from ContextStep
+            job->setStatus(CV::JobStatus::DONE);
+        }
         fn->accessMutex.unlock();
         return v;
     }
@@ -1788,7 +1873,7 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
     auto first = tokens[0];
     auto imp = first.first;
 
-    if(imp == "react"){
+    if(imp == "on"){
         if(first.modifiers.size() > 0){
             cursor->setError("'"+imp+"': Innate constructors don't have modifiers.");
             return std::make_shared<CV::Item>();
@@ -1803,24 +1888,20 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
         auto interp = interpret(params[0], cursor, ctx);
         auto target = processPreInterpretModifiers(interp, params[0].modifiers, cursor, ctx, effects);
         if(target->type != CV::ItemTypes::JOB){
-            cursor->setError("'"+imp+"': Can only react to Jobs.");
+            cursor->setError("'"+imp+"': Can only callback on Jobs.");
             return std::make_shared<CV::Item>();
         }
 
         interp = interpret(params[1], cursor, ctx);
-        auto fn = processPreInterpretModifiers(interp, params[0].modifiers, cursor, ctx, effects);
+        auto fn = processPreInterpretModifiers(interp, params[1].modifiers, cursor, ctx, effects);
         if(fn->type != CV::ItemTypes::FUNCTION){
             cursor->setError("'"+imp+"': Expects a function for argument(2).");
             return std::make_shared<CV::Item>();
         }
 
         auto fnCasted = std::static_pointer_cast<CV::Function>(fn);
-        auto job = std::make_shared<CV::Job>();
-        job->cursor = cursor;
-        job->setCallBack(target, fnCasted);
-        ctx->addJob(job);        
-        return job;
-
+        auto job = std::static_pointer_cast<CV::Job>(target)->setCallBack(fnCasted);
+        return std::static_pointer_cast<CV::Item>(job);
     }else
     if(imp == "set"){
         if(first.modifiers.size() > 0){
@@ -1872,17 +1953,27 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
             return ctx->set(params[0].first, solved);
         }
     }else
-    if(imp == "skip" || imp == "stop"){
+    if(imp == "skip" || imp == "stop" || imp == "continue"){
         if(first.modifiers.size() > 0){
             cursor->setError("'"+imp+"': Innate constructors don't have modifiers.");
             return std::make_shared<CV::Item>();
         }
-        auto interrupt = std::make_shared<CV::Interrupt>(CV::Interrupt(imp == "skip" ? CV::InterruptTypes::SKIP : CV::InterruptTypes::STOP));
+        uint8_t type;
+        if(imp == "skip"){
+            type = CV::InterruptTypes::SKIP;
+        }else
+        if(imp == "STOP"){
+            type = CV::InterruptTypes::STOP;
+        }else
+        if(imp == "continue"){
+            type = CV::InterruptTypes::CONTINUE;
+        }                
+        auto interrupt = std::make_shared<CV::Interrupt>(type);
         if(tokens.size() > 1){
             auto params = compileTokens(tokens, 1, tokens.size()-1);
             auto solved = processIteration(params, cursor, ctx, postEval);
             if(solved->type == CV::ItemTypes::INTERRUPT){
-                return solved;
+                return solved; // if the solved "payload" is a interrupt itself, then we haul it instead
             }else{
                 interrupt->setPayload(solved);
             }
@@ -2146,6 +2237,7 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
         return solved;
     }else{
         auto var = ctx->get(imp);
+
         CV::ModifierEffect effects;     
         // If we've got a var as first item, we solve its modifiers   
         if(var){

@@ -40,10 +40,11 @@ std::shared_ptr<ExecArg> getParam(std::vector<std::string> &params, const std::s
 }
 static CV::Cursor cursor;
 static std::shared_ptr<CV::Context> ctx = std::make_shared<CV::Context>();
+static bool finished = false;
 static bool isBusy = false;
 
 static void RunContextIsDone(){
-	while(true){
+	while(!finished){
 		isBusy = CV::ContextStep(ctx);
 		if(!isBusy){
 			CV::Tools::sleep(20);
@@ -85,11 +86,9 @@ int main(int argc, char* argv[]){
 		printCVEntry();
 		return 0;
 	}
-	bool useColors = dashC->valid;
+	CV::setUseColor(dashC->valid);
 	
 	ctx->copyable = false; // top contexts shouldn't be copied (only referenced)
-	CV::AddStandardOperators(ctx);
-	io::registerLibrary(ctx);
 
 	// std::cout << CV::ItemToText(ctx.get()) << std::endl;
 
@@ -124,6 +123,8 @@ int main(int argc, char* argv[]){
 	}else
 	if(dashRepl.get() && dashRepl->valid){
 		printCVEntry(false);
+		CV::AddStandardOperators(ctx);
+		io::registerLibrary(ctx);		
 		std::thread loop(&RunContextIsDone);
 		while(true){
 			std::cout << std::endl;
@@ -132,7 +133,7 @@ int main(int argc, char* argv[]){
 			std::getline (std::cin, input);
 
 			if(input.size() > 0){
-				std::cout << CV::ItemToText(CV::interpret(input, &cursor, ctx).get(), useColors) << std::endl;
+				std::cout << CV::ItemToText(CV::interpret(input, &cursor, ctx).get()) << std::endl;
 				if(cursor.error){
 					std::cout <<  cursor.message << std::endl;
 					if(!relaxed){
@@ -142,9 +143,13 @@ int main(int argc, char* argv[]){
 				}
 			}
 		}
-		while(isBusy) CV::Tools::sleep(20);
+		while(ctx->jobs.size() > 0)CV::Tools::sleep(20);
+		finished = true;
+		loop.join();
 		std::cout << "Bye!" << std::endl;
 	}else{
+		CV::AddStandardOperators(ctx);
+		io::registerLibrary(ctx);			
 		std::thread loop(&RunContextIsDone);
 		std::string cmd = "";
 		for(int i = 1; i < params.size(); ++i){
@@ -156,13 +161,14 @@ int main(int argc, char* argv[]){
 			return 0;
 		}
 		auto result = CV::interpret(cmd, &cursor, ctx);
-		std::cout << CV::ItemToText(result.get(), useColors);
+		std::cout << CV::ItemToText(result.get());
 		if(cursor.error){
 			std::cout << "\n" << cursor.message << std::endl;
 			std::exit(1);
 		}
-		while(isBusy)CV::Tools::sleep(20);
-		std::exit(0);
+		while(ctx->jobs.size() > 0)CV::Tools::sleep(20);
+		finished = true;
+		loop.join();
 	}		
 
 	return 0;

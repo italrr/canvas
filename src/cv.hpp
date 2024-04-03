@@ -99,9 +99,7 @@
                 UNDEFINED,
                 NAMER,
                 SCOPE,
-                LINKER,
                 EXPAND,
-                UNTETHERED,
                 TRAIT
             };
             static uint8_t getToken(char mod){
@@ -188,7 +186,8 @@
         namespace InterruptTypes {
             enum InterruptTypes : uint8_t {
                 SKIP,
-                STOP
+                STOP,
+                CONTINUE
             };
             static std::string str(uint8_t type){
                 switch(type){
@@ -512,19 +511,21 @@
         struct Job : Item {
             __CV_NUMBER_NATIVE_TYPE id;
             std::shared_ptr<CV::Item> payload;
+            std::shared_ptr<CV::Job> callback;
             std::vector<std::shared_ptr<CV::Item>> params;
-            std::shared_ptr<CV::Item> target;
             std::shared_ptr<CV::Function> fn;
             Cursor *cursor;
             int jobType;
             int status;
             std::thread thread;
+            
 
             void setStatus(int nstatus);
             int getStatus();
 
             std::shared_ptr<CV::Item> getPayload();
             void setPayload(std::shared_ptr<CV::Item> &item);
+            bool hasPayload();
 
             void registerTraits();
             std::shared_ptr<CV::Item> copy(bool deep = true);
@@ -532,7 +533,7 @@
             Job();
 
             void set(int type, std::shared_ptr<CV::Function> &fn, std::vector<std::shared_ptr<CV::Item>> &params);
-            void setCallBack(std::shared_ptr<CV::Item> &job, std::shared_ptr<CV::Function> &cb);
+            std::shared_ptr<CV::Job> setCallBack(std::shared_ptr<CV::Function> &cb);
 
             Job(const Job &other){
                 this->id = other.id;
@@ -558,7 +559,7 @@
             std::unordered_map<std::string, std::shared_ptr<CV::Item>> vars;
             std::shared_ptr<Context> head;
             bool readOnly;
-            int lastJobId;
+            uint64_t createdAt;
 
             std::vector<std::shared_ptr<CV::Job>> jobs;
 
@@ -643,7 +644,8 @@
         std::shared_ptr<CV::Item> interpret(const std::string &input, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx);
         std::shared_ptr<CV::Item>  interpret(const CV::Token &token, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx);
         bool ContextStep(std::shared_ptr<CV::Context> &cv);
-        std::string ItemToText(CV::Item *item, bool useColors = false);
+        void setUseColor(bool v);
+        std::string ItemToText(CV::Item *item);
 
 
     }
