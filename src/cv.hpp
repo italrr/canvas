@@ -19,6 +19,7 @@
         namespace Tools {
             bool isLineComplete(const std::string &input);
             void sleep(uint64_t t);
+            bool isReservedWord(const std::string &input);
         }
 
         namespace SupportedPlatform {
@@ -641,8 +642,8 @@
         };        
 
         void AddStandardOperators(std::shared_ptr<CV::Context> &ctx);
-        std::shared_ptr<CV::Item> interpret(const std::string &input, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx);
-        std::shared_ptr<CV::Item>  interpret(const CV::Token &token, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx);
+        std::shared_ptr<CV::Item> interpret(const std::string &input, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, bool singleReturn = false);
+        std::shared_ptr<CV::Item> interpret(const CV::Token &token, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, bool singleReturn = false);
         bool ContextStep(std::shared_ptr<CV::Context> &cv);
         void setUseColor(bool v);
         std::string ItemToText(CV::Item *item);

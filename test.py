@@ -15,7 +15,7 @@ class TestCase:
 
 def run_test(test):
     p = subprocess.run([CV_BINARY_PATH, test.command], capture_output=True, text=True)
-    return (( p.stdout == test.expected if test.expEqual else p.stdout != test.expected ), p.stdout)
+    return (( p.stdout.replace('\n', '') == test.expected if test.expEqual else p.stdout != test.expected ), p.stdout.replace('\n', ''))
 
 cases = [
     # Test function definition
@@ -23,7 +23,6 @@ cases = [
     
     # Test Context definion and access
     TestCase("[set a [fn [a b c][+ a b c]]][a 1 2 3]", "[[fn [a b c] [[+ a b c]]] 6]", True),
-    TestCase("[set test [ct 25~n]][test: set n 10][test]", "[[ct 10~n <TOP>~top] 10 [ct 10~n <TOP>~top]]", True),
     
     # Test `type` trait
     TestCase("5|type", "'NUMBER'", True),
@@ -37,6 +36,7 @@ cases = [
     TestCase("* 0.5 100", "50", True),
     TestCase("/ 3.5 3.5", "1", True),
     TestCase("** 2", "2", False),
+    TestCase("/ 1 0", "nil'/': Division by zero.", False),
 
     # l-range and ANY_NUMBER trait
     TestCase("l-range 1 10", "[1 2 3 4 5 6 7 8 9 10]", True),    
@@ -49,7 +49,7 @@ cases = [
     TestCase("[1 2 [3 4 [5 6 [7 8 [9 10 [11 12]]]]]]", "[1 2 [3 4 [5 6 [7 8 [9 10 [11 12]]]]]]", True),
 
     # Complex list defition and trait stress test
-    TestCase("[set k [+|copy 2 'Tres' [ct 10]]][k|0 1 2][k|1][k|2|2][k|3:v-0]", "[[[fn [...] [BINARY]] 2 'Tres' [ct 10~v-0 <TOP>~top]] 3 2 'e' 10]", True),
+    TestCase("[set k 10][+ k k][set w [ct 1500~n]][w: ** n][set m [k w]][m|0|inv]", "[10 20 [ct 2250000~n] 2250000 [10 [ct 2250000~n]] -10]", True),
 
     # l-flat
     TestCase("l-flat [1 2 [3 4 [5 6 [7 8 [9 10 [11 12]]]]]]", "[1 2 3 4 5 6 7 8 9 10 11 12]", True),
@@ -71,7 +71,10 @@ cases = [
     TestCase("eq 5.2 1.2", "0", True),
 
     # Copy trait
-    TestCase("l-sort|copy", "[fn [c l] [BINARY]]", True)
+    TestCase("l-sort|copy", "[fn [c l] [BINARY]]", True),
+
+    # on / untether
+    TestCase("on [+|untether [l-range 1 1000]^] [fn [v][io:out v]]", "[JOB 0 'CALLBACK' 'RUNNING']500500", True)    
 ]
 
 print("ABOUT TO START TEST CASES FOR CANVAS")

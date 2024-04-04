@@ -9,14 +9,35 @@
 #include "CV.hpp"
 
 static bool useColorOnText = false;
+static const bool ShowHEADRef = false;
 
 static std::string FunctionToText(CV::Function *fn);
-std::shared_ptr<CV::Item> CV::interpret(const CV::Token &token, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx);
+static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, bool singleReturn, bool postEval = true);
 static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV::Item> &item, std::vector<CV::ModifierPair> modifiers, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects);
+static std::shared_ptr<CV::Item> processIteration(const std::vector<CV::Token> &tokens, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, bool postEval, bool singleReturn);
+static void processPostInterpretExpandListOrContext(std::shared_ptr<CV::Item> &solved, CV::ModifierEffect &effects, std::vector<std::shared_ptr<CV::Item>> &items, CV::Cursor *cursor, const std::shared_ptr<CV::Context> &ctx);
+static std::shared_ptr<CV::Item> runFunction(std::shared_ptr<CV::Function> &fn, std::vector<std::shared_ptr<CV::Item>> &items, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx);
+static std::shared_ptr<CV::Item> runFunction(std::shared_ptr<CV::Function> &fn, const std::vector<CV::Token> &tokens, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx);
+static std::shared_ptr<CV::Item> runJob(std::shared_ptr<CV::Function> &fn, const std::vector<std::shared_ptr<CV::Item>> &items, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Job> &job);
+
+
 
 void CV::setUseColor(bool v){
     useColorOnText = v;
 }
+
+static const std::vector<std::string> RESERVED_WORDS = {
+    "top", "nil", "ct", "fn", "iter", "do", "if", "skip",
+    "stop", "Continue", "set", "on"
+};
+
+static const std::vector<std::string> RESERVED_SYMBOLS = {
+    CV::ModifierTypes::str(CV::ModifierTypes::NAMER),
+    CV::ModifierTypes::str(CV::ModifierTypes::SCOPE),
+    CV::ModifierTypes::str(CV::ModifierTypes::TRAIT),
+    CV::ModifierTypes::str(CV::ModifierTypes::EXPAND),
+    "[", "]", "'", "#", ".", "\n"
+};
 
 namespace CV {
     namespace Tools {
@@ -135,6 +156,24 @@ namespace CV {
 
         static bool isNumber(const std::string &s){
             return (s.find_first_not_of( "-.0123456789") == std::string::npos);
+        }
+
+        bool isReservedWord(const std::string &input){
+            for(int i = 0; i < RESERVED_SYMBOLS.size(); ++i){
+                if(input == RESERVED_SYMBOLS[i] || input.find(RESERVED_SYMBOLS[i]) != -1){
+                    return true;
+                }
+            }            
+            for(int i = 0; i < RESERVED_WORDS.size(); ++i){
+                if(input == RESERVED_WORDS[i]){
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        bool isValidVarName(const std::string &varname){
+            return  !CV::Tools::isReservedWord(varname) && !CV::Tools::isNumber(varname);
         }
 
         static __CV_NUMBER_NATIVE_TYPE positive(__CV_NUMBER_NATIVE_TYPE n){
@@ -325,7 +364,7 @@ CV::Interrupt::Interrupt(uint8_t intType){
 }
 
 std::shared_ptr<CV::Item> CV::Interrupt::copy(bool deep){
-    auto item = std::make_shared<CV::Interrupt>(CV::Interrupt(this->intType));
+    auto item = std::make_shared<CV::Interrupt>(this->intType);
     if(this->hasPayload()){
         auto pl = this->getPayload();
         item->setPayload(pl);
@@ -452,7 +491,7 @@ void CV::List::registerTraits(){
         auto list = static_cast<List*>(subject); 
         auto index = std::stod(value);
         if(index < 0 || index >= list->size()){
-            cursor->setError("'List|*ANY_NUMBER*': Index("+Tools::removeTrailingZeros(index)+") is out of range(0-"+std::to_string(list->size())+")");
+            cursor->setError("'List|*ANY_NUMBER*': Index("+Tools::removeTrailingZeros(index)+") is out of range(0-"+std::to_string(list->size()-1)+")");
             return std::make_shared<CV::Item>();
         }
         return list->get(index); 
@@ -535,7 +574,7 @@ void CV::String::registerTraits(){
         auto str = static_cast<String*>(subject)->get();
         auto index = std::stod(value);
         if(index < 0 || index >= str.size()){
-            cursor->setError("'String|*ANY_NUMBER*': Index("+Tools::removeTrailingZeros(index)+") is out of range(0-"+std::to_string(str.size())+")");
+            cursor->setError("'String|*ANY_NUMBER*': Index("+Tools::removeTrailingZeros(index)+") is out of range(0-"+std::to_string(str.size()-1)+")");
             return std::make_shared<CV::Item>();
         }
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::String>(  std::string("")+str[index]  ));
@@ -776,13 +815,13 @@ void CV::Function::registerTraits(){
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>( v  ));            
     });   
 
-    this->registerTrait("proto", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("body", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
         auto func = static_cast<Function*>(subject);
         func->accessMutex.lock();
-        auto v = func->binary ? "[]" : func->body;
+        auto v = func->binary ? "[BINARY]" : func->body;
         func->accessMutex.unlock();
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::String>(  v  ));
         
@@ -801,6 +840,8 @@ void CV::Function::set(const std::vector<std::string> &params, const std::string
     this->binary = false;
     this->variadic = variadic;
     this->accessMutex.unlock();
+    this->threaded = false;
+    this->async = false;
 }
 
 void CV::Function::set(const std::vector<std::string> &params, const std::function<std::shared_ptr<CV::Item> (const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx)> &fn, bool variadic){
@@ -811,6 +852,8 @@ void CV::Function::set(const std::vector<std::string> &params, const std::functi
     this->binary = true;
     this->variadic = variadic;
     this->accessMutex.unlock();
+    this->threaded = false;
+    this->async = false;    
 }
 
 /*
@@ -822,8 +865,8 @@ std::shared_ptr<CV::Item> CV::Context::get(const std::string &name){
     this->accessMutex.lock();
     auto it = vars.find(name);
     if(it == vars.end()){
-        auto v = this->head ? this->head->get(name) : std::shared_ptr<CV::Item>(NULL);
         this->accessMutex.unlock();
+        auto v = this->head && this->head.get() != this ? this->head->get(name) : std::shared_ptr<CV::Item>(NULL);
         return v;
     }
     auto v = it->second;
@@ -866,8 +909,6 @@ std::shared_ptr<CV::Job> CV::Context::getJobById(__CV_NUMBER_NATIVE_TYPE id){
     this->accessMutex.unlock();
     return std::shared_ptr<Job>(NULL);
 }
-
-static std::shared_ptr<CV::Item> runJob(std::shared_ptr<CV::Function> &fn, const std::vector<std::shared_ptr<CV::Item>> &items, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Job> &job);
 
 static void ThreadedFunction(std::shared_ptr<CV::Job> job, std::shared_ptr<CV::Context> ctx){
     while(job->getStatus() == CV::JobStatus::IDLE){ CV::Tools::sleep(20); }
@@ -936,6 +977,22 @@ bool CV::ContextStep(std::shared_ptr<CV::Context> &ctx){
         }
     }
 
+    auto runCb = [&](std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Job> &job){
+        auto cb = job->callback;
+        if(cb->jobType == CV::JobType::CALLBACK){
+            std::vector<std::shared_ptr<CV::Item>> items;
+            if(job->hasPayload()){
+                items.push_back(job->getPayload());
+            }
+            auto result = runJob(cb->fn, items, cb->cursor, ctx, cb);
+            cb->setPayload(result);
+            cb->setStatus(JobStatus::DONE);
+        }else{
+            cb->cursor->setError("Non-Callback Job '"+CV::Tools::removeTrailingZeros(cb->id)+"' attached as Callback.");
+            cb->setStatus(JobStatus::DONE);
+        }
+    };
+
     // Delete finished jobs
     ctx->accessMutex.lock();
     for(int i = 0; i < done.size(); ++i){
@@ -949,19 +1006,9 @@ bool CV::ContextStep(std::shared_ptr<CV::Context> &ctx){
                     RUN CALL BACK                
                 */
                 if(job->callback.get()){
-                    auto cb = job->callback;
-                    if(cb->jobType == CV::JobType::CALLBACK){
-                        std::vector<std::shared_ptr<CV::Item>> items;
-                        if(job->hasPayload()){
-                            items.push_back(job->getPayload());
-                        }
-                        auto result = runJob(cb->fn, items, cb->cursor, ctx, cb);
-                        cb->setPayload(result);
-                        cb->setStatus(JobStatus::DONE);
-                    }else{
-                        cb->cursor->setError("Non-Callback Job '"+CV::Tools::removeTrailingZeros(cb->id)+"' attached as Callback.");
-                        cb->setStatus(JobStatus::DONE);
-                    }
+                    ctx->accessMutex.unlock();
+                    runCb(ctx, job);
+                    ctx->accessMutex.lock();
                 }
                 ctx->jobs.erase(ctx->jobs.begin() + j);
                 break;
@@ -1206,9 +1253,15 @@ std::string CV::ItemToText(CV::Item *item){
             int n = proto->vars.size();
             int c = 0;
             proto->accessMutex.lock();
+            if(!ShowHEADRef && proto->vars.find("top") != proto->vars.end()){
+                --n;
+            }
             for(auto &it : proto->vars){
                 auto name = it.first;
                 auto item = it.second;
+                if(!ShowHEADRef && name == "top") {
+                    continue;
+                }
                 auto body = name == "top" ? Tools::setTextColor(Tools::Color::YELLOW, true)+"[ct]"+Tools::setTextColor(Tools::Color::RESET) : CV::ItemToText(item.get());
                 output += body+CV::ModifierTypes::str(CV::ModifierTypes::NAMER)+Tools::setTextColor(Tools::Color::GREEN)+name+Tools::setTextColor(Tools::Color::RESET);
                 if(c < n-1){
@@ -1386,19 +1439,24 @@ CV::Token parseTokenWModifier(const std::string &_input){
 }
 
 std::vector<CV::Token> buildTokens(const std::vector<std::string> &literals, CV::Cursor *cursor){
-
     std::vector<CV::Token> tokens;
     for(int i = 0; i < literals.size(); ++i){
         auto innLiterals = parseTokens(literals[i], ' ', cursor);
-        // Complex tokens (It's usually tokens that actually are complete statements) need to be evaluated further        
+        // Complex tokens type 1 (more than parsed token)     
         if(innLiterals.size() > 1){
             CV::Token token;
             token.first = literals[i];
             tokens.push_back(token);  
-        // Simple can be inserted right away
         }else{
             auto token = parseTokenWModifier(literals[i]);
-            if(token.first == ""){ // This means this modifier belongs to the token before this one
+            // Complex token type 2 (no space, but chained blocks)
+            if(token.first != "" && literals[i][0] == '[' && literals[i][literals[i].size()-1] == ']' && token.modifiers.size() > 0){
+                CV::Token token;
+                token.first = literals[i];
+                tokens.push_back(token);                 
+            // Otherwise simple tokens
+            }else
+            if(token.first == "" && token.modifiers.size() > 0){ 
                 if(i > 0){
                     auto &prev = tokens[tokens.size()-1];
                     for(int j = 0; j < token.modifiers.size(); ++j){
@@ -1414,6 +1472,13 @@ std::vector<CV::Token> buildTokens(const std::vector<std::string> &literals, CV:
             }
         }
     }
+
+    // CV::Tools::printList(literals);
+    //     for(int i = 0; i < tokens.size(); ++i){
+    //         std::cout << tokens[i].literal() << std::endl;
+    //     }
+
+    // std::exit(1);
 
     return tokens;
 };
@@ -1517,7 +1582,6 @@ bool CV::FunctionConstraints::test(const std::vector<std::shared_ptr<CV::Item>> 
 }
 
 
-static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, bool postEval = true);
 
 
 static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV::Item> &item, std::vector<CV::ModifierPair> modifiers, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
@@ -1555,21 +1619,30 @@ static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV
                     auto result = item->runTrait(name, "", cursor, ctx, effects);
                     if(cursor->error){
                         return std::make_shared<CV::Item>();
-                    }                       
+                    }                    
                     item = result;
                 }
             } break;            
             case CV::ModifierTypes::NAMER: {
                 effects.named = mod.subject;
+                if(effects.named.size() == 0){
+                    cursor->setError("'"+CV::ModifierTypes::str(CV::ModifierTypes::NAMER)+"': Namer expects a name for the item.");
+                    return std::make_shared<CV::Item>();
+                }
                 if(ctx->readOnly){
-                    cursor->setError("'"+CV::ModifierTypes::str(CV::ModifierTypes::NAMER)+"': Cannot name this variable '"+mod.subject+"' within this context as it's readonly.");
+                    cursor->setError("'"+CV::ModifierTypes::str(CV::ModifierTypes::NAMER)+"': Cannot name this item '"+mod.subject+"' within this context as it's readonly.");
                     return std::make_shared<CV::Item>();
                 }
                 if(ctx.get() == item.get()){
                     cursor->setError("'"+CV::ModifierTypes::str(CV::ModifierTypes::NAMER)+"': Naming a context within a context is prohibited (circular referencing).");
                     return std::make_shared<CV::Item>();                    
                 }
-                ctx->set(mod.subject, item);
+                std::string &varname = mod.subject;
+                if(!CV::Tools::isValidVarName(varname)){
+                    cursor->setError("'"+CV::ModifierTypes::str(CV::ModifierTypes::NAMER)+"': Invalid name '"+varname+"'. The name cannot be a reserved word and/or contain prohibited symbols (Modifiers, numbers, brackets, etc).");
+                    return std::make_shared<CV::Item>();  
+                }
+                ctx->set(varname, item);
             } break;        
             case CV::ModifierTypes::SCOPE: {
                 if(item->type != CV::ItemTypes::CONTEXT){
@@ -1604,7 +1677,7 @@ static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV
 }
 
 // Interpret from STRING
-std::shared_ptr<CV::Item> CV::interpret(const std::string &input, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+std::shared_ptr<CV::Item> CV::interpret(const std::string &input, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, bool singleReturn){
     auto literals = parseTokens(input, ' ', cursor);
     if(cursor->error){
         return std::make_shared<CV::Item>();
@@ -1613,11 +1686,17 @@ std::shared_ptr<CV::Item> CV::interpret(const std::string &input, CV::Cursor *cu
     if(cursor->error){
         return std::make_shared<CV::Item>();
     }   
-    return eval(tokens, cursor, ctx);
+
+        
+    auto r = eval(tokens, cursor, ctx, singleReturn);
+    if(r->type == CV::ItemTypes::INTERRUPT && std::static_pointer_cast<CV::Interrupt>(r)->hasPayload()){
+        return std::static_pointer_cast<CV::Interrupt>(r)->getPayload();
+    }
+    return r;
 }
 
 // Interpret from single TOKEN without dropping modifiers. Should be only used by `eval`
-std::shared_ptr<CV::Item> CV::interpret(const CV::Token &token, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+std::shared_ptr<CV::Item> CV::interpret(const CV::Token &token, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, bool singleReturn){
     auto literals = parseTokens(token.first, ' ', cursor);
     if(cursor->error){
         return std::make_shared<CV::Item>();
@@ -1626,17 +1705,13 @@ std::shared_ptr<CV::Item> CV::interpret(const CV::Token &token, CV::Cursor *curs
     if(cursor->error){
         return std::make_shared<CV::Item>();
     }       
-    return eval(tokens, cursor, ctx);
+
+    auto r = eval(tokens, cursor, ctx, singleReturn);
+    if(r->type == CV::ItemTypes::INTERRUPT && std::static_pointer_cast<CV::Interrupt>(r)->hasPayload()){
+        return std::static_pointer_cast<CV::Interrupt>(r)->getPayload();
+    }
+    return r;
 }
-
-static std::shared_ptr<CV::Item> processIteration(const std::vector<CV::Token> &tokens, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, bool postEval);
-static void processPostInterpretExpandListOrContext(std::shared_ptr<CV::Item> &solved, CV::ModifierEffect &effects, std::vector<std::shared_ptr<CV::Item>> &items, CV::Cursor *cursor, const std::shared_ptr<CV::Context> &ctx);
-
-
-static std::shared_ptr<CV::Item> runFunction(std::shared_ptr<CV::Function> &fn, std::vector<std::shared_ptr<CV::Item>> &items, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx);
-static std::shared_ptr<CV::Item> runFunction(std::shared_ptr<CV::Function> &fn, const std::vector<CV::Token> &tokens, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx);
-
-
 static std::shared_ptr<CV::Item> runJob(std::shared_ptr<CV::Function> &fn, const std::vector<std::shared_ptr<CV::Item>> &items, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Job> &job){
     fn->accessMutex.lock();
     if(fn->type == CV::ItemTypes::NIL){
@@ -1668,24 +1743,17 @@ static std::shared_ptr<CV::Item> runJob(std::shared_ptr<CV::Function> &fn, const
         fn->accessMutex.unlock();
         return v;
     }else{
-        std::cout << "HUH" << std::endl;
         auto tctx = std::make_shared<CV::Context>(ctx);
-    std::cout << "XD 1" << std::endl;
-
         tctx->setTop(ctx);
-    std::cout << "XD 2" << std::endl;
         if(fn->variadic){
             auto list = std::make_shared<CV::List>(items, false);
             tctx->set("...", std::static_pointer_cast<CV::Item>(list));
         }else{
             if(items.size() != fn->params.size()){
-                std::cout << "XD 3" << std::endl;
                 fn->accessMutex.unlock();
                 std::string msg = "'"+FunctionToText(fn.get())+"': Provided ("+std::to_string(items.size())+") argument(s). Expects exactly "+(std::to_string(fn->params.size()))+".";
-                std::cout << "XD 4" << std::endl;
                 cursor->setError(msg);
                 std::cout << CV::Tools::setTextColor(CV::Tools::Color::GREEN)+"JOB ["<< job->id << "]: "+CV::Tools::setTextColor(CV::Tools::Color::RESET) << cursor->message << std::endl;
-                std::cout << "XD 5" << std::endl;
                 job->setStatus(CV::JobStatus::DONE);
                 return std::make_shared<CV::Item>();
             }
@@ -1693,14 +1761,10 @@ static std::shared_ptr<CV::Item> runJob(std::shared_ptr<CV::Function> &fn, const
                 tctx->set(fn->params[i], items[i]);
             }
         }
-        std::cout << "XD 6" << std::endl;
-        auto v = interpret(fn->body, cursor, tctx);
-        std::cout << "XD 7" << std::endl;
+        auto v = interpret(fn->body, cursor, tctx, true);
         if(cursor->error){
-            std::cout << "XD 8" << std::endl;
             // We force print errors from 'runJob'
             std::cout << CV::Tools::setTextColor(CV::Tools::Color::GREEN)+"JOB["<< job->id << "]: "+CV::Tools::setTextColor(CV::Tools::Color::RESET) << cursor->message << std::endl;
-            std::cout << "XD 9" << std::endl;
             job->setStatus(CV::JobStatus::DONE);
             fn->accessMutex.unlock();
             return std::make_shared<CV::Item>();
@@ -1728,7 +1792,7 @@ static std::shared_ptr<CV::Item> runFunction(std::shared_ptr<CV::Function> &fn, 
     std::vector<std::shared_ptr<CV::Item>> items;
     for(int i = 0; i < tokens.size(); ++i){
         CV::ModifierEffect effects;
-        auto interp = interpret(tokens[i], cursor, ctx);
+        auto interp = eval({tokens[i]}, cursor, ctx, true);
         if(cursor->error){
             return std::make_shared<CV::Item>();
         }        
@@ -1768,15 +1832,16 @@ static std::shared_ptr<CV::Item> runFunction(std::shared_ptr<CV::Function> &fn, 
             tctx->set("...", std::static_pointer_cast<CV::Item>(list));
         }else{
             if(items.size() != fn->params.size()){
-                cursor->setError("'"+CV::ItemToText(fn.get())+"': Expects exactly "+(std::to_string(fn->params.size()))+" arguments");
                 fn->accessMutex.unlock();
+                std::string msg = "'"+FunctionToText(fn.get())+"': Provided ("+std::to_string(items.size())+") argument(s). Expects exactly "+(std::to_string(fn->params.size()))+".";
+                cursor->setError(msg);
                 return std::make_shared<CV::Item>();
             }
             for(int i = 0; i < items.size(); ++i){
                 tctx->set(fn->params[i], items[i]);
             }
         }
-        auto v = interpret(fn->body, cursor, tctx);
+        auto v = interpret(fn->body, cursor, tctx, true);
         fn->accessMutex.unlock();
         return v;
     }
@@ -1795,7 +1860,7 @@ static void processPostInterpretExpandListOrContext(std::shared_ptr<CV::Item> &s
             for(auto &it : proto->vars){
                 if(ctx == NULL){
                     items.push_back(it.second);
-                }else{
+                }else{                           
                     ctx->set(it.first, it.second);
                 }
             }
@@ -1809,11 +1874,12 @@ static void processPostInterpretExpandListOrContext(std::shared_ptr<CV::Item> &s
     } 
 }
 
-static std::shared_ptr<CV::Item> processIteration(const std::vector<CV::Token> &tokens, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, bool postEval){
+static std::shared_ptr<CV::Item> processIteration(const std::vector<CV::Token> &tokens, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, bool postEval, bool singleReturn){
     std::vector<std::shared_ptr<CV::Item>> items;
     for(int i = 0; i < tokens.size(); ++i){
         CV::ModifierEffect effects;
-        auto solved = eval({tokens[i]}, cursor, ctx, postEval);
+
+        auto solved = eval({tokens[i]}, cursor, ctx, singleReturn, postEval);
         if(cursor->error){
             return std::make_shared<CV::Item>();
         }
@@ -1834,7 +1900,7 @@ static std::shared_ptr<CV::Item> processIteration(const std::vector<CV::Token> &
             return std::make_shared<CV::Item>();
         }                           
     }
-    auto r = tokens.size() == 1 ? items[0] : std::make_shared<CV::List>(items);
+    auto r = tokens.size() == 1 ? items[0] : (singleReturn ? items[items.size()-1] : std::make_shared<CV::List>(items, false));
     return r;
 }
 
@@ -1868,10 +1934,15 @@ static CV::ItemContextPair findTokenOrigin(CV::Token &token, CV::Cursor *cursor,
     return ctx->getWithContext(findName);
 }
 
-static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx,  bool postEval){
+static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx,  bool singleReturn, bool postEval){
+
+    // No tokens will be interpreted an empty list
+    if(tokens.size() == 0){
+        return std::make_shared<CV::List>(std::vector<std::shared_ptr<CV::Item>>({}), false);
+    }
 
     auto first = tokens[0];
-    auto imp = first.first;
+    auto imp = first.first;    
 
     if(imp == "on"){
         if(first.modifiers.size() > 0){
@@ -1933,7 +2004,12 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
             if(f.context == solved.get()){
                 cursor->setError("'"+imp+"': Setting a context within a context is prohibited (circular referencing).");
                 return std::make_shared<CV::Item>();
-            }                  
+            }                 
+            std::string varname = f.name;
+            if(!CV::Tools::isValidVarName(varname)){
+                cursor->setError("'"+imp+"': Invalid name '"+varname+"'. The name cannot be a reserved word and/or contain prohibited symbols (Modifiers, numbers, brackets, etc).");
+                return std::make_shared<CV::Item>();  
+            }               
             return f.context->set(f.name, solved);
         }else
         // If a scope modifier was provided but the context wasn't found, we throw an error
@@ -1943,14 +2019,19 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
         // Othwerwise just define it within the current context
         }else{
             if(ctx->readOnly){
-                cursor->setError("'"+imp+"': Cannot set variable '"+params[0].first+"' within this context as it is readonly.");
+                cursor->setError("'"+imp+"': Cannot set item '"+params[0].first+"' within this context as it is readonly.");
                 return std::make_shared<CV::Item>();
             }
             if(ctx.get() == solved.get()){
                 cursor->setError("'"+imp+"': Setting a context within a context is prohibited (circular referencing).");
                 return std::make_shared<CV::Item>();
             }
-            return ctx->set(params[0].first, solved);
+            std::string varname = params[0].first;
+            if(!CV::Tools::isValidVarName(varname)){
+                cursor->setError("'"+imp+"': Invalid name '"+varname+"'. The name cannot be a reserved word and/or contain prohibited symbols (Modifiers, numbers, brackets, etc).");
+                return std::make_shared<CV::Item>();  
+            }                 
+            return ctx->set(varname, solved);
         }
     }else
     if(imp == "skip" || imp == "stop" || imp == "continue"){
@@ -1962,7 +2043,7 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
         if(imp == "skip"){
             type = CV::InterruptTypes::SKIP;
         }else
-        if(imp == "STOP"){
+        if(imp == "stop"){
             type = CV::InterruptTypes::STOP;
         }else
         if(imp == "continue"){
@@ -1971,7 +2052,7 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
         auto interrupt = std::make_shared<CV::Interrupt>(type);
         if(tokens.size() > 1){
             auto params = compileTokens(tokens, 1, tokens.size()-1);
-            auto solved = processIteration(params, cursor, ctx, postEval);
+            auto solved = processIteration(params, cursor, ctx, postEval, false);
             if(solved->type == CV::ItemTypes::INTERRUPT){
                 return solved; // if the solved "payload" is a interrupt itself, then we haul it instead
             }else{
@@ -2109,7 +2190,12 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
                 auto item = list->get(i);
                 // We use the namer to name every iteration's current variable
                 if(origEff.named.size() > 0){
-                    tctx->set(origEff.named, item);
+                    std::string varname = origEff.named;
+                    if(!CV::Tools::isValidVarName(varname)){
+                        cursor->setError("'"+imp+"': Invalid name '"+varname+"'. The name cannot be a reserved word and/or contain prohibited symbols (Modifiers, numbers, brackets, etc).");
+                        return std::make_shared<CV::Item>();  
+                    }                    
+                    tctx->set(varname, item);
                 }                
                 CV::ModifierEffect effects;
                 auto interp = interpret(code, cursor, tctx);
@@ -2143,7 +2229,12 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
                 auto item = it.second;
                 // We use the namer to name every iteration's current variable
                 if(origEff.named.size() > 0){
-                    tctx->set(origEff.named, item);
+                    std::string varname = origEff.named;
+                    if(!CV::Tools::isValidVarName(varname)){
+                        cursor->setError("'"+imp+"': Invalid name '"+varname+"'. The name cannot be a reserved word and/or contain prohibited symbols (Modifiers, numbers, brackets, etc).");
+                        return std::make_shared<CV::Item>();  
+                    }                                  
+                    tctx->set(varname, item);
                 }                
                 CV::ModifierEffect effects;
                 auto interp = interpret(code, cursor, tctx);
@@ -2180,10 +2271,9 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
             cursor->setError("'"+imp+"': Innate constructors don't have modifiers.");
             return std::make_shared<CV::Item>();
         }
-
         auto params = compileTokens(tokens, 1, tokens.size()-1);
         if(params.size() > 2 || params.size() < 2){
-            cursor->setError("'"+imp+"': Expects exactly 2 arguments: <[ARGS[0]...ARGS[n]]> <[CODE[0]...CODE[n]]>.");
+            cursor->setError("'"+imp+"': Expects exactly 2 arguments: [ARGS[0]...ARGS[n]] [CODE[0]...CODE[n]].");
             return std::make_shared<CV::Item>();
         }
         bool isVariadic = false;
@@ -2193,6 +2283,14 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
         }
         if(argNames.size() == 1 && argNames[0] == "..."){
             isVariadic = true;
+        }else{
+            for(int i = 0; i < argNames.size(); ++i){
+                auto &name = argNames[i];
+                if(!CV::Tools::isValidVarName(name)){
+                    cursor->setError("'"+imp+"': Invalid name '"+name+"' for function definition. The name cannot be a reserved word and/or contain prohibited symbols (Modifiers, numbers, brackets, etc).");
+                    return std::make_shared<CV::Item>();  
+                }
+            }
         }
         auto code = params[1];
 
@@ -2229,17 +2327,24 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
                 }  
                 for(int j = 0; j < items.size(); ++j){
                     if(effects.named.size() == 0){
-                        pctx->set("v-"+std::to_string(j), items[j]);
+                        pctx->set("v"+std::to_string(j), items[j]);
                     }
                 }
             }
         }
         return solved;
-    }else{
-        auto var = ctx->get(imp);
-
+    // A completely empty first statement will be considered an empty list
+    }else
+    if(imp == ""){
         CV::ModifierEffect effects;     
-        // If we've got a var as first item, we solve its modifiers   
+        auto list = std::static_pointer_cast<CV::Item>(std::make_shared<CV::List>(std::vector<std::shared_ptr<CV::Item>>({}), false));
+        auto v = processPreInterpretModifiers(list, first.modifiers, cursor, ctx, effects);
+        return v;
+    }else{
+
+        auto var = ctx->get(imp);
+        CV::ModifierEffect effects;     
+        // If we've got a var as first item, we solve its modifiers  
         if(var){
             var = processPreInterpretModifiers(var, first.modifiers, cursor, ctx, effects);
         }
@@ -2254,7 +2359,7 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
             return var;
         }else
         // Is it a natural type?
-        if(tokens.size() == 1){
+        if(tokens.size() == 1){           
             if(!var && CV::Tools::isNumber(imp)){
                 auto n = std::make_shared<CV::Number>(std::stod(imp));
                 CV::ModifierEffect effects;
@@ -2272,7 +2377,8 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
                 auto result = processPreInterpretModifiers(casted, first.modifiers, cursor, ctx, effects);
                 return result;
             }else
-            if(!var && CV::Tools::isList(imp)){
+            // List or no-parameter function with chained modifiers
+            if(!var && CV::Tools::isList(imp) || !var || !CV::Tools::isList(imp) && imp[0] == '[' && imp[imp.size()-1] == ']'){
                 CV::ModifierEffect effects;
                 auto interp = interpret(first, cursor, ctx);
                 if(cursor->error){
@@ -2312,10 +2418,12 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
                     return std::make_shared<CV::Item>();
                 } 
                 auto inlineCode = compileTokens(tokens, 1, tokens.size()-1);
-                return eval(inlineCode, cursor, effects.toCtx); // Check if toCtx is null? Shouldn't be possible tho
+                return eval(inlineCode, cursor, effects.toCtx, singleReturn); // Check if toCtx is null? Shouldn't be possible tho
             }else{
             // List it is
-                auto r = processIteration(tokens, cursor, ctx, false);
+
+
+                auto r = processIteration(tokens, cursor, ctx, false, singleReturn);
                 return r;
             }
         }
@@ -2347,6 +2455,10 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         ARITHMETIC OPERATORS
 
     */
+    ctx->set("none", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+        return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(256));
+    }, true));
+
     ctx->set("+", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
         if(!typicalVariadicArithmeticCheck("+", params, cursor)){
             auto r = std::make_shared<CV::Item>();
@@ -2385,7 +2497,12 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         }
         __CV_NUMBER_NATIVE_TYPE r = std::static_pointer_cast<CV::Number>(params[0])->get();
         for(int i = 1; i < params.size(); ++i){
-            r /= std::static_pointer_cast<CV::Number>(params[i])->get();
+            auto n = std::static_pointer_cast<CV::Number>(params[i])->get();
+            if(n == 0){
+                cursor->setError("'/': Division by zero.");
+                return std::make_shared<CV::Item>();
+            }
+            r /= n;
         }
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(r));
     }, true));
@@ -2695,7 +2812,6 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         }
 
 
-
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::List>(finalList, false));
     }, false));   
 
@@ -2852,7 +2968,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
 
         list->accessMutex.lock();
         if(index+n < 0 || index+n > list->data.size()){
-            cursor->setError("'"+name+"': position("+std::to_string(index+n)+") is out of range("+std::to_string(list->data.size())+")");
+            cursor->setError("'"+name+"': position("+std::to_string(index+n)+") is out of range("+std::to_string(list->data.size()-1)+")");
             list->accessMutex.unlock();
             return std::make_shared<CV::Item>();
         }      
@@ -2892,7 +3008,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
 
         list->accessMutex.lock();
         if(index+n < 0 || index+n > list->data.size()){
-            cursor->setError("'"+name+"': position("+std::to_string(index+n)+") is out of range("+std::to_string(list->data.size())+")");
+            cursor->setError("'"+name+"': position("+std::to_string(index+n)+") is out of range("+std::to_string(list->data.size()-1)+")");
             list->accessMutex.unlock();
             return std::make_shared<CV::Item>();
         }      
@@ -3044,7 +3160,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
 
         str->accessMutex.lock();
         if(index+n < 0 || index+n > str->data.size()){
-            cursor->setError("'"+name+"': position("+std::to_string(index+n)+") is out of range("+std::to_string(str->data.size())+")");
+            cursor->setError("'"+name+"': position("+std::to_string(index+n)+") is out of range("+std::to_string(str->data.size()-1)+")");
             str->accessMutex.unlock();            
             return std::make_shared<CV::Item>();
         }      
@@ -3086,7 +3202,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
 
         str->accessMutex.lock();
         if(index+n < 0 || index+n > str->data.size()){
-            cursor->setError("'"+name+"': position("+std::to_string(index+n)+") is out of range("+std::to_string(str->data.size())+")");
+            cursor->setError("'"+name+"': position("+std::to_string(index+n)+") is out of range("+std::to_string(str->data.size()-1)+")");
             return std::make_shared<CV::Item>();
         }      
 
