@@ -21,7 +21,7 @@
             lib->copyable = false;
             lib->readOnly = true;
 
-            lib->set("out", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+            lib->set("out", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
                 CV::FunctionConstraints consts;
                 consts.setMinParams(1);
                 consts.allowNil = false;
@@ -29,7 +29,7 @@
 
                 std::string errormsg;
                 if(!consts.test(params, errormsg)){
-                    cursor->setError("'"+LIBNAME+":out': "+errormsg);
+                    cursor->setError(LIBNAME+"':'out", errormsg);
                     return std::make_shared<CV::Item>(CV::Item());
                 }
 

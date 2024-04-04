@@ -91,7 +91,8 @@
             std::string message;
             Cursor();
             void clear();
-            void setError(const std::string &v, int line = -1);
+            std::string getOrigin(const std::string &origin);
+            void setError(const std::string &origin, const std::string &v, int line = -1);
         };
 
 
@@ -253,7 +254,7 @@
         struct Trait {
             std::string name;
             uint8_t type;
-            std::function<std::shared_ptr<Item>(Item *subject, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx, CV::ModifierEffect &effects)> action;
+            std::function<std::shared_ptr<Item>(Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<Context> &ctx, CV::ModifierEffect &effects)> action;
             Trait();
         };
 
@@ -274,13 +275,13 @@
 
             Item();
 
-            void registerTrait(uint8_t type, const std::function<std::shared_ptr<Item>(Item *subject, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx, CV::ModifierEffect &effects)> &action);
+            void registerTrait(uint8_t type, const std::function<std::shared_ptr<Item>(Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<Context> &ctx, CV::ModifierEffect &effects)> &action);
             
-            void registerTrait(const std::string &name, const std::function<std::shared_ptr<Item>(Item *subject, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx, CV::ModifierEffect &effects)> &action);
+            void registerTrait(const std::string &name, const std::function<std::shared_ptr<Item>(Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<Context> &ctx, CV::ModifierEffect &effects)> &action);
             
-            std::shared_ptr<Item> runTrait(const std::string &name, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx, CV::ModifierEffect &effects);
+            std::shared_ptr<Item> runTrait(const std::string &name, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<Context> &ctx, CV::ModifierEffect &effects);
 
-            std::shared_ptr<Item> runTrait(uint8_t type, const std::string &value, Cursor *cursor, std::shared_ptr<Context> &ctx, CV::ModifierEffect &effects);   
+            std::shared_ptr<Item> runTrait(uint8_t type, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<Context> &ctx, CV::ModifierEffect &effects);   
 
             bool hasTrait(const std::string &name);
 
@@ -424,14 +425,14 @@
                 return *this;
             };
 
-            std::function< std::shared_ptr<CV::Item> (const std::vector<std::shared_ptr<CV::Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx) > fn;
+            std::function< std::shared_ptr<CV::Item> (const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<Context> &ctx) > fn;
             std::shared_ptr<CV::Item> copy(bool deep = true);
             Function();
             Function(const std::vector<std::string> &params, const std::string &body, bool variadic = false);
-            Function(const std::vector<std::string> &params, const std::function<std::shared_ptr<CV::Item> (const std::vector<std::shared_ptr<CV::Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx)> &fn, bool variadic = false);
+            Function(const std::vector<std::string> &params, const std::function<std::shared_ptr<CV::Item> (const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<Context> &ctx)> &fn, bool variadic = false);
             void registerTraits();
             void set(const std::vector<std::string> &params, const std::string &body, bool variadic);
-            void set(const std::vector<std::string> &params, const std::function<std::shared_ptr<CV::Item> (const std::vector<std::shared_ptr<CV::Item>> &params, Cursor *cursor, std::shared_ptr<Context> &ctx)> &fn, bool variadic);
+            void set(const std::vector<std::string> &params, const std::function<std::shared_ptr<CV::Item> (const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<Context> &ctx)> &fn, bool variadic);
             
         };    
 
@@ -515,7 +516,7 @@
             std::shared_ptr<CV::Job> callback;
             std::vector<std::shared_ptr<CV::Item>> params;
             std::shared_ptr<CV::Function> fn;
-            Cursor *cursor;
+            std::shared_ptr<Cursor> cursor;
             int jobType;
             int status;
             std::thread thread;
@@ -642,11 +643,12 @@
         };        
 
         void AddStandardOperators(std::shared_ptr<CV::Context> &ctx);
-        std::shared_ptr<CV::Item> interpret(const std::string &input, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, bool singleReturn = false);
-        std::shared_ptr<CV::Item> interpret(const CV::Token &token, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, bool singleReturn = false);
+        std::shared_ptr<CV::Item> interpret(const std::string &input, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, bool singleReturn = false);
+        std::shared_ptr<CV::Item> interpret(const CV::Token &token, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, bool singleReturn = false);
         bool ContextStep(std::shared_ptr<CV::Context> &cv);
         void setUseColor(bool v);
         std::string ItemToText(CV::Item *item);
+        std::string getPrompt();
 
 
     }

@@ -8,18 +8,70 @@
 
 #include "CV.hpp"
 
+static std::mutex genIdMutex;
+static std::mutex gJobsMutex;
+static unsigned lastGenId = 0;
 static bool useColorOnText = false;
 static const bool ShowHEADRef = false;
 
 static std::string FunctionToText(CV::Function *fn);
-static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, bool singleReturn, bool postEval = true);
-static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV::Item> &item, std::vector<CV::ModifierPair> modifiers, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects);
-static std::shared_ptr<CV::Item> processIteration(const std::vector<CV::Token> &tokens, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, bool postEval, bool singleReturn);
-static void processPostInterpretExpandListOrContext(std::shared_ptr<CV::Item> &solved, CV::ModifierEffect &effects, std::vector<std::shared_ptr<CV::Item>> &items, CV::Cursor *cursor, const std::shared_ptr<CV::Context> &ctx);
-static std::shared_ptr<CV::Item> runFunction(std::shared_ptr<CV::Function> &fn, std::vector<std::shared_ptr<CV::Item>> &items, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx);
-static std::shared_ptr<CV::Item> runFunction(std::shared_ptr<CV::Function> &fn, const std::vector<CV::Token> &tokens, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx);
-static std::shared_ptr<CV::Item> runJob(std::shared_ptr<CV::Function> &fn, const std::vector<std::shared_ptr<CV::Item>> &items, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Job> &job);
+static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, bool singleReturn, bool postEval = true);
+static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV::Item> &item, std::vector<CV::ModifierPair> modifiers, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects);
+static std::shared_ptr<CV::Item> processIteration(const std::vector<CV::Token> &tokens, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, bool postEval, bool singleReturn);
+static void processPostInterpretExpandListOrContext(std::shared_ptr<CV::Item> &solved, CV::ModifierEffect &effects, std::vector<std::shared_ptr<CV::Item>> &items, std::shared_ptr<CV::Cursor> &cursor, const std::shared_ptr<CV::Context> &ctx);
+static std::shared_ptr<CV::Item> runFunction(std::shared_ptr<CV::Function> &fn, std::vector<std::shared_ptr<CV::Item>> &items, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx);
+static std::shared_ptr<CV::Item> runFunction(std::shared_ptr<CV::Function> &fn, const std::vector<CV::Token> &tokens, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx);
+static std::shared_ptr<CV::Item> runJob(std::shared_ptr<CV::Function> &fn, const std::vector<std::shared_ptr<CV::Item>> &items, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Job> &job);
+static std::unordered_map<int, std::shared_ptr<CV::Job>> gjobs;
 
+static void gAddJob(int id, std::shared_ptr<CV::Job> &job){
+    gJobsMutex.lock();
+    gjobs[id] = job;
+    gJobsMutex.unlock();
+}
+
+static std::shared_ptr<CV::Job> gGetJob(int id){
+    gJobsMutex.lock();
+    auto it = gjobs.find(id);
+    if(it == gjobs.end()){
+        gJobsMutex.unlock();
+        return std::shared_ptr<CV::Job>(NULL);
+    }
+    auto job = it->second;
+    gJobsMutex.unlock();
+    return job;
+}
+
+static bool gKillJob(int id){
+    gJobsMutex.lock();
+    auto it = gjobs.find(id);
+    if(it == gjobs.end()){
+        gJobsMutex.unlock();
+        return false;
+    }
+    it->second->setStatus(CV::JobStatus::DONE);
+    gJobsMutex.unlock();   
+    return true;
+}
+
+static bool gRemoveJob(int id){
+    gJobsMutex.lock();
+    auto it = gjobs.find(id);
+    if(it == gjobs.end()){
+        gJobsMutex.unlock();
+        return false;
+    }
+    gjobs.erase(it);
+    gJobsMutex.unlock();   
+    return true;
+}
+
+static unsigned genId(){
+    genIdMutex.lock();
+    unsigned id = ++lastGenId;
+    genIdMutex.unlock();
+    return id;
+}
 
 
 void CV::setUseColor(bool v){
@@ -229,6 +281,12 @@ namespace CV {
 }
 
 
+std::string CV::getPrompt(){
+    std::string start = Tools::setTextColor(Tools::Color::MAGENTA) + "[" + Tools::setTextColor(Tools::Color::RESET);
+    std::string cv = Tools::setTextColor(Tools::Color::CYAN) + "~" + Tools::setTextColor(Tools::Color::RESET);
+    std::string end = Tools::setTextColor(Tools::Color::MAGENTA) + "]" + Tools::setTextColor(Tools::Color::RESET);
+    return start+cv+end+"> ";
+}
 
 
 
@@ -243,20 +301,22 @@ void CV::Cursor::clear(){
     message = "";
 }
 
-void CV::Cursor::setError(const std::string &v, int line){
+void CV::Cursor::setError(const std::string &origin, const std::string &v, int line){
     if(line != -1){
         this->line = line;
     }
     this->error = true;
-    this->message = Tools::setTextColor(Tools::Color::RED) +
+    this->message = (origin.size() > 0 ? "'"+getOrigin(origin)+"': " : "")+
+                    Tools::setTextColor(Tools::Color::RED) +
                     v +
                     Tools::setTextColor(Tools::Color::RESET);
 }
 
-
-
-
-
+std::string CV::Cursor::getOrigin(const std::string &origin){
+    return  Tools::setTextColor(Tools::Color::YELLOW) +
+            origin +
+            Tools::setTextColor(Tools::Color::RESET);
+}
 /*
 
     TRAIT
@@ -264,7 +324,7 @@ void CV::Cursor::setError(const std::string &v, int line){
 */
 CV::Trait::Trait(){
     this->type = CV::TraitType::SPECIFIC;
-    this->action = [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->action = [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         return std::shared_ptr<CV::Item>(NULL);
     };
 }
@@ -281,14 +341,14 @@ CV::Item::Item(){
 }
 
 void CV::Item::registerTraits(){
-    this->registerTrait("copy", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("copy", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
         effects.postEval = false;
         return std::static_pointer_cast<CV::Item>(subject->copy(true));
     });
-    this->registerTrait("type", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("type", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
@@ -296,7 +356,7 @@ void CV::Item::registerTraits(){
     });    
 }
 
-void CV::Item::registerTrait(uint8_t type, const std::function<std::shared_ptr<CV::Item>(Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects)> &action){
+void CV::Item::registerTrait(uint8_t type, const std::function<std::shared_ptr<CV::Item>(Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects)> &action){
     this->accessMutex.lock();
     Trait trait;
     trait.action = action;
@@ -305,7 +365,7 @@ void CV::Item::registerTrait(uint8_t type, const std::function<std::shared_ptr<C
     this->accessMutex.unlock();
 }    
 
-void CV::Item::registerTrait(const std::string &name, const std::function<std::shared_ptr<CV::Item>(Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects)> &action){
+void CV::Item::registerTrait(const std::string &name, const std::function<std::shared_ptr<CV::Item>(Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects)> &action){
     this->accessMutex.lock();
     Trait trait;
     trait.name = name;
@@ -314,12 +374,12 @@ void CV::Item::registerTrait(const std::string &name, const std::function<std::s
     this->accessMutex.unlock();
 }
 
-std::shared_ptr<CV::Item> CV::Item::runTrait(const std::string &name, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+std::shared_ptr<CV::Item> CV::Item::runTrait(const std::string &name, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
     auto &trait = this->traits.find(name)->second;
     return trait.action( this, value, cursor, ctx, effects);
 }
 
-std::shared_ptr<CV::Item> CV::Item::runTrait(uint8_t type, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+std::shared_ptr<CV::Item> CV::Item::runTrait(uint8_t type, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
     return this->traitsAny.find(type)->second.action(this, value, cursor, ctx, effects);
 }    
 
@@ -415,25 +475,25 @@ bool CV::Number::isEq(std::shared_ptr<CV::Item> &item){
 }    
 
 void CV::Number::registerTraits(){
-    this->registerTrait("is-neg", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("is-neg", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(static_cast<Number*>(subject)->get() < 0));
     });
-    this->registerTrait("inv", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("inv", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(static_cast<Number*>(subject)->get() * -1));
     });    
-    this->registerTrait("is-odd", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("is-odd", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>( (int)static_cast<Number*>(subject)->get() % 2 != 0));
     });   
-    this->registerTrait("is-even", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("is-even", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
@@ -484,26 +544,26 @@ size_t CV::List::size(){
 }
 
 void CV::List::registerTraits(){
-    this->registerTrait(CV::TraitType::ANY_NUMBER, [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait(CV::TraitType::ANY_NUMBER, [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
         auto list = static_cast<List*>(subject); 
         auto index = std::stod(value);
         if(index < 0 || index >= list->size()){
-            cursor->setError("'List|*ANY_NUMBER*': Index("+Tools::removeTrailingZeros(index)+") is out of range(0-"+std::to_string(list->size()-1)+")");
+            cursor->setError("List|*ANY_NUMBER*", "Index("+Tools::removeTrailingZeros(index)+") is out of range(0-"+std::to_string(list->size()-1)+")");
             return std::make_shared<CV::Item>();
         }
         return list->get(index); 
     });        
-    this->registerTrait("length", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("length", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
         auto list = static_cast<List*>(subject); 
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(list->size()));
     });
-    this->registerTrait("reverse", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("reverse", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
@@ -567,26 +627,26 @@ CV::String::String(const std::string &str){
 }    
 
 void CV::String::registerTraits(){ 
-    this->registerTrait(CV::TraitType::ANY_NUMBER, [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait(CV::TraitType::ANY_NUMBER, [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
         auto str = static_cast<String*>(subject)->get();
         auto index = std::stod(value);
         if(index < 0 || index >= str.size()){
-            cursor->setError("'String|*ANY_NUMBER*': Index("+Tools::removeTrailingZeros(index)+") is out of range(0-"+std::to_string(str.size()-1)+")");
+            cursor->setError("String|*ANY_NUMBER*", "Index("+Tools::removeTrailingZeros(index)+") is out of range(0-"+std::to_string(str.size()-1)+")");
             return std::make_shared<CV::Item>();
         }
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::String>(  std::string("")+str[index]  ));
     });           
-    this->registerTrait("length", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("length", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
         auto str = static_cast<String*>(subject);
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>( str->size() ));
     });
-    this->registerTrait("list", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("list", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
@@ -600,7 +660,7 @@ void CV::String::registerTraits(){
 
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::List>(result));
     });        
-    this->registerTrait("reverse", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("reverse", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
@@ -708,7 +768,7 @@ CV::Function::Function(const std::vector<std::string> &params, const std::string
     set(params, body, variadic);
 }
 
-CV::Function::Function(const std::vector<std::string> &params, const std::function<std::shared_ptr<CV::Item> (const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx)> &fn, bool variadic){
+CV::Function::Function(const std::vector<std::string> &params, const std::function<std::shared_ptr<CV::Item> (const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx)> &fn, bool variadic){
     registerTraits();
     set(params, fn, variadic);
 }    
@@ -744,7 +804,7 @@ std::vector<std::string> CV::Function::getParams(){
 }
 
 void CV::Function::registerTraits(){
-    this->registerTrait("is-variadic", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("is-variadic", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
@@ -755,7 +815,7 @@ void CV::Function::registerTraits(){
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>( v ));
     });
 
-    this->registerTrait("is-binary", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("is-binary", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
@@ -766,17 +826,17 @@ void CV::Function::registerTraits(){
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>( v ));
     }); 
 
-    this->registerTrait("async", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("async", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
         auto fn = static_cast<Function*>(subject);
         if(fn->async){
-            cursor->setError("'Function|async': This function already started asynchronously.");            
+            cursor->setError("FUNCTION|async", "This function already started asynchronously.");            
             return std::make_shared<Item>();
         }
         if(fn->threaded){
-            cursor->setError("'Function|async': This function already started threaded.");            
+            cursor->setError("FUNCTION|async", "This function already started threaded.");            
             return std::make_shared<Item>();
         }        
         auto copy = std::static_pointer_cast<Function>(fn->copy());
@@ -785,17 +845,17 @@ void CV::Function::registerTraits(){
         return std::static_pointer_cast<CV::Item>(copy);
     }); 
 
-    this->registerTrait("untether", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("untether", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
         auto fn = static_cast<Function*>(subject);
         if(fn->async){
-            cursor->setError("'Function|untether': This function already started asynchronously.");            
+            cursor->setError("FUNCTION|untether", "This function already started asynchronously.");            
             return std::make_shared<Item>();
         }
         if(fn->threaded){
-            cursor->setError("'Function|untether': This function already started threaded.");            
+            cursor->setError("FUNCTION|untether", "This function already started threaded.");            
             return std::make_shared<Item>();
         }         
         auto copy = std::static_pointer_cast<Function>(fn->copy());
@@ -804,7 +864,7 @@ void CV::Function::registerTraits(){
         return std::static_pointer_cast<CV::Item>(copy);
     });     
 
-    this->registerTrait("n-args", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("n-args", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
@@ -815,7 +875,7 @@ void CV::Function::registerTraits(){
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>( v  ));            
     });   
 
-    this->registerTrait("body", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("body", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
@@ -834,7 +894,7 @@ void CV::Function::set(const std::vector<std::string> &params, const std::string
     this->body = body;
     this->params = params;
     this->type = CV::ItemTypes::FUNCTION;
-    this->fn = [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    this->fn = [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         return std::shared_ptr<CV::Item>(NULL);
     };
     this->binary = false;
@@ -844,7 +904,7 @@ void CV::Function::set(const std::vector<std::string> &params, const std::string
     this->async = false;
 }
 
-void CV::Function::set(const std::vector<std::string> &params, const std::function<std::shared_ptr<CV::Item> (const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx)> &fn, bool variadic){
+void CV::Function::set(const std::vector<std::string> &params, const std::function<std::shared_ptr<CV::Item> (const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx)> &fn, bool variadic){
     this->accessMutex.lock();
     this->params = params;
     this->type = CV::ItemTypes::FUNCTION;
@@ -925,18 +985,10 @@ static void AsyncFunction(std::shared_ptr<CV::Job> &job, std::shared_ptr<CV::Con
     job->setPayload(result);
 }
 
-static unsigned lastGenId = 0;
-static std::mutex genIdMutex;
-static unsigned genId(){
-    genIdMutex.lock();
-    unsigned id = ++lastGenId;
-    genIdMutex.unlock();
-    return id;
-}
-
-void CV::Context::addJob(std::shared_ptr<Job> &job){
+void CV::Context::addJob(std::shared_ptr<Job> &job){    
     this->accessMutex.lock();
     job->id = genId();
+    gAddJob(job->id, job);
     this->jobs.push_back(job);
     this->accessMutex.unlock();
 }
@@ -988,7 +1040,7 @@ bool CV::ContextStep(std::shared_ptr<CV::Context> &ctx){
             cb->setPayload(result);
             cb->setStatus(JobStatus::DONE);
         }else{
-            cb->cursor->setError("Non-Callback Job '"+CV::Tools::removeTrailingZeros(cb->id)+"' attached as Callback.");
+            cb->cursor->setError("JOB|CALLBACK", "Non-Callback Job '"+CV::Tools::removeTrailingZeros(cb->id)+"' attached as Callback.");
             cb->setStatus(JobStatus::DONE);
         }
     };
@@ -998,21 +1050,26 @@ bool CV::ContextStep(std::shared_ptr<CV::Context> &ctx){
     for(int i = 0; i < done.size(); ++i){
         for(int j = 0; j < ctx->jobs.size(); ++j){
             auto &job = ctx->jobs[j];
-            if(job->id == done[i]){
-                if(job->jobType == JobType::THREAD){
-                    job->thread.join();
-                }
-                /*
-                    RUN CALL BACK                
-                */
-                if(job->callback.get()){
-                    ctx->accessMutex.unlock();
-                    runCb(ctx, job);
-                    ctx->accessMutex.lock();
-                }
-                ctx->jobs.erase(ctx->jobs.begin() + j);
-                break;
+            if(job->id != done[i]){
+                continue;
             }
+            if(job->jobType == JobType::THREAD){
+                job->thread.join();
+            }
+            /*
+                RUN CALL BACK                
+            */
+            if(job->callback.get()){
+                ctx->accessMutex.unlock();
+                runCb(ctx, job);
+                ctx->accessMutex.lock();
+            }
+            /*
+                Then delete
+            */
+            gRemoveJob(job->id);
+            ctx->jobs.erase(ctx->jobs.begin() + j);
+            break;            
         }
     }
     busy = ctx->jobs.size() > 0;
@@ -1100,7 +1157,7 @@ std::shared_ptr<CV::Job> CV::Job::setCallBack(std::shared_ptr<CV::Function> &cb)
 }
 
 void CV::Job::registerTraits(){
-    this->registerTrait("result", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("result", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
@@ -1112,15 +1169,24 @@ void CV::Job::registerTraits(){
     }); 
 
     // Should overwrite the default copy
-    this->registerTrait("copy", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("copy", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
-        cursor->setError("'Job|copy': Jobs cannot be copied.");            
+        cursor->setError("JOB|copy", "Jobs cannot be copied.");            
         return std::make_shared<Item>();
     });
 
-    this->registerTrait("await", [](Item *subject, const std::string &value, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("kill", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+        if(subject->type == CV::ItemTypes::NIL){
+            return std::make_shared<Item>();
+        }
+        auto job = static_cast<CV::Job*>(subject);
+        job->setStatus(CV::JobStatus::DONE);
+        return job->getPayload();
+    }); 
+
+    this->registerTrait("await", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return std::make_shared<Item>();
         }
@@ -1292,7 +1358,7 @@ std::string CV::ItemToText(CV::Item *item){
 
 
 
-static std::vector<std::string> parseTokens(std::string input, char sep, CV::Cursor *cursor){
+static std::vector<std::string> parseTokens(std::string input, char sep, std::shared_ptr<CV::Cursor> &cursor){
     std::vector<std::string> tokens; 
     std::string buffer;
     int open = 0;
@@ -1329,12 +1395,12 @@ static std::vector<std::string> parseTokens(std::string input, char sep, CV::Cur
     open = 0;
     // Throw mismatching brackets
     if(leftBrackets != rightBrackets){
-        cursor->setError("Mismatching brackets", cline);
+        cursor->setError("", "Mismatching brackets", cline);
         return {};
     }
     // Throw mismatching quotes
     if(quotes != 0){
-        cursor->setError("Mismatching quotes", cline);
+        cursor->setError("", "Mismatching quotes", cline);
         return {};
     }
     cline = 0;
@@ -1438,7 +1504,7 @@ CV::Token parseTokenWModifier(const std::string &_input){
     return token;
 }
 
-std::vector<CV::Token> buildTokens(const std::vector<std::string> &literals, CV::Cursor *cursor){
+std::vector<CV::Token> buildTokens(const std::vector<std::string> &literals, std::shared_ptr<CV::Cursor> &cursor){
     std::vector<CV::Token> tokens;
     for(int i = 0; i < literals.size(); ++i){
         auto innLiterals = parseTokens(literals[i], ' ', cursor);
@@ -1464,7 +1530,7 @@ std::vector<CV::Token> buildTokens(const std::vector<std::string> &literals, CV:
                     }
                     continue;
                 }else{
-                    cursor->setError("Provided dangling modifier ('"+CV::ModifierTypes::str(token.modifiers[0].type)+"'). Modifiers can only go accompanying something.");
+                    cursor->setError(CV::ModifierTypes::str(token.modifiers[0].type), "Provided dangling modifier. Modifiers can only go accompanying something.");
                     return {};
                 }
             }else{
@@ -1584,7 +1650,7 @@ bool CV::FunctionConstraints::test(const std::vector<std::shared_ptr<CV::Item>> 
 
 
 
-static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV::Item> &item, std::vector<CV::ModifierPair> modifiers, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV::Item> &item, std::vector<CV::ModifierPair> modifiers, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
     effects.reset();
     for(int i = 0; i < modifiers.size(); ++i){
         auto &mod = modifiers[i];
@@ -1592,7 +1658,7 @@ static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV
             case CV::ModifierTypes::TRAIT: {
                 auto name = mod.subject;
                 if(name.size() == 0){
-                    cursor->setError("'"+CV::ModifierTypes::str(CV::ModifierTypes::SCOPE)+"': Trait modifier requires a name or type group.");
+                    cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::SCOPE), "Trait modifier requires a name or type group.");
                     return item;                    
                 }
                 // ANY_NUMBER type trait
@@ -1613,7 +1679,7 @@ static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV
                 }else                
                 // Regular trait
                 if(!item->hasTrait(name)){
-                    cursor->setError("'"+CV::ModifierTypes::str(CV::ModifierTypes::SCOPE)+"': Trait '"+name+"' doesn't belong to '"+CV::ItemTypes::str(item->type)+"' type.");
+                    cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::SCOPE), "Trait '"+name+"' doesn't belong to '"+CV::ItemTypes::str(item->type)+"' type.");
                     return item;                      
                 }else{
                     auto result = item->runTrait(name, "", cursor, ctx, effects);
@@ -1626,33 +1692,33 @@ static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV
             case CV::ModifierTypes::NAMER: {
                 effects.named = mod.subject;
                 if(effects.named.size() == 0){
-                    cursor->setError("'"+CV::ModifierTypes::str(CV::ModifierTypes::NAMER)+"': Namer expects a name for the item.");
+                    cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::NAMER), "Namer expects a name for the item.");
                     return std::make_shared<CV::Item>();
                 }
                 if(ctx->readOnly){
-                    cursor->setError("'"+CV::ModifierTypes::str(CV::ModifierTypes::NAMER)+"': Cannot name this item '"+mod.subject+"' within this context as it's readonly.");
+                    cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::NAMER), "Cannot name this item '"+mod.subject+"' within this context as it's readonly.");
                     return std::make_shared<CV::Item>();
                 }
                 if(ctx.get() == item.get()){
-                    cursor->setError("'"+CV::ModifierTypes::str(CV::ModifierTypes::NAMER)+"': Naming a context within a context is prohibited (circular referencing).");
+                    cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::NAMER), "Naming a context within a context is prohibited (circular referencing).");
                     return std::make_shared<CV::Item>();                    
                 }
                 std::string &varname = mod.subject;
                 if(!CV::Tools::isValidVarName(varname)){
-                    cursor->setError("'"+CV::ModifierTypes::str(CV::ModifierTypes::NAMER)+"': Invalid name '"+varname+"'. The name cannot be a reserved word and/or contain prohibited symbols (Modifiers, numbers, brackets, etc).");
+                    cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::NAMER), "Invalid name '"+varname+"'. The name cannot be a reserved word and/or contain prohibited symbols (Modifiers, numbers, brackets, etc).");
                     return std::make_shared<CV::Item>();  
                 }
                 ctx->set(varname, item);
             } break;        
             case CV::ModifierTypes::SCOPE: {
                 if(item->type != CV::ItemTypes::CONTEXT){
-                    cursor->setError("'"+CV::ModifierTypes::str(CV::ModifierTypes::SCOPE)+"': Scope modifier can only be used on contexts.");
+                    cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::SCOPE), "Scope modifier can only be used on contexts.");
                     return item;
                 }
                 if(mod.subject.size() > 0){
                     auto subsequent = std::static_pointer_cast<CV::Context>(item)->get(mod.subject);
                     if(!subsequent){
-                        cursor->setError("'"+CV::ModifierTypes::str(CV::ModifierTypes::SCOPE)+"':'"+mod.subject+"': Undefined constructor, or operator within this context or above.");
+                        cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::SCOPE)+"':'"+mod.subject, "Undefined constructor, or operator within this context or above.");
                         return item;
                     }
                     effects.toCtx = std::static_pointer_cast<CV::Context>(item);
@@ -1667,7 +1733,7 @@ static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV
                 if(i == modifiers.size()-1){
                     effects.expand = true;
                 }else{
-                    cursor->setError("'"+CV::ModifierTypes::str(CV::ModifierTypes::EXPAND)+"': Expand modifier can only be used at the end of a modifier chain.");
+                    cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::EXPAND), "Expand modifier can only be used at the end of a modifier chain.");
                     return item;
                 }
             } break;                                   
@@ -1677,7 +1743,7 @@ static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV
 }
 
 // Interpret from STRING
-std::shared_ptr<CV::Item> CV::interpret(const std::string &input, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, bool singleReturn){
+std::shared_ptr<CV::Item> CV::interpret(const std::string &input, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, bool singleReturn){
     auto literals = parseTokens(input, ' ', cursor);
     if(cursor->error){
         return std::make_shared<CV::Item>();
@@ -1696,7 +1762,7 @@ std::shared_ptr<CV::Item> CV::interpret(const std::string &input, CV::Cursor *cu
 }
 
 // Interpret from single TOKEN without dropping modifiers. Should be only used by `eval`
-std::shared_ptr<CV::Item> CV::interpret(const CV::Token &token, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, bool singleReturn){
+std::shared_ptr<CV::Item> CV::interpret(const CV::Token &token, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, bool singleReturn){
     auto literals = parseTokens(token.first, ' ', cursor);
     if(cursor->error){
         return std::make_shared<CV::Item>();
@@ -1712,7 +1778,7 @@ std::shared_ptr<CV::Item> CV::interpret(const CV::Token &token, CV::Cursor *curs
     }
     return r;
 }
-static std::shared_ptr<CV::Item> runJob(std::shared_ptr<CV::Function> &fn, const std::vector<std::shared_ptr<CV::Item>> &items, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Job> &job){
+static std::shared_ptr<CV::Item> runJob(std::shared_ptr<CV::Function> &fn, const std::vector<std::shared_ptr<CV::Item>> &items, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Job> &job){
     fn->accessMutex.lock();
     if(fn->type == CV::ItemTypes::NIL){
         fn->accessMutex.lock();
@@ -1751,8 +1817,7 @@ static std::shared_ptr<CV::Item> runJob(std::shared_ptr<CV::Function> &fn, const
         }else{
             if(items.size() != fn->params.size()){
                 fn->accessMutex.unlock();
-                std::string msg = "'"+FunctionToText(fn.get())+"': Provided ("+std::to_string(items.size())+") argument(s). Expects exactly "+(std::to_string(fn->params.size()))+".";
-                cursor->setError(msg);
+                cursor->setError(FunctionToText(fn.get()), "Provided ("+std::to_string(items.size())+") argument(s). Expects exactly "+(std::to_string(fn->params.size()))+".");
                 std::cout << CV::Tools::setTextColor(CV::Tools::Color::GREEN)+"JOB ["<< job->id << "]: "+CV::Tools::setTextColor(CV::Tools::Color::RESET) << cursor->message << std::endl;
                 job->setStatus(CV::JobStatus::DONE);
                 return std::make_shared<CV::Item>();
@@ -1788,7 +1853,7 @@ static std::shared_ptr<CV::Item> runJob(std::shared_ptr<CV::Function> &fn, const
 }
 
 
-static std::shared_ptr<CV::Item> runFunction(std::shared_ptr<CV::Function> &fn, const std::vector<CV::Token> &tokens, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+static std::shared_ptr<CV::Item> runFunction(std::shared_ptr<CV::Function> &fn, const std::vector<CV::Token> &tokens, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
     std::vector<std::shared_ptr<CV::Item>> items;
     for(int i = 0; i < tokens.size(); ++i){
         CV::ModifierEffect effects;
@@ -1810,11 +1875,12 @@ static std::shared_ptr<CV::Item> runFunction(std::shared_ptr<CV::Function> &fn, 
 }
 
 
-static std::shared_ptr<CV::Item> runFunction(std::shared_ptr<CV::Function> &fn, std::vector<std::shared_ptr<CV::Item>> &items, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+static std::shared_ptr<CV::Item> runFunction(std::shared_ptr<CV::Function> &fn, std::vector<std::shared_ptr<CV::Item>> &items, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
     fn->accessMutex.lock();
     if(fn->async || fn->threaded){
         auto job = std::make_shared<CV::Job>();
-        job->cursor = cursor;
+        auto c = std::make_shared<CV::Cursor>();
+        job->cursor = c;
         job->set(fn->async ? CV::JobType::ASYNC : CV::JobType::THREAD, fn, items);
         ctx->addJob(job);        
         fn->accessMutex.unlock(); 
@@ -1833,8 +1899,7 @@ static std::shared_ptr<CV::Item> runFunction(std::shared_ptr<CV::Function> &fn, 
         }else{
             if(items.size() != fn->params.size()){
                 fn->accessMutex.unlock();
-                std::string msg = "'"+FunctionToText(fn.get())+"': Provided ("+std::to_string(items.size())+") argument(s). Expects exactly "+(std::to_string(fn->params.size()))+".";
-                cursor->setError(msg);
+                cursor->setError(FunctionToText(fn.get()), "Provided ("+std::to_string(items.size())+") argument(s). Expects exactly "+(std::to_string(fn->params.size()))+".");
                 return std::make_shared<CV::Item>();
             }
             for(int i = 0; i < items.size(); ++i){
@@ -1847,7 +1912,7 @@ static std::shared_ptr<CV::Item> runFunction(std::shared_ptr<CV::Function> &fn, 
     }
 }
 
-static void processPostInterpretExpandListOrContext(std::shared_ptr<CV::Item> &solved, CV::ModifierEffect &effects, std::vector<std::shared_ptr<CV::Item>> &items, CV::Cursor *cursor, const std::shared_ptr<CV::Context> &ctx){
+static void processPostInterpretExpandListOrContext(std::shared_ptr<CV::Item> &solved, CV::ModifierEffect &effects, std::vector<std::shared_ptr<CV::Item>> &items, std::shared_ptr<CV::Cursor> &cursor, const std::shared_ptr<CV::Context> &ctx){
     if(effects.expand && solved->type == CV::ItemTypes::LIST){
         auto list = std::static_pointer_cast<CV::List>(solved);
         for(int j = 0; j < list->size(); ++j){
@@ -1867,14 +1932,14 @@ static void processPostInterpretExpandListOrContext(std::shared_ptr<CV::Item> &s
         }  
     }else
     if(effects.expand && solved->type != CV::ItemTypes::CONTEXT && solved->type != CV::ItemTypes::LIST){
-        cursor->setError("'"+CV::ModifierTypes::str(CV::ModifierTypes::EXPAND)+"': Expand modifier can only be used on iterables.");
+        cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::EXPAND), "Expand modifier can only be used on iterables.");
         items.push_back(solved);
     }else{   
         items.push_back(solved);
     } 
 }
 
-static std::shared_ptr<CV::Item> processIteration(const std::vector<CV::Token> &tokens, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx, bool postEval, bool singleReturn){
+static std::shared_ptr<CV::Item> processIteration(const std::vector<CV::Token> &tokens, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, bool postEval, bool singleReturn){
     std::vector<std::shared_ptr<CV::Item>> items;
     for(int i = 0; i < tokens.size(); ++i){
         CV::ModifierEffect effects;
@@ -1915,7 +1980,7 @@ static bool checkCond(std::shared_ptr<CV::Item> &item){
     }
 };
 
-static CV::ItemContextPair findTokenOrigin(CV::Token &token, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+static CV::ItemContextPair findTokenOrigin(CV::Token &token, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
     auto findName = token.first;
     // If token has modifiers, then we proceed to process them
     if(token.modifiers.size() > 0){
@@ -1934,7 +1999,7 @@ static CV::ItemContextPair findTokenOrigin(CV::Token &token, CV::Cursor *cursor,
     return ctx->getWithContext(findName);
 }
 
-static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx,  bool singleReturn, bool postEval){
+static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx,  bool singleReturn, bool postEval){
 
     // No tokens will be interpreted an empty list
     if(tokens.size() == 0){
@@ -1946,12 +2011,12 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
 
     if(imp == "on"){
         if(first.modifiers.size() > 0){
-            cursor->setError("'"+imp+"': Innate constructors don't have modifiers.");
+            cursor->setError(imp, "Innate constructors don't have modifiers.");
             return std::make_shared<CV::Item>();
         }  
         auto params = compileTokens(tokens, 1, tokens.size()-1);
         if(params.size() > 2 || params.size() < 2){
-            cursor->setError("'"+imp+"': Expects exactly 2 arguments: <JOB> <CODE>.");
+            cursor->setError(imp, "Expects exactly 2 arguments: <JOB> <CODE>.");
             return std::make_shared<CV::Item>();
         }
 
@@ -1959,14 +2024,14 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
         auto interp = interpret(params[0], cursor, ctx);
         auto target = processPreInterpretModifiers(interp, params[0].modifiers, cursor, ctx, effects);
         if(target->type != CV::ItemTypes::JOB){
-            cursor->setError("'"+imp+"': Can only callback on Jobs.");
+            cursor->setError(imp, "Can only callback on Jobs.");
             return std::make_shared<CV::Item>();
         }
 
         interp = interpret(params[1], cursor, ctx);
         auto fn = processPreInterpretModifiers(interp, params[1].modifiers, cursor, ctx, effects);
         if(fn->type != CV::ItemTypes::FUNCTION){
-            cursor->setError("'"+imp+"': Expects a function for argument(2).");
+            cursor->setError(imp, "Expects a function for argument(2).");
             return std::make_shared<CV::Item>();
         }
 
@@ -1976,12 +2041,12 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
     }else
     if(imp == "set"){
         if(first.modifiers.size() > 0){
-            cursor->setError("'"+imp+"': Innate constructors don't have modifiers.");
+            cursor->setError(imp, "Innate constructors don't have modifiers.");
             return std::make_shared<CV::Item>();
         }       
         auto params = compileTokens(tokens, 1, tokens.size()-1);
         if(params.size() > 2 || params.size() < 2){
-            cursor->setError("'"+imp+"': Expects exactly 2 arguments: <NAME> <VALUE>.");
+            cursor->setError(imp, "Expects exactly 2 arguments: <NAME> <VALUE>.");
             return std::make_shared<CV::Item>();
         }
         CV::ModifierEffect effects;
@@ -1998,37 +2063,37 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
         // Replace existing item
         if(f.item || f.context){
             if(f.context->readOnly){
-                cursor->setError("'"+imp+"': Context '"+params[0].first+"' is readonly.");
+                cursor->setError(imp, "Context '"+params[0].first+"' is readonly.");
                 return std::make_shared<CV::Item>();
             }      
             if(f.context == solved.get()){
-                cursor->setError("'"+imp+"': Setting a context within a context is prohibited (circular referencing).");
+                cursor->setError(imp, "Setting a context within a context is prohibited (circular referencing).");
                 return std::make_shared<CV::Item>();
             }                 
             std::string varname = f.name;
             if(!CV::Tools::isValidVarName(varname)){
-                cursor->setError("'"+imp+"': Invalid name '"+varname+"'. The name cannot be a reserved word and/or contain prohibited symbols (Modifiers, numbers, brackets, etc).");
+                cursor->setError(imp, "Invalid name '"+varname+"'. The name cannot be a reserved word and/or contain prohibited symbols (Modifiers, numbers, brackets, etc).");
                 return std::make_shared<CV::Item>();  
             }               
             return f.context->set(f.name, solved);
         }else
         // If a scope modifier was provided but the context wasn't found, we throw an error
         if(params[0].hasModifier(CV::ModifierTypes::SCOPE)){
-            cursor->setError("'"+imp+"': Context '"+params[0].first+"' doesn't exist.");
+            cursor->setError(imp, "Context '"+params[0].first+"' doesn't exist.");
             return std::make_shared<CV::Item>();
         // Othwerwise just define it within the current context
         }else{
             if(ctx->readOnly){
-                cursor->setError("'"+imp+"': Cannot set item '"+params[0].first+"' within this context as it is readonly.");
+                cursor->setError(imp, "Cannot set item '"+params[0].first+"' within this context as it is readonly.");
                 return std::make_shared<CV::Item>();
             }
             if(ctx.get() == solved.get()){
-                cursor->setError("'"+imp+"': Setting a context within a context is prohibited (circular referencing).");
+                cursor->setError(imp, "Setting a context within a context is prohibited (circular referencing).");
                 return std::make_shared<CV::Item>();
             }
             std::string varname = params[0].first;
             if(!CV::Tools::isValidVarName(varname)){
-                cursor->setError("'"+imp+"': Invalid name '"+varname+"'. The name cannot be a reserved word and/or contain prohibited symbols (Modifiers, numbers, brackets, etc).");
+                cursor->setError(imp, "Invalid name '"+varname+"'. The name cannot be a reserved word and/or contain prohibited symbols (Modifiers, numbers, brackets, etc).");
                 return std::make_shared<CV::Item>();  
             }                 
             return ctx->set(varname, solved);
@@ -2036,7 +2101,7 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
     }else
     if(imp == "skip" || imp == "stop" || imp == "continue"){
         if(first.modifiers.size() > 0){
-            cursor->setError("'"+imp+"': Innate constructors don't have modifiers.");
+            cursor->setError(imp, "Innate constructors don't have modifiers.");
             return std::make_shared<CV::Item>();
         }
         uint8_t type;
@@ -2064,16 +2129,16 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
     if(imp == "if"){
 
         if(first.modifiers.size() > 0){
-            cursor->setError("'"+imp+"': Innate constructors don't have modifiers.");
+            cursor->setError(imp, "Innate constructors don't have modifiers.");
             return std::make_shared<CV::Item>();
         }
 
         if(tokens.size() > 4){
-            cursor->setError("'"+imp+"': Expects no more than 3 arguments: <CONDITION> <[CODE[0]...CODE[n]]> (ELSE-OPT)<[CODE[0]...CODE[n]]>.");
+            cursor->setError(imp, "Expects no more than 3 arguments: <CONDITION> <[CODE[0]...CODE[n]]> (ELSE-OPT)<[CODE[0]...CODE[n]]>.");
             return std::make_shared<CV::Item>();
         }
         if(tokens.size() < 3){
-            cursor->setError("'"+imp+"': Expects no less than 2 arguments: <CONDITION> <[CODE[0]...CODE[n]]> (ELSE-OPT)<[CODE[0]...CODE[n]]>.");
+            cursor->setError(imp, "Expects no less than 2 arguments: <CONDITION> <[CODE[0]...CODE[n]]> (ELSE-OPT)<[CODE[0]...CODE[n]]>.");
             return std::make_shared<CV::Item>();
         }        
 
@@ -2114,12 +2179,12 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
     if(imp == "do"){
 
         if(first.modifiers.size() > 0){
-            cursor->setError("'"+imp+"': Innate constructors don't have modifiers.");
+            cursor->setError(imp, "Innate constructors don't have modifiers.");
             return std::make_shared<CV::Item>();
         }
 
         if(tokens.size() > 3 || tokens.size() < 3){
-            cursor->setError("'"+imp+"': Expects exactly 2 arguments: <CONDITION> <[CODE[0]...CODE[n]]>.");
+            cursor->setError(imp, "Expects exactly 2 arguments: <CONDITION> <[CODE[0]...CODE[n]]>.");
             return std::make_shared<CV::Item>();
         }
         auto params = compileTokens(tokens, 1, tokens.size()-1);
@@ -2164,12 +2229,12 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
     if(imp == "iter"){
         
         if(first.modifiers.size() > 0){
-            cursor->setError("'"+imp+"': Innate constructors don't have modifiers.");
+            cursor->setError(imp, "Innate constructors don't have modifiers.");
             return std::make_shared<CV::Item>();
         }
 
         if(tokens.size() > 3 || tokens.size() < 3){
-            cursor->setError("'"+imp+"': Expects exactly 2 arguments: <ITERABLE> <[CODE[0]...CODE[n]]>.");
+            cursor->setError(imp, "Expects exactly 2 arguments: <ITERABLE> <[CODE[0]...CODE[n]]>.");
             return std::make_shared<CV::Item>();
         }        
         auto params = compileTokens(tokens, 1, tokens.size()-1);
@@ -2192,7 +2257,7 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
                 if(origEff.named.size() > 0){
                     std::string varname = origEff.named;
                     if(!CV::Tools::isValidVarName(varname)){
-                        cursor->setError("'"+imp+"': Invalid name '"+varname+"'. The name cannot be a reserved word and/or contain prohibited symbols (Modifiers, numbers, brackets, etc).");
+                        cursor->setError(imp, "Invalid name '"+varname+"'. The name cannot be a reserved word and/or contain prohibited symbols (Modifiers, numbers, brackets, etc).");
                         return std::make_shared<CV::Item>();  
                     }                    
                     tctx->set(varname, item);
@@ -2231,7 +2296,7 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
                 if(origEff.named.size() > 0){
                     std::string varname = origEff.named;
                     if(!CV::Tools::isValidVarName(varname)){
-                        cursor->setError("'"+imp+"': Invalid name '"+varname+"'. The name cannot be a reserved word and/or contain prohibited symbols (Modifiers, numbers, brackets, etc).");
+                        cursor->setError(imp, "Invalid name '"+varname+"'. The name cannot be a reserved word and/or contain prohibited symbols (Modifiers, numbers, brackets, etc).");
                         return std::make_shared<CV::Item>();  
                     }                                  
                     tctx->set(varname, item);
@@ -2261,19 +2326,19 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
             }
             return std::static_pointer_cast<CV::Item>(std::make_shared<CV::List>(items));
         }else{
-            cursor->setError("'"+imp+"': Expects argument(0) to be iterable.");
+            cursor->setError(imp, "Expects argument(0) to be iterable.");
             return std::make_shared<CV::Item>();        
         }
     }else
     if(imp == "fn"){
 
         if(first.modifiers.size() > 0){
-            cursor->setError("'"+imp+"': Innate constructors don't have modifiers.");
+            cursor->setError(imp, "Innate constructors don't have modifiers.");
             return std::make_shared<CV::Item>();
         }
         auto params = compileTokens(tokens, 1, tokens.size()-1);
         if(params.size() > 2 || params.size() < 2){
-            cursor->setError("'"+imp+"': Expects exactly 2 arguments: [ARGS[0]...ARGS[n]] [CODE[0]...CODE[n]].");
+            cursor->setError(imp, "Expects exactly 2 arguments: [ARGS[0]...ARGS[n]] [CODE[0]...CODE[n]].");
             return std::make_shared<CV::Item>();
         }
         bool isVariadic = false;
@@ -2287,7 +2352,7 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
             for(int i = 0; i < argNames.size(); ++i){
                 auto &name = argNames[i];
                 if(!CV::Tools::isValidVarName(name)){
-                    cursor->setError("'"+imp+"': Invalid name '"+name+"' for function definition. The name cannot be a reserved word and/or contain prohibited symbols (Modifiers, numbers, brackets, etc).");
+                    cursor->setError(imp, "Invalid name '"+name+"' for function definition. The name cannot be a reserved word and/or contain prohibited symbols (Modifiers, numbers, brackets, etc).");
                     return std::make_shared<CV::Item>();  
                 }
             }
@@ -2299,7 +2364,7 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
     if(imp == "ct"){
 
         if(first.modifiers.size() > 0){
-            cursor->setError("'"+imp+"': Innate constructors don't have modifiers.");
+            cursor->setError(imp, "Innate constructors don't have modifiers.");
             return std::make_shared<CV::Item>();
         }
 
@@ -2378,8 +2443,9 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
                 return result;
             }else
             // List or no-parameter function with chained modifiers
-            if(!var && CV::Tools::isList(imp) || !var || !CV::Tools::isList(imp) && imp[0] == '[' && imp[imp.size()-1] == ']'){
+            if(!var && CV::Tools::isList(imp) || !var && !CV::Tools::isList(imp) && imp[0] == '[' && imp[imp.size()-1] == ']'){
                 CV::ModifierEffect effects;
+                
                 auto interp = interpret(first, cursor, ctx);
                 if(cursor->error){
                     return std::make_shared<CV::Item>();
@@ -2399,7 +2465,7 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
                 }                      
                 return result;
             }else{
-                cursor->setError("'"+imp+"': Undefined constructor, or operator within this context or above."); // TODO: Check if it's running as relaxed
+                cursor->setError(imp, "Undefined constructor, or operator within this context or above."); // TODO: Check if it's running as relaxed
                 return std::make_shared<CV::Item>();
             }
         }else
@@ -2432,7 +2498,7 @@ static std::shared_ptr<CV::Item> eval(const std::vector<CV::Token> &tokens, CV::
     return std::make_shared<CV::Item>();
 }
 
-static bool typicalVariadicArithmeticCheck(const std::string &name, const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, int max = -1){
+static bool typicalVariadicArithmeticCheck(const std::string &name, const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, int max = -1){
     CV::FunctionConstraints consts;
     consts.setMinParams(2);
     if(max != -1){
@@ -2443,7 +2509,7 @@ static bool typicalVariadicArithmeticCheck(const std::string &name, const std::v
     consts.allowNil = false;
     std::string errormsg;
     if(!consts.test(params, errormsg)){
-        cursor->setError("'"+name+"': "+errormsg);
+        cursor->setError(name, errormsg);
         return false;
     }
     return true;
@@ -2455,11 +2521,11 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         ARITHMETIC OPERATORS
 
     */
-    ctx->set("none", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("none", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(256));
     }, true));
 
-    ctx->set("+", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("+", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         if(!typicalVariadicArithmeticCheck("+", params, cursor)){
             auto r = std::make_shared<CV::Item>();
             return r;
@@ -2471,7 +2537,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(r));
     }, true));
 
-    ctx->set("-", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("-", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         if(!typicalVariadicArithmeticCheck("-", params, cursor)){
             return std::make_shared<CV::Item>();
         }
@@ -2481,7 +2547,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         }
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(r));
     }, true));
-    ctx->set("*", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("*", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         if(!typicalVariadicArithmeticCheck("*", params, cursor)){
             return std::make_shared<CV::Item>();
         }
@@ -2491,7 +2557,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         }
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(r));
     }, false));  
-    ctx->set("/", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("/", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         if(!typicalVariadicArithmeticCheck("/", params, cursor)){
             return std::make_shared<CV::Item>();
         }
@@ -2499,14 +2565,14 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         for(int i = 1; i < params.size(); ++i){
             auto n = std::static_pointer_cast<CV::Number>(params[i])->get();
             if(n == 0){
-                cursor->setError("'/': Division by zero.");
+                cursor->setError("/", "Division by zero.");
                 return std::make_shared<CV::Item>();
             }
             r /= n;
         }
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(r));
     }, true));
-    ctx->set("pow", std::make_shared<CV::Function>(std::vector<std::string>({"a", "b"}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("pow", std::make_shared<CV::Function>(std::vector<std::string>({"a", "b"}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         if(!typicalVariadicArithmeticCheck("pow", params, cursor, 2)){
             return std::make_shared<CV::Item>();
         }
@@ -2516,7 +2582,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         }
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(r));
     }, false)); 
-    ctx->set("sqrt", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("sqrt", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         CV::FunctionConstraints consts;
         consts.setMinParams(1);
         consts.setExpectType(CV::ItemTypes::NUMBER);
@@ -2524,7 +2590,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         consts.allowNil = false;
         std::string errormsg;
         if(!consts.test(params, errormsg)){
-            cursor->setError("'sqrt': "+errormsg);
+            cursor->setError("sqrt", errormsg);
             return std::make_shared<CV::Item>();
         }
         if(params.size() == 1){
@@ -2543,7 +2609,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
     /* 
         QUICK MATH
     */ 
-    ctx->set("++", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("++", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         CV::FunctionConstraints consts;
         consts.setMinParams(1);
         consts.allowMisMatchingTypes = false;        
@@ -2552,7 +2618,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
 
         std::string errormsg;
         if(!consts.test(params, errormsg)){
-            cursor->setError("'++': "+errormsg);
+            cursor->setError("++", errormsg);
             return std::make_shared<CV::Item>();
         }
 
@@ -2570,7 +2636,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::List>(params, false));
     }, true));
 
-    ctx->set("--", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("--", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         CV::FunctionConstraints consts;
         consts.setMinParams(1);
         consts.allowMisMatchingTypes = false;        
@@ -2579,7 +2645,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
 
         std::string errormsg;
         if(!consts.test(params, errormsg)){
-            cursor->setError("'--': "+errormsg);
+            cursor->setError("--", errormsg);
             return std::make_shared<CV::Item>();
         }
 
@@ -2598,7 +2664,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
     }, false));    
 
 
-    ctx->set("//", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("//", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         CV::FunctionConstraints consts;
         consts.setMinParams(1);
         consts.allowMisMatchingTypes = false;        
@@ -2607,7 +2673,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
 
         std::string errormsg;
         if(!consts.test(params, errormsg)){
-            cursor->setError("'//': "+errormsg);
+            cursor->setError("//", errormsg);
             return std::make_shared<CV::Item>();
         }
 
@@ -2625,7 +2691,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::List>(params, false));
     }, false));    
 
-    ctx->set("**", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("**", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         CV::FunctionConstraints consts;
         consts.setMinParams(1);
         consts.allowMisMatchingTypes = false;        
@@ -2634,7 +2700,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
 
         std::string errormsg;
         if(!consts.test(params, errormsg)){
-            cursor->setError("'**': "+errormsg);
+            cursor->setError("**", errormsg);
             return std::make_shared<CV::Item>();
         }
 
@@ -2656,7 +2722,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
     /*
         LISTS
     */
-    ctx->set("l-range", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("l-range", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         if(!typicalVariadicArithmeticCheck("l-range", params, cursor)){
             return std::make_shared<CV::Item>();
         }
@@ -2679,7 +2745,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         return std::static_pointer_cast<CV::Item>(resultList);
     }, true));
     
-    ctx->set("l-sort", std::make_shared<CV::Function>(std::vector<std::string>({"c", "l"}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("l-sort", std::make_shared<CV::Function>(std::vector<std::string>({"c", "l"}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         CV::FunctionConstraints consts;
         consts.setMinParams(2);
         consts.setMaxParams(2);
@@ -2692,7 +2758,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
 
         std::string errormsg;
         if(!consts.test(params, errormsg)){
-            cursor->setError("'l-sort': "+errormsg);
+            cursor->setError("l-sort", errormsg);
             return std::make_shared<CV::Item>();
         }
 
@@ -2700,7 +2766,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
 
         auto &order = criteria->data;
         if(order != "DESC" && order != "ASC"){
-            cursor->setError("'l-sort': criteria can only be 'DESC' or 'ASC'.");
+            cursor->setError("l-sort", "criteria can only be 'DESC' or 'ASC'.");
             return std::make_shared<CV::Item>();
         }        
 
@@ -2717,7 +2783,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         constsList.allowMisMatchingTypes = false;        
         constsList.allowNil = false;
         if(!constsList.test(items, errormsg)){
-            cursor->setError("'l-sort': "+errormsg);
+            cursor->setError("l-sort", errormsg);
             return std::make_shared<CV::Item>();
         }        
 
@@ -2730,7 +2796,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
     }, false));    
 
 
-    ctx->set("l-filter", std::make_shared<CV::Function>(std::vector<std::string>({"c", "l"}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("l-filter", std::make_shared<CV::Function>(std::vector<std::string>({"c", "l"}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         CV::FunctionConstraints consts;
         consts.setMinParams(2);
         consts.setMaxParams(2);
@@ -2741,14 +2807,14 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         
         std::string errormsg;
         if(!consts.test(params, errormsg)){
-            cursor->setError("'l-filter': "+errormsg);
+            cursor->setError("l-filter", errormsg);
             return std::make_shared<CV::Item>();
         }
 
         auto criteria = std::static_pointer_cast<Function>(params[0]);
 
         if(criteria->variadic || criteria->params.size() != 1){
-            cursor->setError("'l-filter': criteria's function must receive exactly 1 argument(a).");
+            cursor->setError("l-filter", "criteria's function must receive exactly 1 argument(a).");
             return std::make_shared<CV::Item>();
         }
 
@@ -2769,14 +2835,14 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
     }, false));  
 
 
-    ctx->set("l-flat", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("l-flat", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         CV::FunctionConstraints consts;
         consts.allowMisMatchingTypes = true;        
         consts.allowNil = true;
         
         std::string errormsg;
         if(!consts.test(params, errormsg)){
-            cursor->setError("'l-flat': "+errormsg);
+            cursor->setError("l-flat", errormsg);
             return std::make_shared<CV::Item>();
         }
 
@@ -2817,7 +2883,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
 
 
 
-    ctx->set("splice", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("splice", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         CV::FunctionConstraints consts;
         consts.setMinParams(2);
         consts.allowNil = false;
@@ -2827,7 +2893,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
 
         std::string errormsg;
         if(!consts.test(params, errormsg)){
-            cursor->setError("'splice': "+errormsg);
+            cursor->setError("splice", errormsg);
             return std::make_shared<CV::Item>();
         }
 
@@ -2878,7 +2944,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         return std::make_shared<CV::Item>();
     }, false));    
 
-    ctx->set("l-push", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("l-push", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         CV::FunctionConstraints consts;
         consts.setMinParams(2);
         consts.allowMisMatchingTypes = true;
@@ -2886,7 +2952,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
 
         std::string errormsg;
         if(!consts.test(params, errormsg)){
-            cursor->setError("'l-push': "+errormsg);
+            cursor->setError("l-push", errormsg);
             return std::make_shared<CV::Item>();
         }
 
@@ -2912,7 +2978,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
 
     }, false)); 
     
-    ctx->set("l-pop", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("l-pop", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         CV::FunctionConstraints consts;
         consts.setMinParams(2);
         consts.allowMisMatchingTypes = true;
@@ -2920,7 +2986,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
 
         std::string errormsg;
         if(!consts.test(params, errormsg)){
-            cursor->setError("'<<': "+errormsg);
+            cursor->setError("<<", errormsg);
             return std::make_shared<CV::Item>();
         }
 
@@ -2946,7 +3012,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
 
     }, false));     
 
-    ctx->set("l-sub", std::make_shared<CV::Function>(std::vector<std::string>({"l", "p", "n"}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("l-sub", std::make_shared<CV::Function>(std::vector<std::string>({"l", "p", "n"}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         CV::FunctionConstraints consts;
         consts.setMinParams(2);
         consts.setMaxParams(3);
@@ -2958,7 +3024,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         static const std::string name = "l-sub";
         std::string errormsg;
         if(!consts.test(params, errormsg)){
-            cursor->setError("'"+name+"': "+errormsg);
+            cursor->setError(name, ""+errormsg);
             return std::make_shared<CV::Item>();
         }
 
@@ -2968,7 +3034,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
 
         list->accessMutex.lock();
         if(index+n < 0 || index+n > list->data.size()){
-            cursor->setError("'"+name+"': position("+std::to_string(index+n)+") is out of range("+std::to_string(list->data.size()-1)+")");
+            cursor->setError(name, "position("+std::to_string(index+n)+") is out of range("+std::to_string(list->data.size()-1)+")");
             list->accessMutex.unlock();
             return std::make_shared<CV::Item>();
         }      
@@ -2986,7 +3052,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
     }, false));
 
 
-    ctx->set("l-cut", std::make_shared<CV::Function>(std::vector<std::string>({"l", "p", "n"}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("l-cut", std::make_shared<CV::Function>(std::vector<std::string>({"l", "p", "n"}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         CV::FunctionConstraints consts;
         consts.setMinParams(2);
         consts.setMaxParams(3);
@@ -2998,7 +3064,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         static const std::string name = "l-cut";
         std::string errormsg;
         if(!consts.test(params, errormsg)){
-            cursor->setError("'"+name+"': "+errormsg);
+            cursor->setError(name, errormsg);
             return std::make_shared<CV::Item>();
         }
 
@@ -3008,7 +3074,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
 
         list->accessMutex.lock();
         if(index+n < 0 || index+n > list->data.size()){
-            cursor->setError("'"+name+"': position("+std::to_string(index+n)+") is out of range("+std::to_string(list->data.size()-1)+")");
+            cursor->setError(name, "position("+std::to_string(index+n)+") is out of range("+std::to_string(list->data.size()-1)+")");
             list->accessMutex.unlock();
             return std::make_shared<CV::Item>();
         }      
@@ -3028,7 +3094,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
 
     }, false));      
 
-    ctx->set("l-reverse", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("l-reverse", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         CV::FunctionConstraints consts;
         consts.setMinParams(1);
         consts.setExpectType(CV::ItemTypes::LIST);
@@ -3037,7 +3103,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
 
         std::string errormsg;
         if(!consts.test(params, errormsg)){
-            cursor->setError("'l-reverse': "+errormsg);
+            cursor->setError("l-reverse", errormsg);
             return std::make_shared<CV::Item>();
         }
 
@@ -3073,7 +3139,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
     /*
         STRING
     */
-    ctx->set("s-reverse", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("s-reverse", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         CV::FunctionConstraints consts;
         consts.setMinParams(1);
         consts.setExpectType(CV::ItemTypes::LIST);
@@ -3082,7 +3148,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
 
         std::string errormsg;
         if(!consts.test(params, errormsg)){
-            cursor->setError("'l-reverse': "+errormsg);
+            cursor->setError("l-reverse", errormsg);
             return std::make_shared<CV::Item>();
         }
 
@@ -3114,7 +3180,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
 
     }, true));  
 
-    ctx->set("s-join", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("s-join", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         CV::FunctionConstraints consts;
         // consts.setMinParams(2);
         consts.allowMisMatchingTypes = false;
@@ -3124,7 +3190,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         static const std::string name = "s-join";
         std::string errormsg;
         if(!consts.test(params, errormsg)){
-            cursor->setError("'"+name+"': "+errormsg);
+            cursor->setError(name, ""+errormsg);
             return std::make_shared<CV::Item>();
         }
         std::string result;
@@ -3135,7 +3201,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::String>(result));
     }, false));   
 
-    ctx->set("s-cut", std::make_shared<CV::Function>(std::vector<std::string>({"s", "p", "n"}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("s-cut", std::make_shared<CV::Function>(std::vector<std::string>({"s", "p", "n"}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         CV::FunctionConstraints consts;
         consts.setMinParams(2);
         consts.setMaxParams(3);
@@ -3148,7 +3214,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         static const std::string name = "s-cut";
         std::string errormsg;
         if(!consts.test(params, errormsg)){
-            cursor->setError("'"+name+"': "+errormsg);
+            cursor->setError(name, ""+errormsg);
             return std::make_shared<CV::Item>();
         }
 
@@ -3160,7 +3226,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
 
         str->accessMutex.lock();
         if(index+n < 0 || index+n > str->data.size()){
-            cursor->setError("'"+name+"': position("+std::to_string(index+n)+") is out of range("+std::to_string(str->data.size()-1)+")");
+            cursor->setError(name, "position("+std::to_string(index+n)+") is out of range("+std::to_string(str->data.size()-1)+")");
             str->accessMutex.unlock();            
             return std::make_shared<CV::Item>();
         }      
@@ -3178,7 +3244,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
     }, false));       
 
 
-    ctx->set("s-sub", std::make_shared<CV::Function>(std::vector<std::string>({"s", "p", "n"}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("s-sub", std::make_shared<CV::Function>(std::vector<std::string>({"s", "p", "n"}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         CV::FunctionConstraints consts;
         consts.setMinParams(2);
         consts.setMaxParams(3);
@@ -3191,7 +3257,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         static const std::string name = "s-sub";
         std::string errormsg;
         if(!consts.test(params, errormsg)){
-            cursor->setError("'"+name+"': "+errormsg);
+            cursor->setError(name, ""+errormsg);
             return std::make_shared<CV::Item>();
         }
 
@@ -3202,7 +3268,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
 
         str->accessMutex.lock();
         if(index+n < 0 || index+n > str->data.size()){
-            cursor->setError("'"+name+"': position("+std::to_string(index+n)+") is out of range("+std::to_string(str->data.size()-1)+")");
+            cursor->setError(name, "position("+std::to_string(index+n)+") is out of range("+std::to_string(str->data.size()-1)+")");
             return std::make_shared<CV::Item>();
         }      
 
@@ -3221,12 +3287,12 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
     /*
         LOGIC
     */
-    ctx->set("or", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("or", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         CV::FunctionConstraints consts;
         consts.setMinParams(1);
         std::string errormsg;
         if(!consts.test(params, errormsg)){
-            cursor->setError("'or': "+errormsg);
+            cursor->setError("or", errormsg);
             return std::make_shared<CV::Item>();
         }
 
@@ -3240,12 +3306,12 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(0));
     }, false));        
 
-    ctx->set("and", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("and", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         CV::FunctionConstraints consts;
         consts.setMinParams(1);
         std::string errormsg;
         if(!consts.test(params, errormsg)){
-            cursor->setError("'and': "+errormsg);
+            cursor->setError("and", errormsg);
             return std::make_shared<CV::Item>();
         }
 
@@ -3258,12 +3324,12 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(1));
     }, false));    
 
-    ctx->set("not", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("not", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         CV::FunctionConstraints consts;
         consts.setMinParams(1);
         std::string errormsg;
         if(!consts.test(params, errormsg)){
-            cursor->setError("'not': "+errormsg);
+            cursor->setError("not", errormsg);
             return std::make_shared<CV::Item>();
         }
         auto val = [](std::shared_ptr<CV::Item> &item){
@@ -3291,14 +3357,14 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
     }, false));                  
 
 
-    ctx->set("eq", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("eq", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         CV::FunctionConstraints consts;
         consts.setMinParams(2);
         consts.allowMisMatchingTypes = false;
         consts.allowNil = false;
         std::string errormsg;
         if(!consts.test(params, errormsg)){
-            cursor->setError("'eq': "+errormsg);
+            cursor->setError("eq", errormsg);
             return std::make_shared<CV::Item>();
         }
         auto last = params[0];
@@ -3312,14 +3378,14 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
     }, false));     
 
 
-    ctx->set("neq", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("neq", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         CV::FunctionConstraints consts;
         consts.setMinParams(2);
         consts.allowMisMatchingTypes = false;
         consts.allowNil = false;
         std::string errormsg;
         if(!consts.test(params, errormsg)){
-            cursor->setError("'neq': "+errormsg);
+            cursor->setError("neq", errormsg);
             return std::make_shared<CV::Item>();
         }
         for(int i = 0; i < params.size(); ++i){
@@ -3338,7 +3404,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
     }, false));      
 
 
-    ctx->set("gt", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("gt", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         CV::FunctionConstraints consts;
         consts.setMinParams(2);
         consts.allowNil = false;
@@ -3346,7 +3412,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         consts.setExpectType(CV::ItemTypes::NUMBER);
         std::string errormsg;
         if(!consts.test(params, errormsg)){
-            cursor->setError("'gt': "+errormsg);
+            cursor->setError("gt", errormsg);
             return std::make_shared<CV::Item>();
         }
         auto last = std::static_pointer_cast<CV::Number>(params[0])->get();
@@ -3360,7 +3426,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
     }, false));    
 
 
-    ctx->set("gte", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("gte", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         CV::FunctionConstraints consts;
         consts.setMinParams(2);
         consts.allowNil = false;
@@ -3368,7 +3434,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         consts.setExpectType(CV::ItemTypes::NUMBER);
         std::string errormsg;
         if(!consts.test(params, errormsg)){
-            cursor->setError("'gte': "+errormsg);
+            cursor->setError("gte", errormsg);
             return std::make_shared<CV::Item>();
         }
         auto last = std::static_pointer_cast<CV::Number>(params[0])->get();
@@ -3382,7 +3448,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
     }, false));         
 
 
-    ctx->set("lt", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("lt", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         CV::FunctionConstraints consts;
         consts.setMinParams(2);
         consts.allowNil = false;
@@ -3390,7 +3456,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         consts.setExpectType(CV::ItemTypes::NUMBER);
         std::string errormsg;
         if(!consts.test(params, errormsg)){
-            cursor->setError("'lt': "+errormsg);
+            cursor->setError("lt", errormsg);
             return std::make_shared<CV::Item>();
         }
         auto last = std::static_pointer_cast<CV::Number>(params[0])->get();
@@ -3403,7 +3469,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(1));
     }, false));    
 
-    ctx->set("lte", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, CV::Cursor *cursor, std::shared_ptr<CV::Context> &ctx){
+    ctx->set("lte", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         CV::FunctionConstraints consts;
         consts.setMinParams(2);
         consts.allowNil = false;
@@ -3411,7 +3477,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         consts.setExpectType(CV::ItemTypes::NUMBER);
         std::string errormsg;
         if(!consts.test(params, errormsg)){
-            cursor->setError("'gte': "+errormsg);
+            cursor->setError("lte", errormsg);
             return std::make_shared<CV::Item>();
         }
         auto last = std::static_pointer_cast<CV::Number>(params[0])->get();
@@ -3422,6 +3488,87 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
             last = std::static_pointer_cast<CV::Number>(params[i])->get();
         }				
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(1));
-    }, false));    
-         
+    }, false));   
+
+
+    /*
+    
+        INTERNAL TOOLS
+        JOBS
+    
+    */
+    ctx->set("j-get", std::make_shared<CV::Function>(std::vector<std::string>({"id"}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
+        CV::FunctionConstraints consts;
+        consts.setMinParams(1);
+        consts.setMaxParams(1);
+        consts.allowNil = false;
+        consts.allowMisMatchingTypes = false;
+        consts.setExpectType(CV::ItemTypes::NUMBER);
+        std::string errormsg;
+        if(!consts.test(params, errormsg)){
+            cursor->setError("j-get", errormsg);
+            return std::make_shared<CV::Item>();
+        }
+        auto id = std::static_pointer_cast<CV::Number>(params[0])->get();
+        if(id < 0){
+            cursor->setError("j-get", "Job ID cannot be negative.");
+            return std::make_shared<CV::Item>();            
+        }
+        auto job = gGetJob(id);
+        if(!job.get()){
+            cursor->setError("j-get", "Failed to find Job ID '"+CV::Tools::removeTrailingZeros(id)+"'. Perhaps it doesn't exist anymore.");
+            return std::make_shared<CV::Item>(); 
+        }
+        return std::static_pointer_cast<CV::Item>(job);
+    }, false)); 
+
+
+    ctx->set("j-kill", std::make_shared<CV::Function>(std::vector<std::string>({"id"}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
+        CV::FunctionConstraints consts;
+        consts.setMinParams(1);
+        consts.setMaxParams(1);
+        consts.allowNil = false;
+        consts.allowMisMatchingTypes = false;
+        consts.setExpectType(CV::ItemTypes::NUMBER);
+        std::string errormsg;
+        if(!consts.test(params, errormsg)){
+            cursor->setError("j-kill", errormsg);
+            return std::make_shared<CV::Item>();
+        }
+        auto id = std::static_pointer_cast<CV::Number>(params[0])->get();
+        if(id < 0){
+            cursor->setError("j-kill", "Job ID cannot be negative.");
+            return std::make_shared<CV::Item>();            
+        }
+        auto job = gGetJob(id);
+        if(!job.get()){
+            cursor->setError("j-kill", "Failed to find Job ID '"+CV::Tools::removeTrailingZeros(id)+"'. Perhaps it doesn't exist anymore.");
+            return std::make_shared<CV::Item>(); 
+        }
+        return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(gKillJob(id)));
+    }, false));     
+    
+    ctx->set("j-list", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
+        CV::FunctionConstraints consts;
+        consts.setMinParams(0);
+        consts.setMaxParams(0);
+        consts.allowNil = false;
+        consts.allowMisMatchingTypes = false;
+        std::string errormsg;
+        if(!consts.test(params, errormsg)){
+            cursor->setError("j-list", errormsg);
+            return std::make_shared<CV::Item>();
+        }
+        std::vector<std::shared_ptr<CV::Item>> jobs;
+
+        gJobsMutex.lock();
+
+        for(auto it : gjobs){
+            jobs.push_back(it.second);
+        }
+
+        gJobsMutex.unlock();
+
+        return std::static_pointer_cast<CV::Item>(std::make_shared<CV::List>(jobs, false));
+    }, false));              
 }

@@ -30,6 +30,9 @@ cases = [
     TestCase("[1 2 3]|type", "'LIST'", True),
     TestCase("[ct 10]|type", "'CONTEXT'", True),
 
+    # Test loops
+    TestCase("[set k 50][do [gt [-- k] 0] [io:out k]]", "49484746454443424140393837363534333231302928272625242322212019181716151413121110987654321[0 0]", True),
+
     # Arithmetic
     TestCase("+ 1 1", "2", True),
     TestCase("- 5 2", "3", True),

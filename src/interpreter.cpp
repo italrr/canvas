@@ -38,7 +38,7 @@ std::shared_ptr<ExecArg> getParam(std::vector<std::string> &params, const std::s
 
 	return v;
 }
-static CV::Cursor cursor;
+static std::shared_ptr<CV::Cursor> cursor = std::make_shared<CV::Cursor>();
 static std::shared_ptr<CV::Context> ctx = std::make_shared<CV::Context>();
 static bool finished = false;
 static bool isBusy = false;
@@ -129,17 +129,17 @@ int main(int argc, char* argv[]){
 		while(true){
 			std::cout << std::endl;
 			std::string input = "";
-			std::cout << "CV> ";
+			std::cout << CV::getPrompt();
 			std::getline (std::cin, input);
 
 			if(input.size() > 0){
-				std::cout << CV::ItemToText(CV::interpret(input, &cursor, ctx).get()) << std::endl;
-				if(cursor.error){
-					std::cout <<  cursor.message << std::endl;
+				std::cout << CV::ItemToText(CV::interpret(input, cursor, ctx).get()) << std::endl;
+				if(cursor->error){
+					std::cout <<  cursor->message << std::endl;
 					if(!relaxed){
 						std::exit(1);
 					}
-					cursor.clear();
+					cursor->clear();
 				}
 			}
 		}
@@ -160,10 +160,10 @@ int main(int argc, char* argv[]){
 			printCVEntry();
 			return 0;
 		}
-		auto result = CV::interpret(cmd, &cursor, ctx);
+		auto result = CV::interpret(cmd, cursor, ctx);
 		std::cout << CV::ItemToText(result.get());
-		if(cursor.error){
-			std::cout << "\n" << cursor.message << std::endl;
+		if(cursor->error){
+			std::cout << "\n" << cursor->message << std::endl;
 			std::exit(1);
 		}
 		while(ctx->jobs.size() > 0)CV::Tools::sleep(20);
