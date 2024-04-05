@@ -310,7 +310,7 @@
                 }
                 auto n = std::static_pointer_cast<CV::Number>(params[0])->get();
                 auto min = std::static_pointer_cast<CV::Number>(params[1])->get();
-                auto max = std::static_pointer_cast<CV::Number>(params[0])->get();
+                auto max = std::static_pointer_cast<CV::Number>(params[2])->get();
                 return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(std::min(std::max(n, min), max)));
             }, false));                                                            
 

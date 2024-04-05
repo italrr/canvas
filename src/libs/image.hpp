@@ -203,15 +203,13 @@
                 std::vector<std::shared_ptr<CV::Item>> numbers;
                 numbers.reserve(total);
                 auto n = CV::Tools::ticks();
-                std::cout << "building..." << std::endl;
                 for(int i = 0; i < total; ++i){
                     numbers.push_back(std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(0)));
                 }
-                std::cout << "done " << CV::Tools::ticks()-n << std::endl;
-                std::cout << "copying..." << std::endl;
 
                 auto handle = createImageHandle(format->get(), width->get(), height->get());
-                handle->set("data", std::make_shared<CV::List>(numbers, false));
+                n = CV::Tools::ticks();
+                handle->set("data", std::make_shared<CV::List>(numbers, true));
 
                 return std::static_pointer_cast<CV::Item>(handle);
             }, false)); 

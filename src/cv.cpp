@@ -2218,7 +2218,17 @@ static std::shared_ptr<CV::Item> eval(std::vector<CV::Token> &tokens, std::share
             return std::make_shared<CV::Item>();
         }        
         auto params = compileTokens(tokens, 1, tokens.size()-1);
-        auto code = params[1];
+
+        auto literals = parseTokens(params[1].first, ' ', cursor);
+        if(cursor->error){
+            return std::make_shared<CV::Item>();
+        }
+        auto code = buildTokens(literals, cursor);
+        if(cursor->error){
+            return std::make_shared<CV::Item>();
+        }   
+
+
         auto tctx = std::make_shared<CV::Context>(ctx);
         tctx->setTop(ctx);
                 
@@ -2231,6 +2241,7 @@ static std::shared_ptr<CV::Item> eval(std::vector<CV::Token> &tokens, std::share
         if(iterable->type == CV::ItemTypes::LIST){
             std::vector<std::shared_ptr<CV::Item>> items;
             auto list = std::static_pointer_cast<CV::List>(iterable);
+            auto n = CV::Tools::ticks();
             for(int i = 0; i < list->size(); i += iterStep){
                 auto item = list->get(i);
                 // We use the namer to name every iteration's current variable
@@ -2240,7 +2251,7 @@ static std::shared_ptr<CV::Item> eval(std::vector<CV::Token> &tokens, std::share
                     if(!CV::Tools::isValidVarName(varname)){
                         cursor->setError(imp, "Invalid name '"+varname+"'. The name cannot be a reserved word and/or contain prohibited symbols (Modifiers, numbers, brackets, etc).");
                         return std::make_shared<CV::Item>();  
-                    }
+                    }                    
                     if(iterStep > 1){
                         std::vector<std::shared_ptr<CV::Item>> items;
                         for(int j = i; j < i+iterStep; ++j){
@@ -2255,8 +2266,7 @@ static std::shared_ptr<CV::Item> eval(std::vector<CV::Token> &tokens, std::share
                     tctx->set(varname, iterVal);
                 }                
                 CV::ModifierEffect effects;
-                auto interp = interpret(code, cursor, tctx);
-                auto solved = processPreInterpretModifiers(interp, code.modifiers, cursor, tctx, effects);
+                auto solved = eval(code, cursor, tctx, singleReturn);
                 if(cursor->error){
                     return std::make_shared<CV::Item>();
                 }                   
@@ -2294,8 +2304,7 @@ static std::shared_ptr<CV::Item> eval(std::vector<CV::Token> &tokens, std::share
                     tctx->set(varname, item);
                 }                
                 CV::ModifierEffect effects;
-                auto interp = interpret(code, cursor, tctx);
-                auto solved = processPreInterpretModifiers(interp, code.modifiers, cursor, tctx, effects);
+                auto solved = eval(code, cursor, tctx, singleReturn);
                 if(cursor->error){
                     return std::make_shared<CV::Item>();
                 }             
