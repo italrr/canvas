@@ -8,7 +8,8 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/builds/cmake)
 
 # src
 set (cv_src 
-           src/CV.cpp)
+            src/libs/image.cpp
+            src/CV.cpp)
 
 if(UNIX AND NOT APPLE)
     set(LINUX TRUE)

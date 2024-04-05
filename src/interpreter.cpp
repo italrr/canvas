@@ -5,9 +5,14 @@
 #include <memory>
 #include <signal.h>
 #include <fstream>
+#include <time.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "CV.hpp"
 #include "libs/io.hpp"
+#include "libs/image.hpp"
 
 struct ExecArg {
 	std::string name;
@@ -52,6 +57,51 @@ static void RunContextIsDone(){
 	}
 }
 
+static void readAndExecuteFile(const std::string &input, bool relaxed){
+	std::ifstream file(input);
+	std::string line;
+	int n = 1;
+	std::string buffer = "";
+	for(std::string line; std::getline(file, line);){
+		cursor->line = n;
+		if(line.size() > 0){
+			buffer += line;
+			if(CV::Tools::isLineComplete(buffer)){
+				CV::interpret(buffer, cursor, ctx);
+				// std::cout << buffer << std::endl;
+				if(cursor->error){
+					std::cout << "Line #" << cursor->line << ": " << cursor->message << std::endl;
+					if(!relaxed){
+						std::exit(1);
+					}
+				}
+				buffer = "";
+			}
+		}
+		++n;
+	}
+
+	if(buffer.size() > 0 && !CV::Tools::isLineComplete(buffer)){
+		std::cout << "Line #" << cursor->line << ": Block wasn't properly closed"  << std::endl;
+		std::exit(1);			
+	}
+}
+
+static time_t getFileLastMod(const std::string &path){
+    struct stat file_stat;
+    int err = stat(path.c_str(), &file_stat);
+    if (err != 0) {
+        perror(" [asd] stat");
+        std::exit(errno);
+    }
+    return file_stat.st_mtime;
+}
+
+static bool wasFileModified(const std::string &path, time_t oldMTime) {
+    auto currentTime = getFileLastMod(path);
+    return currentTime > oldMTime;
+} 
+
 int main(int argc, char* argv[]){
 
 	std::vector<std::string> params;
@@ -59,6 +109,8 @@ int main(int argc, char* argv[]){
 		params.push_back(std::string(argv[i]));
 	}
 
+	auto dashD = getParam(params, "-d", true);
+	auto dashDynamic = getParam(params, "--dynamic");
 
 	auto dashC = getParam(params, "-c", true);
 	auto dashFile = getParam(params, "-f");
@@ -76,9 +128,10 @@ int main(int argc, char* argv[]){
 
 
 	const bool relaxed = dashRelax->valid || dashR->valid;
+	const bool dynamic = dashDynamic->valid || dashD->valid;
 
-	auto printCVEntry = [&](bool nl = true){
-		std::string text = std::string("canvas[~] v%.0f.%.0f.%.0f %s [%s]")+(nl || relaxed ? "\n" : "")+(relaxed ? ">>>>> RELAXED MODE <<<<<\n": "");
+	auto printCVEntry = [&](bool nl = true, const std::string &mode = ""){
+		std::string text = std::string("canvas[~] v%.0f.%.0f.%.0f %s [%s]")+(nl || mode.size() > 0 ? "\n" : "")+(mode.length() > 0 ? ">>>>> "+mode+" <<<<<\n": "");
 		printf(text.c_str(), CANVAS_LANG_VERSION[0], CANVAS_LANG_VERSION[1], CANVAS_LANG_VERSION[2], CV::SupportedArchitecture::name(CV::ARCH).c_str(), CV::SupportedPlatform::name(CV::PLATFORM).c_str());
 	};
 
@@ -86,45 +139,54 @@ int main(int argc, char* argv[]){
 		printCVEntry();
 		return 0;
 	}
-	CV::setUseColor(dashC->valid);
-	
-	ctx->copyable = false; // top contexts shouldn't be copied (only referenced)
-
-	// std::cout << CV::ItemToText(ctx.get()) << std::endl;
+	CV::setUseColor(dashC->valid);	
+	ctx->copyable = false;
 
 	if(dashFile.get() && dashFile->valid){
-		// std::ifstream file(dashFile->val);
-		// std::string line;
-		// int n = 1;
-		// std::string buffer = "";
-		// for(std::string line; std::getline(file, line);){
-		// 	cursor.line = n;
-		// 	if(line.size() > 0){
-		// 		buffer += line;
-		// 		if(CV::Tools::isLineComplete(buffer)){
-		// 			CV::eval(buffer, ctx, &cursor);
-		// 			if(cursor.error){
-		// 				std::cout << "Line #" << cursor.line << ": " << cursor.message << std::endl;
-		// 				if(!dashRelax->valid){
-		// 					std::exit(1);
-		// 				}
-		// 			}
-		// 			buffer = "";
-		// 		}
-		// 	}
-		// 	++n;
-		// }
+		if(dashRepl.get() && dashRepl->valid){
+			std::cout << "REPL mode cannot be used while reading a file. Start REPL mode and import a file by using \"[import LIBRAY]\"" << std::endl;
+			std::exit(1);
+		}		
+		CV::AddStandardOperators(ctx);
+		io::registerLibrary(ctx);
+		img::registerLibrary(ctx);	
 
-		// if(buffer.size() > 0 && !CV::Tools::isLineComplete(buffer)){
-		// 	std::cout << "Line #" << cursor.line << ": Block wasn't properly closed"  << std::endl;
-		// 	std::exit(1);			
-		// }
-		// std::exit(0);
+		ctx->solidify(true);
+		std::thread loop(&RunContextIsDone);
+		auto lastMod = getFileLastMod(dashFile->val);
+		bool reexecute = true;		
+		if(dynamic){
+			printCVEntry(false, relaxed ? "DYNAMIC & RELAXED MODE" : "DYNAMIC MODE");
+		}
+		do {
+			if(reexecute){
+				ctx->reset(true);
+				cursor->clear();				
+				readAndExecuteFile(dashFile->val, dashRelax->valid);
+				reexecute = false;
+			}else
+			if(dynamic){
+				CV::Tools::sleep(20);
+				reexecute = wasFileModified(dashFile->val, lastMod);
+				if(reexecute){
+					std::cout << "Detected change in '" << dashFile->val << "': Re-loading" << std::endl;
+					lastMod = getFileLastMod(dashFile->val);
+				}
+			}
+		} while(dynamic || ctx->getJobNumber() > 0);
+		finished = true;
+		loop.join();
+		return 0;
 	}else
 	if(dashRepl.get() && dashRepl->valid){
-		printCVEntry(false);
+		if(dynamic){
+			std::cout << "Dynamic mode can only be used while reading a file (-f FILE)" << std::endl;
+			std::exit(1);
+		}
+		printCVEntry(false, relaxed ? "RELAXED MODE" : "");
 		CV::AddStandardOperators(ctx);
 		io::registerLibrary(ctx);		
+		img::registerLibrary(ctx);	
 		std::thread loop(&RunContextIsDone);
 		while(true){
 			std::cout << std::endl;
@@ -143,13 +205,14 @@ int main(int argc, char* argv[]){
 				}
 			}
 		}
-		while(ctx->jobs.size() > 0)CV::Tools::sleep(20);
+		while(ctx->getJobNumber() > 0) CV::Tools::sleep(20);
 		finished = true;
 		loop.join();
 		std::cout << "Bye!" << std::endl;
 	}else{
 		CV::AddStandardOperators(ctx);
-		io::registerLibrary(ctx);			
+		io::registerLibrary(ctx);	
+		img::registerLibrary(ctx);	
 		std::thread loop(&RunContextIsDone);
 		std::string cmd = "";
 		for(int i = 1; i < params.size(); ++i){
@@ -166,7 +229,7 @@ int main(int argc, char* argv[]){
 			std::cout << "\n" << cursor->message << std::endl;
 			std::exit(1);
 		}
-		while(ctx->jobs.size() > 0)CV::Tools::sleep(20);
+		while(ctx->getJobNumber() > 0)CV::Tools::sleep(20);
 		finished = true;
 		loop.join();
 	}		

@@ -254,7 +254,7 @@
         struct Trait {
             std::string name;
             uint8_t type;
-            std::function<std::shared_ptr<Item>(Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<Context> &ctx, CV::ModifierEffect &effects)> action;
+            std::function<std::shared_ptr<Item>(std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<Context> &ctx, CV::ModifierEffect &effects)> action;
             Trait();
         };
 
@@ -264,6 +264,7 @@
             std::unordered_map<std::string, Trait> traits;
             std::unordered_map<uint8_t, Trait> traitsAny;
             bool copyable;
+            bool solid;
             std::mutex accessMutex; 
 
             Item(const Item &other){
@@ -275,14 +276,10 @@
 
             Item();
 
-            void registerTrait(uint8_t type, const std::function<std::shared_ptr<Item>(Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<Context> &ctx, CV::ModifierEffect &effects)> &action);
+            void registerTrait(uint8_t type, const std::function<std::shared_ptr<Item>(std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<Context> &ctx, CV::ModifierEffect &effects)> &action);
             
-            void registerTrait(const std::string &name, const std::function<std::shared_ptr<Item>(Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<Context> &ctx, CV::ModifierEffect &effects)> &action);
+            void registerTrait(const std::string &name, const std::function<std::shared_ptr<Item>(std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<Context> &ctx, CV::ModifierEffect &effects)> &action);
             
-            std::shared_ptr<Item> runTrait(const std::string &name, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<Context> &ctx, CV::ModifierEffect &effects);
-
-            std::shared_ptr<Item> runTrait(uint8_t type, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<Context> &ctx, CV::ModifierEffect &effects);   
-
             bool hasTrait(const std::string &name);
 
             bool hasTrait(uint8_t type);
@@ -569,6 +566,8 @@
             void addJob(std::shared_ptr<Job> &job);
             
 
+            unsigned getJobNumber();
+
             Context(const Context &other){
                 this->type = CV::ItemTypes::CONTEXT;        
              };
@@ -577,7 +576,10 @@
                 return *this;
             };
 
+            void solidify(bool downstream);
+
             std::shared_ptr<CV::Item> get(const std::string &name);
+            void reset(bool downstream);
 
             std::shared_ptr<CV::Item> copy(bool deep = true);
 
@@ -639,9 +641,15 @@
 
             bool test(List *list, std::string &errormsg);
             bool test(const std::vector<std::shared_ptr<CV::Item>> &items, std::string &errormsg);
+            bool testAgainst(std::shared_ptr<CV::String> &item, const std::vector<std::string> &opts, std::string &errormsg);
+            bool testRange(std::shared_ptr<CV::Number> &item, __CV_NUMBER_NATIVE_TYPE min, __CV_NUMBER_NATIVE_TYPE max, std::string &errormsg);
+            bool testRange(std::shared_ptr<CV::List> &item, __CV_NUMBER_NATIVE_TYPE min, __CV_NUMBER_NATIVE_TYPE max, std::string &errormsg);
+            bool testListUniformType(std::shared_ptr<CV::List> &item, uint8_t type, std::string &errormsg);
 
         };        
 
+        std::shared_ptr<Item> runTrait(std::shared_ptr<Item> &item, const std::string &name, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<Context> &ctx, CV::ModifierEffect &effects);
+        std::shared_ptr<Item> runTrait(std::shared_ptr<Item> &item, uint8_t type, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<Context> &ctx, CV::ModifierEffect &effects);   
         void AddStandardOperators(std::shared_ptr<CV::Context> &ctx);
         std::shared_ptr<CV::Item> interpret(const std::string &input, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, bool singleReturn = false);
         std::shared_ptr<CV::Item> interpret(const CV::Token &token, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, bool singleReturn = false);
@@ -649,6 +657,29 @@
         void setUseColor(bool v);
         std::string ItemToText(CV::Item *item);
         std::string getPrompt();
+
+        static std::vector<std::shared_ptr<CV::Item>> toList(const std::vector<std::string> &strings){
+            std::vector<std::shared_ptr<CV::Item>> result;
+            auto toStr = [](const std::string &str){
+                return std::make_shared<CV::String>(str);
+            };
+            for(int i = 0; i < strings.size(); ++i){
+                result.push_back(toStr(strings[i]));
+            }
+            return result;
+        }
+
+        static std::vector<std::shared_ptr<CV::Item>> toList(const std::vector<__CV_NUMBER_NATIVE_TYPE> &numbers){
+            std::vector<std::shared_ptr<CV::Item>> result;
+
+            auto toNumber = [](__CV_NUMBER_NATIVE_TYPE n){
+                return std::make_shared<CV::Number>(n);
+            };
+            for(int i = 0; i < numbers.size(); ++i){
+                result.push_back(toNumber(numbers[i]));
+            }
+            return result;
+        }
 
 
     }

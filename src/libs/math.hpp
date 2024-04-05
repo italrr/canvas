@@ -5,7 +5,7 @@
 
     #include "../CV.hpp"
 
-    namespace io {
+    namespace img {
         static std::string LIBNAME = "math";
 
         static void registerLibrary(std::shared_ptr<CV::Context> &ctx){

@@ -324,7 +324,7 @@ std::string CV::Cursor::getOrigin(const std::string &origin){
 */
 CV::Trait::Trait(){
     this->type = CV::TraitType::SPECIFIC;
-    this->action = [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->action = [](std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         return std::shared_ptr<CV::Item>(NULL);
     };
 }
@@ -337,26 +337,34 @@ CV::Trait::Trait(){
 CV::Item::Item(){
     registerTraits();
     this->copyable = true;
+    this->solid = false;
     this->type = CV::ItemTypes::NIL;
 }
 
 void CV::Item::registerTraits(){
-    this->registerTrait("copy", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("copy", [](std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
-            return std::make_shared<Item>();
+            return subject;
         }
         effects.postEval = false;
         return std::static_pointer_cast<CV::Item>(subject->copy(true));
     });
-    this->registerTrait("type", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("solid", [](std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
-            return std::make_shared<Item>();
+            return subject;
+        }
+        subject->solid = true;
+        return subject;
+    });    
+    this->registerTrait("type", [](std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+        if(subject->type == CV::ItemTypes::NIL){
+            return subject;
         }
         return std::static_pointer_cast<CV::Item>( std::make_shared<CV::String>(  CV::ItemTypes::str(subject->type)  ));
     });    
 }
 
-void CV::Item::registerTrait(uint8_t type, const std::function<std::shared_ptr<CV::Item>(Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects)> &action){
+void CV::Item::registerTrait(uint8_t type, const std::function<std::shared_ptr<CV::Item>(std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects)> &action){
     this->accessMutex.lock();
     Trait trait;
     trait.action = action;
@@ -365,7 +373,7 @@ void CV::Item::registerTrait(uint8_t type, const std::function<std::shared_ptr<C
     this->accessMutex.unlock();
 }    
 
-void CV::Item::registerTrait(const std::string &name, const std::function<std::shared_ptr<CV::Item>(Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects)> &action){
+void CV::Item::registerTrait(const std::string &name, const std::function<std::shared_ptr<CV::Item>(std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects)> &action){
     this->accessMutex.lock();
     Trait trait;
     trait.name = name;
@@ -374,13 +382,13 @@ void CV::Item::registerTrait(const std::string &name, const std::function<std::s
     this->accessMutex.unlock();
 }
 
-std::shared_ptr<CV::Item> CV::Item::runTrait(const std::string &name, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
-    auto &trait = this->traits.find(name)->second;
-    return trait.action( this, value, cursor, ctx, effects);
+std::shared_ptr<CV::Item> CV::runTrait(std::shared_ptr<Item> &item, const std::string &name, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    auto &trait = item->traits.find(name)->second;
+    return trait.action( item, value, cursor, ctx, effects);
 }
 
-std::shared_ptr<CV::Item> CV::Item::runTrait(uint8_t type, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
-    return this->traitsAny.find(type)->second.action(this, value, cursor, ctx, effects);
+std::shared_ptr<CV::Item> CV::runTrait(std::shared_ptr<Item> &item, uint8_t type, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    return item->traitsAny.find(type)->second.action(item, value, cursor, ctx, effects);
 }    
 
 bool CV::Item::hasTrait(const std::string &name){
@@ -475,29 +483,29 @@ bool CV::Number::isEq(std::shared_ptr<CV::Item> &item){
 }    
 
 void CV::Number::registerTraits(){
-    this->registerTrait("is-neg", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("is-neg", [](std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
-            return std::make_shared<Item>();
+            return subject;
         }
-        return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(static_cast<Number*>(subject)->get() < 0));
+        return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(std::static_pointer_cast<CV::Number>(subject)->get() < 0));
     });
-    this->registerTrait("inv", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("inv", [](std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
-            return std::make_shared<Item>();
+            return subject;
         }
-        return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(static_cast<Number*>(subject)->get() * -1));
+        return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(std::static_pointer_cast<CV::Number>(subject)->get() * -1));
     });    
-    this->registerTrait("is-odd", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("is-odd", [](std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
-            return std::make_shared<Item>();
+            return subject;
         }
-        return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>( (int)static_cast<Number*>(subject)->get() % 2 != 0));
+        return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>( (int)std::static_pointer_cast<CV::Number>(subject)->get() % 2 != 0));
     });   
-    this->registerTrait("is-even", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("is-even", [](std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
-            return std::make_shared<Item>();
+            return subject;
         }
-        return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>( (int)static_cast<Number*>(subject)->get() % 2 == 0));
+        return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>( (int)std::static_pointer_cast<CV::Number>(subject)->get() % 2 == 0));
     });                       
 }
 
@@ -544,11 +552,11 @@ size_t CV::List::size(){
 }
 
 void CV::List::registerTraits(){
-    this->registerTrait(CV::TraitType::ANY_NUMBER, [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait(CV::TraitType::ANY_NUMBER, [](std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
-            return std::make_shared<Item>();
+            return subject;
         }
-        auto list = static_cast<List*>(subject); 
+        auto list = std::static_pointer_cast<CV::List>(subject); 
         auto index = std::stod(value);
         if(index < 0 || index >= list->size()){
             cursor->setError("List|*ANY_NUMBER*", "Index("+Tools::removeTrailingZeros(index)+") is out of range(0-"+std::to_string(list->size()-1)+")");
@@ -556,19 +564,19 @@ void CV::List::registerTraits(){
         }
         return list->get(index); 
     });        
-    this->registerTrait("length", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("length", [](std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
-            return std::make_shared<Item>();
+            return subject;
         }
-        auto list = static_cast<List*>(subject); 
+        auto list = std::static_pointer_cast<CV::List>(subject); 
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(list->size()));
     });
-    this->registerTrait("reverse", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("reverse", [](std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
-            return std::make_shared<Item>();
+            return subject;
         }
         std::vector<std::shared_ptr<CV::Item>> result;
-        auto list = static_cast<List*>(subject); 
+        auto list = std::static_pointer_cast<CV::List>(subject); 
         list->accessMutex.lock();
         for(int i = 0; i < list->data.size(); ++i){
             result.push_back(list->data[list->data.size()-1 - i]);
@@ -627,11 +635,11 @@ CV::String::String(const std::string &str){
 }    
 
 void CV::String::registerTraits(){ 
-    this->registerTrait(CV::TraitType::ANY_NUMBER, [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait(CV::TraitType::ANY_NUMBER, [](std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
-            return std::make_shared<Item>();
+            return subject;
         }
-        auto str = static_cast<String*>(subject)->get();
+        auto str = std::static_pointer_cast<CV::String>(subject)->get();
         auto index = std::stod(value);
         if(index < 0 || index >= str.size()){
             cursor->setError("String|*ANY_NUMBER*", "Index("+Tools::removeTrailingZeros(index)+") is out of range(0-"+std::to_string(str.size()-1)+")");
@@ -639,19 +647,19 @@ void CV::String::registerTraits(){
         }
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::String>(  std::string("")+str[index]  ));
     });           
-    this->registerTrait("length", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("length", [](std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
-            return std::make_shared<Item>();
+            return subject;
         }
-        auto str = static_cast<String*>(subject);
+        auto str = std::static_pointer_cast<CV::String>(subject);
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>( str->size() ));
     });
-    this->registerTrait("list", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("list", [](std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
-            return std::make_shared<Item>();
+            return subject;
         }
         std::vector<std::shared_ptr<CV::Item>> result;
-        auto str = static_cast<String*>(subject)->get();
+        auto str = std::static_pointer_cast<CV::String>(subject)->get();
 
         for(int i = 0; i < str.size(); ++i){
             result.push_back(std::static_pointer_cast<CV::Item>(std::make_shared<CV::String>(  std::string("")+str[i]  )));
@@ -660,12 +668,12 @@ void CV::String::registerTraits(){
 
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::List>(result));
     });        
-    this->registerTrait("reverse", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("reverse", [](std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
-            return std::make_shared<Item>();
+            return subject;
         }
         std::string result;
-        auto str = static_cast<String*>(subject);
+        auto str = std::static_pointer_cast<CV::String>(subject);
 
         auto copy = str->get();
 
@@ -804,33 +812,33 @@ std::vector<std::string> CV::Function::getParams(){
 }
 
 void CV::Function::registerTraits(){
-    this->registerTrait("is-variadic", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("is-variadic", [](std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
-            return std::make_shared<Item>();
+            return subject;
         }
-        auto func = static_cast<Function*>(subject);
+        auto func = std::static_pointer_cast<CV::Function>(subject);
         subject->accessMutex.lock();
         auto v = func->variadic;
         subject->accessMutex.unlock();
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>( v ));
     });
 
-    this->registerTrait("is-binary", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("is-binary", [](std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
-            return std::make_shared<Item>();
+            return subject;
         }
-        auto func = static_cast<Function*>(subject);
+        auto func = std::static_pointer_cast<CV::Function>(subject);
         subject->accessMutex.lock();
         auto v = func->binary;
         subject->accessMutex.unlock();
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>( v ));
     }); 
 
-    this->registerTrait("async", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("async", [](std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
-            return std::make_shared<Item>();
+            return subject;
         }
-        auto fn = static_cast<Function*>(subject);
+        auto fn = std::static_pointer_cast<CV::Function>(subject);
         if(fn->async){
             cursor->setError("FUNCTION|async", "This function already started asynchronously.");            
             return std::make_shared<Item>();
@@ -845,11 +853,11 @@ void CV::Function::registerTraits(){
         return std::static_pointer_cast<CV::Item>(copy);
     }); 
 
-    this->registerTrait("untether", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("untether", [](std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
-            return std::make_shared<Item>();
+            return subject;
         }
-        auto fn = static_cast<Function*>(subject);
+        auto fn = std::static_pointer_cast<CV::Function>(subject);
         if(fn->async){
             cursor->setError("FUNCTION|untether", "This function already started asynchronously.");            
             return std::make_shared<Item>();
@@ -864,22 +872,22 @@ void CV::Function::registerTraits(){
         return std::static_pointer_cast<CV::Item>(copy);
     });     
 
-    this->registerTrait("n-args", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("n-args", [](std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
-            return std::make_shared<Item>();
+            return subject;
         }
-        auto func = static_cast<Function*>(subject);
+        auto func = std::static_pointer_cast<CV::Function>(subject);
         func->accessMutex.lock();
         auto v = func->params.size();
         func->accessMutex.unlock();
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>( v  ));            
     });   
 
-    this->registerTrait("body", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("body", [](std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
-            return std::make_shared<Item>();
+            return subject;
         }
-        auto func = static_cast<Function*>(subject);
+        auto func = std::static_pointer_cast<CV::Function>(subject);
         func->accessMutex.lock();
         auto v = func->binary ? "[BINARY]" : func->body;
         func->accessMutex.unlock();
@@ -983,6 +991,13 @@ static void ThreadedFunction(std::shared_ptr<CV::Job> job, std::shared_ptr<CV::C
 static void AsyncFunction(std::shared_ptr<CV::Job> &job, std::shared_ptr<CV::Context> &ctx){
     auto result = runJob(job->fn, job->params, job->cursor, ctx, job);
     job->setPayload(result);
+}
+
+unsigned CV::Context::getJobNumber(){
+    this->accessMutex.lock();
+    auto n = this->jobs.size();
+    this->accessMutex.unlock();
+    return n;
 }
 
 void CV::Context::addJob(std::shared_ptr<Job> &job){    
@@ -1157,11 +1172,11 @@ std::shared_ptr<CV::Job> CV::Job::setCallBack(std::shared_ptr<CV::Function> &cb)
 }
 
 void CV::Job::registerTraits(){
-    this->registerTrait("result", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("result", [](std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
-            return std::make_shared<Item>();
+            return subject;
         }
-        auto job = static_cast<CV::Job*>(subject);
+        auto job = std::static_pointer_cast<CV::Job>(subject);
         if(job->getStatus() != CV::JobStatus::DONE){
             return std::static_pointer_cast<CV::Item>(std::make_shared<String>(JobStatus::str(job->getStatus())));
         }
@@ -1169,28 +1184,28 @@ void CV::Job::registerTraits(){
     }); 
 
     // Should overwrite the default copy
-    this->registerTrait("copy", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("copy", [](std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
-            return std::make_shared<Item>();
+            return subject;
         }
         cursor->setError("JOB|copy", "Jobs cannot be copied.");            
         return std::make_shared<Item>();
     });
 
-    this->registerTrait("kill", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("kill", [](std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
-            return std::make_shared<Item>();
+            return subject;
         }
-        auto job = static_cast<CV::Job*>(subject);
+        auto job = std::static_pointer_cast<CV::Job>(subject);
         job->setStatus(CV::JobStatus::DONE);
         return job->getPayload();
     }); 
 
-    this->registerTrait("await", [](Item *subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    this->registerTrait("await", [](std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
-            return std::make_shared<Item>();
+            return subject;
         }
-        auto job = static_cast<CV::Job*>(subject);
+        auto job = std::static_pointer_cast<CV::Job>(subject);
         while(job->getStatus() != CV::JobStatus::DONE){
             CV::Tools::sleep(20);
         }
@@ -1246,6 +1261,58 @@ CV::Context::Context(std::shared_ptr<CV::Context> &ctx){
     this->head = ctx;
     this->setTop(ctx);
 }    
+
+void CV::Context::solidify(bool downstream){
+    this->accessMutex.lock();
+    for(auto &it : this->vars){
+        auto &item = it.second;
+        item->solid = true;
+        if(downstream && item->type == CV::ItemTypes::CONTEXT){
+            std::static_pointer_cast<CV::Context>(item)->solidify(downstream);
+        }
+    }
+
+    this->accessMutex.unlock();
+}
+
+void CV::Context::reset(bool downstream){
+    this->accessMutex.lock();
+    // Find non-solid mutable items to delete
+    std::vector<std::string> names;
+    for(auto &it : this->vars){
+        auto &item = it.second;
+        if(item->solid){ //  || (item->type == CV::ItemTypes::CONTEXT && std::static_pointer_cast<CV::Context>(item)->readOnly)
+            continue;
+        }     
+        if(it.first == "top"){
+            continue;
+        }        
+        names.push_back(it.first);
+    }    
+    // delete them
+    for(int i = 0; i < names.size(); ++i){
+        auto it = this->vars.find(names[i]);
+        if(it == this->vars.end()){
+            // what? shouldn't happen :|
+            continue;
+        }
+        this->vars.erase(it);
+    }        
+    // tell solid contexts left to delete reset in downstream chain
+    if(downstream){
+        for(auto &it : this->vars){
+            auto &item = it.second;
+            if(item->type != CV::ItemTypes::CONTEXT){
+                continue;
+            }
+            if(it.first == "top"){
+                continue;
+            }
+            std::static_pointer_cast<CV::Context>(item)->reset(downstream);
+        }       
+    } 
+    this->accessMutex.unlock();
+}
 
 void CV::Context::debug(){
     std::cout << "\n\n==================CONTEXT DEBUG==================" << std::endl;
@@ -1343,13 +1410,19 @@ std::string CV::ItemToText(CV::Item *item){
             auto list = static_cast<CV::List*>(item);
 
             list->accessMutex.lock();
-            for(int i = 0; i < list->data.size(); ++i){
+            int total = list->data.size();
+            int limit = total > 30 ? 10 : total;
+            for(int i = 0; i < limit; ++i){
                 auto item = list->data[i];
                 output += CV::ItemToText(item.get());
                 if(i < list->data.size()-1){
                     output += " ";
                 }
             }
+            if(limit != total){
+                output += Tools::setTextColor(Tools::Color::YELLOW)+"...("+std::to_string(total-limit)+" hidden)"+Tools::setTextColor(Tools::Color::RESET);
+            }
+                        
             list->accessMutex.unlock();
             return output + Tools::setTextColor(Tools::Color::MAGENTA)+"]"+Tools::setTextColor(Tools::Color::RESET);
         };         
@@ -1647,7 +1720,61 @@ bool CV::FunctionConstraints::test(const std::vector<std::shared_ptr<CV::Item>> 
     return true;
 }
 
+bool CV::FunctionConstraints::testAgainst(std::shared_ptr<CV::String> &item, const std::vector<std::string> &opts, std::string &errormsg){
+    auto str = item->get();
+    for(int i = 0; i < opts.size(); ++i){
+        if(opts[i] == str){
+            return true;
+        }
+    }
+    std::string literalOpts = "";
+    for(int i = 0; i < opts.size(); ++i){
+        if(i == opts.size()-1){
+            literalOpts += " or ";
+        }        
+        literalOpts += "'"+opts[i]+"'";
+        if(i < opts.size()-1){
+            literalOpts += ", ";
+        }
+    }
+    errormsg = "Provided '"+str+"'. Expected only one of the following: "+literalOpts+".";
+    return false;
+}
 
+
+bool CV::FunctionConstraints::testRange(std::shared_ptr<CV::Number> &item, __CV_NUMBER_NATIVE_TYPE min, __CV_NUMBER_NATIVE_TYPE max, std::string &errormsg){
+    auto n = item->get();
+    if(n < min || n > max){
+        auto litmin = Tools::removeTrailingZeros(min);
+        auto litmax= Tools::removeTrailingZeros(max);
+        errormsg = "Provided '"+Tools::removeTrailingZeros(n)+"' which is out range. Expected range is from "+litmin+" to "+litmax+" (inclusive).";
+        return false;
+    }
+    return true;
+}
+
+bool CV::FunctionConstraints::testRange(std::shared_ptr<CV::List> &item, __CV_NUMBER_NATIVE_TYPE min, __CV_NUMBER_NATIVE_TYPE max, std::string &errormsg){
+    auto n = item->size();
+    if(n < min || n > max){
+        auto litmin = Tools::removeTrailingZeros(min);
+        auto litmax = Tools::removeTrailingZeros(max);
+        errormsg = "Provided List of "+Tools::removeTrailingZeros(n)+" element(s) which is out range. Expected range is from "+litmin+" to "+litmax+" (inclusive).";
+        return false;
+    }
+    return true;
+}
+
+bool CV::FunctionConstraints::testListUniformType(std::shared_ptr<CV::List> &item, uint8_t type, std::string &errormsg){
+    item->accessMutex.lock();
+    for(int i = 0; i < item->data.size(); ++i){
+        if(item->data[i]->type != type){
+            errormsg = "Provided List that includes '"+CV::ItemTypes::str(item->data[i]->type)+"' type. The entire List is expected to be made out of '"+CV::ItemTypes::str(type)+"' type.";
+            return false;
+        }
+    }
+    item->accessMutex.unlock();
+    return true;
+}
 
 
 static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV::Item> &item, std::vector<CV::ModifierPair> modifiers, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
@@ -1663,7 +1790,7 @@ static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV
                 }
                 // ANY_NUMBER type trait
                 if(CV::Tools::isNumber(name) && item->hasTrait(CV::TraitType::ANY_NUMBER)){
-                    auto result = item->runTrait(CV::TraitType::ANY_NUMBER, name, cursor, ctx, effects);  
+                    auto result = CV::runTrait(item, CV::TraitType::ANY_NUMBER, name, cursor, ctx, effects);  
                     if(cursor->error){
                         return std::make_shared<CV::Item>();
                     }                         
@@ -1671,7 +1798,7 @@ static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV
                 }else
                 // ANY_STRING type trait
                 if(!CV::Tools::isNumber(name) && item->hasTrait(CV::TraitType::ANY_STRING)){
-                    auto result = item->runTrait(CV::TraitType::ANY_STRING, name, cursor, ctx, effects);    
+                    auto result = CV::runTrait(item, CV::TraitType::ANY_STRING, name, cursor, ctx, effects);    
                     if(cursor->error){
                         return std::make_shared<CV::Item>();
                     }                       
@@ -1682,7 +1809,7 @@ static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV
                     cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::SCOPE), "Trait '"+name+"' doesn't belong to '"+CV::ItemTypes::str(item->type)+"' type.");
                     return item;                      
                 }else{
-                    auto result = item->runTrait(name, "", cursor, ctx, effects);
+                    auto result = CV::runTrait(item, name, "", cursor, ctx, effects);
                     if(cursor->error){
                         return std::make_shared<CV::Item>();
                     }                    
@@ -1718,7 +1845,7 @@ static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV
                 if(mod.subject.size() > 0){
                     auto subsequent = std::static_pointer_cast<CV::Context>(item)->get(mod.subject);
                     if(!subsequent){
-                        cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::SCOPE)+"':'"+mod.subject, "Undefined constructor, or operator within this context or above.");
+                        cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::SCOPE)+":"+mod.subject, "Undefined constructor, or operator within this context or above.");
                         return item;
                     }
                     effects.toCtx = std::static_pointer_cast<CV::Context>(item);

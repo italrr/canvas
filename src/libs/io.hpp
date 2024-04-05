@@ -20,6 +20,7 @@
             auto lib = std::make_shared<CV::Context>(CV::Context());
             lib->copyable = false;
             lib->readOnly = true;
+            lib->solid = true;
 
             lib->set("out", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
                 CV::FunctionConstraints consts;
@@ -30,7 +31,7 @@
                 std::string errormsg;
                 if(!consts.test(params, errormsg)){
                     cursor->setError(LIBNAME+"':'out", errormsg);
-                    return std::make_shared<CV::Item>(CV::Item());
+                    return std::make_shared<CV::Item>();
                 }
 
                 for(int i = 0; i < params.size(); ++i){
@@ -42,11 +43,11 @@
                     }
                 }
 
-                return std::make_shared<CV::Item>(CV::Item());
+                return std::make_shared<CV::Item>();
             }, true)); 
 
 
-            ctx->set("io", lib);
+            ctx->set(LIBNAME, lib);
         }
 
     } 
