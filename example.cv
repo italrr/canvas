@@ -1,1 +1,4 @@
-set k 100
+set width 1024
+set height 1024
+set target [img:create 'RGB' width height]
+

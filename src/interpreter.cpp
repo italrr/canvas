@@ -13,6 +13,7 @@
 #include "CV.hpp"
 #include "libs/io.hpp"
 #include "libs/image.hpp"
+#include "libs/math.hpp"
 
 struct ExecArg {
 	std::string name;
@@ -91,7 +92,7 @@ static time_t getFileLastMod(const std::string &path){
     struct stat file_stat;
     int err = stat(path.c_str(), &file_stat);
     if (err != 0) {
-        perror(" [asd] stat");
+		// error
         std::exit(errno);
     }
     return file_stat.st_mtime;
@@ -149,6 +150,7 @@ int main(int argc, char* argv[]){
 		}		
 		CV::AddStandardOperators(ctx);
 		io::registerLibrary(ctx);
+		math::registerLibrary(ctx);			
 		img::registerLibrary(ctx);	
 
 		ctx->solidify(true);
@@ -185,7 +187,8 @@ int main(int argc, char* argv[]){
 		}
 		printCVEntry(false, relaxed ? "RELAXED MODE" : "");
 		CV::AddStandardOperators(ctx);
-		io::registerLibrary(ctx);		
+		io::registerLibrary(ctx);
+		math::registerLibrary(ctx);			
 		img::registerLibrary(ctx);	
 		std::thread loop(&RunContextIsDone);
 		while(true){
@@ -211,7 +214,8 @@ int main(int argc, char* argv[]){
 		std::cout << "Bye!" << std::endl;
 	}else{
 		CV::AddStandardOperators(ctx);
-		io::registerLibrary(ctx);	
+		io::registerLibrary(ctx);
+		math::registerLibrary(ctx);			
 		img::registerLibrary(ctx);	
 		std::thread loop(&RunContextIsDone);
 		std::string cmd = "";

@@ -29,9 +29,9 @@
             out << "P6\n" << w << "\n" << h << "\n255\n";
             data->accessMutex.lock();
             for (int i = 0; i < w*h*3; i += 3) {
-                uint8_t r = std::static_pointer_cast<CV::Number>(data->data[i+0])->n;
-                uint8_t g = std::static_pointer_cast<CV::Number>(data->data[i+1])->n;
-                uint8_t b = std::static_pointer_cast<CV::Number>(data->data[i+2])->n;
+                uint8_t r = std::static_pointer_cast<CV::Number>(data->data[i+0])->n * 255.0;
+                uint8_t g = std::static_pointer_cast<CV::Number>(data->data[i+1])->n * 255.0;
+                uint8_t b = std::static_pointer_cast<CV::Number>(data->data[i+2])->n * 255.0;
                 out.write((char*)&r, sizeof(uint8_t));
                 out.write((char*)&g, sizeof(uint8_t));
                 out.write((char*)&b, sizeof(uint8_t));
@@ -197,14 +197,21 @@
                     return std::make_shared<CV::Item>();
                 }
 
+                
+
                 auto total = width->get() * height->get() * IMAGE_DETPH.find(format->get())->second;
-                std::vector<__CV_NUMBER_NATIVE_TYPE> numbers;
+                std::vector<std::shared_ptr<CV::Item>> numbers;
+                numbers.reserve(total);
+                auto n = CV::Tools::ticks();
+                std::cout << "building..." << std::endl;
                 for(int i = 0; i < total; ++i){
-                    numbers.push_back(0);
+                    numbers.push_back(std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(0)));
                 }
+                std::cout << "done " << CV::Tools::ticks()-n << std::endl;
+                std::cout << "copying..." << std::endl;
 
                 auto handle = createImageHandle(format->get(), width->get(), height->get());
-                handle->set("data", std::make_shared<CV::List>(CV::toList(numbers), false));
+                handle->set("data", std::make_shared<CV::List>(numbers, false));
 
                 return std::static_pointer_cast<CV::Item>(handle);
             }, false)); 

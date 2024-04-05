@@ -25,7 +25,7 @@ namespace img {
         unsigned char *bytes = new unsigned char[w * h * channels];
 
         for (int i = 0; i < w*h*channels; i += 1) {
-            bytes[i] = std::static_pointer_cast<CV::Number>(data->data[i])->n;
+            bytes[i] = std::static_pointer_cast<CV::Number>(data->data[i])->n * 255.0;
         }
 
         stbi_write_png(filename.c_str(), w, h, channels, bytes, w * channels);

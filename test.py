@@ -41,12 +41,12 @@ cases = [
     TestCase("** 2", "2", False),
     TestCase("/ 1 0", "nil'/': Division by zero.", False),
 
-    # l-range and ANY_NUMBER trait
-    TestCase("l-range 1 10", "[1 2 3 4 5 6 7 8 9 10]", True),    
-    TestCase("[l-range 1 100]|50", "51", True),
+    # l-gen and ANY_NUMBER trait
+    TestCase("l-gen 1 10", "[1 2 3 4 5 6 7 8 9 10]", True),    
+    TestCase("[l-gen 1 100]|50", "51", True),
 
     # Expand
-    TestCase("+ [l-range 1 100]^", "5050", True),
+    TestCase("+ [l-gen 1 100]^", "5050", True),
 
     # Complex list definition
     TestCase("[1 2 [3 4 [5 6 [7 8 [9 10 [11 12]]]]]]", "[1 2 [3 4 [5 6 [7 8 [9 10 [11 12]]]]]]", True),
@@ -59,7 +59,7 @@ cases = [
 
     # Test List `reverse` trait
     TestCase("[1 2 3]|reverse", "[3 2 1]", True),
-    TestCase("[l-range 1 10]|reverse", "[10 9 8 7 6 5 4 3 2 1]", True),
+    TestCase("[l-gen 1 10]|reverse", "[10 9 8 7 6 5 4 3 2 1]", True),
 
 
     # String definition
@@ -77,7 +77,7 @@ cases = [
     TestCase("l-sort|copy", "[fn [c l] [BINARY]]", True),
 
     # on / untether
-    TestCase("on [+|untether [l-range 1 1000]^] [fn [v][io:out v]]", "[JOB 0 'CALLBACK' 'RUNNING']500500", True)    
+    TestCase("on [+|untether [l-gen 1 1000]^] [fn [v][io:out v]]", "[JOB 0 'CALLBACK' 'RUNNING']500500", True)    
 ]
 
 print("ABOUT TO START TEST CASES FOR CANVAS")

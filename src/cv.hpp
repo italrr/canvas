@@ -19,6 +19,7 @@
         namespace Tools {
             bool isLineComplete(const std::string &input);
             void sleep(uint64_t t);
+            uint64_t ticks();
             bool isReservedWord(const std::string &input);
         }
 
@@ -221,12 +222,15 @@
         struct ModifierPair {
             uint8_t type;
             std::string subject;
+            bool used;
             ModifierPair(){
                 type = ModifierTypes::UNDEFINED;
+                used = false;
             }
             ModifierPair(uint8_t type, const std::string &subject){
                 this->type = type;
                 this->subject = subject;
+                this->used = false;
 
             }
         };
@@ -256,13 +260,16 @@
             uint8_t type;
             std::function<std::shared_ptr<Item>(std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<Context> &ctx, CV::ModifierEffect &effects)> action;
             Trait();
+            Trait(const std::string &name, uint8_t type, const std::function<std::shared_ptr<Item>(std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<Context> &ctx, CV::ModifierEffect &effects)> &fn){
+                this->name = name;
+                this->type = type;
+                this->action = fn;
+            }
         };
 
 
         struct Item {
             uint8_t type;
-            std::unordered_map<std::string, Trait> traits;
-            std::unordered_map<uint8_t, Trait> traitsAny;
             bool copyable;
             bool solid;
             std::mutex accessMutex; 
@@ -275,16 +282,6 @@
             };
 
             Item();
-
-            void registerTrait(uint8_t type, const std::function<std::shared_ptr<Item>(std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<Context> &ctx, CV::ModifierEffect &effects)> &action);
-            
-            void registerTrait(const std::string &name, const std::function<std::shared_ptr<Item>(std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<Context> &ctx, CV::ModifierEffect &effects)> &action);
-            
-            bool hasTrait(const std::string &name);
-
-            bool hasTrait(uint8_t type);
-                
-            virtual void registerTraits();
 
             virtual bool isEq(std::shared_ptr<Item> &item);
             virtual std::shared_ptr<Item> copy(bool deep = true);
@@ -359,7 +356,6 @@
 
             List(const std::vector<std::shared_ptr<Item>> &list, bool toCopy = true);
 
-            void registerTraits();
 
             std::shared_ptr<Item> copy(bool deep = true);
 
@@ -390,7 +386,6 @@
             String();
             String(const std::string &str);  
 
-            void registerTraits();
 
             bool isEq(std::shared_ptr<CV::Item> &item);
 
@@ -427,7 +422,6 @@
             Function();
             Function(const std::vector<std::string> &params, const std::string &body, bool variadic = false);
             Function(const std::vector<std::string> &params, const std::function<std::shared_ptr<CV::Item> (const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<Context> &ctx)> &fn, bool variadic = false);
-            void registerTraits();
             void set(const std::vector<std::string> &params, const std::string &body, bool variadic);
             void set(const std::vector<std::string> &params, const std::function<std::shared_ptr<CV::Item> (const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<Context> &ctx)> &fn, bool variadic);
             
@@ -479,18 +473,18 @@
 
         struct Token {
             std::string first;
-            std::vector<CV::ModifierPair> modifiers;
-            CV::ModifierPair getModifier(uint8_t type) const {
+            std::vector<std::shared_ptr<CV::ModifierPair>> modifiers;
+            std::shared_ptr<CV::ModifierPair> getModifier(uint8_t type) const {
                 for(int i = 0; i < modifiers.size(); ++i){
-                    if(modifiers[i].type == type){
+                    if(modifiers[i]->type == type){
                         return modifiers[i];
                     }
                 }
-                return CV::ModifierPair();
+                return std::shared_ptr<CV::ModifierPair>(NULL);
             }
             bool hasModifier(uint8_t type){
                 for(int i = 0; i < modifiers.size(); ++i){
-                    if(modifiers[i].type == type){
+                    if(modifiers[i]->type == type){
                         return true;
                     }
                 }
@@ -500,7 +494,7 @@
                 std::string part = "<"+this->first+">";
                 for(int i = 0; i < modifiers.size(); ++i){
                     auto &mod = modifiers[i];
-                    part += "("+CV::ModifierTypes::str(mod.type)+mod.subject+")";
+                    part += "("+CV::ModifierTypes::str(mod->type)+mod->subject+")";
                 }
                 return part;
             }
@@ -526,7 +520,6 @@
             void setPayload(std::shared_ptr<CV::Item> &item);
             bool hasPayload();
 
-            void registerTraits();
             std::shared_ptr<CV::Item> copy(bool deep = true);
 
             Job();
