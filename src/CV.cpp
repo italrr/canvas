@@ -3184,7 +3184,7 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(std::shared_ptr<CV::Stack
     auto &imp = token.first;
     if(imp == "set"){
         if(params.size() != 2){
-            cursor->setError(imp, "Expects exactly 2 arguments: <NAME> <VALUE>.");
+            cursor->setError(imp, "Provided ("+std::to_string(params.size())+") argument(s). Expects exactly 2: <NAME> <VALUE>.");
             return program->create(CV::ByteCodeType::NOOP);
         }
         auto param1 = params[1];
@@ -3201,13 +3201,6 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(std::shared_ptr<CV::Stack
     if(imp == "ct"){
         auto ins = program->create(CV::ByteCodeType::CONSTRUCT_CTX);
         ins->inheritModifiers(token);
-        for(int i = 0; i < params.size(); ++i){
-            auto param = params[i];
-            auto v = ParseInputToByteToken(param.first, program, ctx, cursor);
-            v->inheritModifiers(param);
-            if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
-            ins->parameter.push_back(v->id);
-        }
 
         return ins;          
     }else{
@@ -3298,8 +3291,16 @@ static std::shared_ptr<CV::Item> &execute(std::shared_ptr<CV::TokenByteCode> &en
         case CV::ByteCodeType::PROXY: {        
             return ctx->getStaticValue(entry->first());
         } break;
-        case CV::ByteCodeType::CONSTRUCT_LIST: {
+        case CV::ByteCodeType::CONSTRUCT_CTX: {
+            auto nctx = std::make_shared<CV::Context>(ctx);
+            auto item = std::static_pointer_cast<CV::Item>(nctx);
+            ctx->setStaticValue(item);
 
+
+
+            return ctx->getStaticValue(nctx->id);
+        } break;
+        case CV::ByteCodeType::CONSTRUCT_LIST: {
             std::vector<std::shared_ptr<CV::Item>> items;
             for(int i = 0; i < entry->parameter.size(); ++i){
                 items.push_back(execute(program->instructions[entry->parameter[i]], program, ctx, cursor));
@@ -3315,7 +3316,8 @@ static std::shared_ptr<CV::Item> &execute(std::shared_ptr<CV::TokenByteCode> &en
             return v;
         };
         case CV::ByteCodeType::NOOP: {
-            // Nothing
+            // Does nothing
+            return GLOBAL_NIL;
         } break;
     }
     return GLOBAL_NIL;
