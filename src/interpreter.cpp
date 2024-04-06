@@ -103,7 +103,18 @@ static bool wasFileModified(const std::string &path, time_t oldMTime) {
     return currentTime > oldMTime;
 } 
 
+void ___interpret(const std::string &input, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);
+
 int main(int argc, char* argv[]){
+
+	CV::setUseColor(true);	
+	CV::AddStandardOperators(ctx);
+
+	___interpret("[1 [2 3]]", ctx, cursor);
+
+	// ctx->debug();
+
+	return 0;
 
 	std::vector<std::string> params;
 	for(int i = 0; i < argc; ++i){

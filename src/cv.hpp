@@ -269,6 +269,7 @@
 
 
         struct Item {
+            unsigned id;
             uint8_t type;
             bool copyable;
             bool solid;
@@ -472,6 +473,7 @@
         }
 
         struct Token {
+            bool complex;
             std::string first;
             std::vector<std::shared_ptr<CV::ModifierPair>> modifiers;
             std::shared_ptr<CV::ModifierPair> getModifier(uint8_t type) const {
@@ -491,12 +493,15 @@
                 return false;
             }
             std::string literal() const {
-                std::string part = "<"+this->first+">";
+                std::string part = std::string("<")+(this->complex ? "(C) " : "")+this->first+">";
                 for(int i = 0; i < modifiers.size(); ++i){
                     auto &mod = modifiers[i];
                     part += "("+CV::ModifierTypes::str(mod->type)+mod->subject+")";
                 }
                 return part;
+            }
+            Token(){
+                complex = false;
             }
         };
 
@@ -547,6 +552,11 @@
 
 
         struct Context : Item {
+
+            std::unordered_map<unsigned, std::shared_ptr<CV::Item>> staticValues;
+            unsigned setStaticValue(std::shared_ptr<CV::Item> &item);
+            std::shared_ptr<CV::Item> &getStaticValue(unsigned id);
+            
 
             std::unordered_map<std::string, std::shared_ptr<CV::Item>> vars;
             std::shared_ptr<Context> head;

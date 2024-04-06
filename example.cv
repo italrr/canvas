@@ -10,7 +10,7 @@ iter|3 [target:data]~pixel [
     [set g [/ [+ y 1] target:height]]
     [mut pixel|0 [- 1 r]]
     [mut pixel|1 [- 1 g]]
-    [mut pixel|2 [math:clamp [+ r g] 0 1]]
+    [mut pixel|2 [- 1 [math:clamp [+ r g] 0 0.5]]]
     [++ c]
 ]
 
