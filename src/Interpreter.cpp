@@ -68,7 +68,7 @@ static void readAndExecuteFile(const std::string &input, bool relaxed){
 		if(line.size() > 0){
 			buffer += line;
 			if(CV::Tools::isLineComplete(buffer)){
-				CV::interpret(buffer, cursor, ctx);
+				CV::interpret(buffer, ctx, cursor);
 				// std::cout << buffer << std::endl;
 				if(cursor->error){
 					std::cout << "Line #" << cursor->line << ": " << cursor->message << std::endl;
@@ -103,18 +103,7 @@ static bool wasFileModified(const std::string &path, time_t oldMTime) {
     return currentTime > oldMTime;
 } 
 
-void ___interpret(const std::string &input, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);
-
 int main(int argc, char* argv[]){
-
-	CV::setUseColor(true);	
-	CV::AddStandardOperators(ctx);
-
-	___interpret("[1 [2 3]]", ctx, cursor);
-
-	// ctx->debug();
-
-	return 0;
 
 	std::vector<std::string> params;
 	for(int i = 0; i < argc; ++i){
@@ -209,7 +198,7 @@ int main(int argc, char* argv[]){
 			std::getline (std::cin, input);
 
 			if(input.size() > 0){
-				std::cout << CV::ItemToText(CV::interpret(input, cursor, ctx).get()) << std::endl;
+				std::cout << CV::ItemToText(CV::interpret(input, ctx, cursor).get()) << std::endl;
 				if(cursor->error){
 					std::cout <<  cursor->message << std::endl;
 					if(!relaxed){
@@ -238,7 +227,7 @@ int main(int argc, char* argv[]){
 			printCVEntry();
 			return 0;
 		}
-		auto result = CV::interpret(cmd, cursor, ctx);
+		auto result = CV::interpret(cmd, ctx, cursor);
 		std::cout << CV::ItemToText(result.get());
 		if(cursor->error){
 			std::cout << "\n" << cursor->message << std::endl;

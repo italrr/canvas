@@ -215,9 +215,101 @@
             };
         }
 
+        namespace ByteCodeType {
+            enum ByteCodeType : unsigned {
+                JMP_FUNCTION = 91,          // Refers to CV Function (Can be another CompiledToken or a binary defined function)
+                JMP_INSTRUCTION,            // Refers to binary defined native instructions
+                PROXY,                      // Links to an already existing item
+                CONSTRUCT_LIST,             // Used to build lists
+                CONSTRUCT_CTX,              // Used to build contexts
+                LITERAL,                    // Normally instructions in text that couldn't be compiled into a real BC token
+                SET,                        // 1) Can define a variable within a Context 2) Can replace an existing variable with a new one using the same name
+                MUT,                        // Can modify primitive types (Numbers and Strings)
+                NOOP,
+                UNDEFINED
+            };
+            static std::string str(unsigned type){
+                switch(type){
+                    case JMP_FUNCTION: {
+                        return "JMP_FUNCTION";
+                    } break;
+                    case JMP_INSTRUCTION: {
+                        return "JMP_INSTRUCTION";
+                    } break;    
+
+                    case CONSTRUCT_CTX: {
+                        return "CONSTRUCT_CTX";
+                    } break;   
+
+                    case CONSTRUCT_LIST: {
+                        return "CONSTRUCT_LIST";
+                    } break;   
+                    case SET: {
+                        return "SET";
+                    } break; 
+                    case MUT: {
+                        return "MUT";
+                    } break;        
+                    case NOOP: {
+                        return "NOOP";
+                    } break;                        
+                    case UNDEFINED:
+                    default: {
+                        return "UNDEFINED";
+                    }                                            
+                }
+            }
+        }
+
+
+        namespace JobStatus {
+            enum JobStatus : int {
+                IDLE,
+                RUNNING,
+                DONE
+            };
+            static std::string str(int t){
+                switch(t){
+                    case CV::JobStatus::IDLE:{
+                        return "IDLE";
+                    };
+                    case CV::JobStatus::RUNNING:{
+                        return "RUNNING";
+                    };
+                    default: {
+                        return "DONE";
+                    }
+                }
+            }            
+        }
+        namespace JobType {
+            enum JobType : int {
+                ASYNC,
+                THREAD,
+                CALLBACK
+            };
+            static std::string str(int t){
+                switch(t){
+                    case JobType::ASYNC:{
+                        return "ASYNC";
+                    };
+                    case JobType::THREAD: {
+                        return "THREAD";
+                    };
+                    case JobType::CALLBACK: {
+                        return "CALLBACK";
+                    };                    
+                    default: {
+                        return "UNDEFINED";
+                    }
+                }
+            }
+        }        
+
         struct Item;
         struct Context;
         struct ItemContextPair;
+       
 
         struct ModifierPair {
             uint8_t type;
@@ -428,84 +520,6 @@
             
         };    
 
-        namespace JobStatus {
-            enum JobStatus : int {
-                IDLE,
-                RUNNING,
-                DONE
-            };
-            static std::string str(int t){
-                switch(t){
-                    case CV::JobStatus::IDLE:{
-                        return "IDLE";
-                    };
-                    case CV::JobStatus::RUNNING:{
-                        return "RUNNING";
-                    };
-                    default: {
-                        return "DONE";
-                    }
-                }
-            }            
-        }
-        namespace JobType {
-            enum JobType : int {
-                ASYNC,
-                THREAD,
-                CALLBACK
-            };
-            static std::string str(int t){
-                switch(t){
-                    case JobType::ASYNC:{
-                        return "ASYNC";
-                    };
-                    case JobType::THREAD: {
-                        return "THREAD";
-                    };
-                    case JobType::CALLBACK: {
-                        return "CALLBACK";
-                    };                    
-                    default: {
-                        return "UNDEFINED";
-                    }
-                }
-            }
-        }
-
-        struct Token {
-            bool complex;
-            std::string first;
-            std::vector<std::shared_ptr<CV::ModifierPair>> modifiers;
-            std::shared_ptr<CV::ModifierPair> getModifier(uint8_t type) const {
-                for(int i = 0; i < modifiers.size(); ++i){
-                    if(modifiers[i]->type == type){
-                        return modifiers[i];
-                    }
-                }
-                return std::shared_ptr<CV::ModifierPair>(NULL);
-            }
-            bool hasModifier(uint8_t type){
-                for(int i = 0; i < modifiers.size(); ++i){
-                    if(modifiers[i]->type == type){
-                        return true;
-                    }
-                }
-                return false;
-            }
-            std::string literal() const {
-                std::string part = std::string("<")+(this->complex ? "(C) " : "")+this->first+">";
-                for(int i = 0; i < modifiers.size(); ++i){
-                    auto &mod = modifiers[i];
-                    part += "("+CV::ModifierTypes::str(mod->type)+mod->subject+")";
-                }
-                return part;
-            }
-            Token(){
-                complex = false;
-            }
-        };
-
-
         struct Job : Item {
             __CV_NUMBER_NATIVE_TYPE id;
             std::shared_ptr<CV::Item> payload;
@@ -556,6 +570,7 @@
             std::unordered_map<unsigned, std::shared_ptr<CV::Item>> staticValues;
             unsigned setStaticValue(std::shared_ptr<CV::Item> &item);
             std::shared_ptr<CV::Item> &getStaticValue(unsigned id);
+            void flushStaticValue();
             
 
             std::unordered_map<std::string, std::shared_ptr<CV::Item>> vars;
@@ -596,7 +611,72 @@
 
             void debug();
 
+        };        
+
+        struct TokenBase {
+            std::vector<std::shared_ptr<CV::ModifierPair>> modifiers;
+            std::shared_ptr<CV::ModifierPair> getModifier(uint8_t type) const {
+                for(int i = 0; i < modifiers.size(); ++i){
+                    if(modifiers[i]->type == type){
+                        return modifiers[i];
+                    }
+                }
+                return std::shared_ptr<CV::ModifierPair>(NULL);
+            }
+            bool hasModifier(uint8_t type){
+                for(int i = 0; i < modifiers.size(); ++i){
+                    if(modifiers[i]->type == type){
+                        return true;
+                    }
+                }
+                return false;
+            }
+        }; 
+
+        // Text Token
+        struct Token : TokenBase {
+            bool complex;
+            std::string first;
+            std::string literal() const {
+                std::string part = std::string("<")+(this->complex ? "(C) " : "")+this->first+">";
+                for(int i = 0; i < modifiers.size(); ++i){
+                    auto &mod = modifiers[i];
+                    part += "("+CV::ModifierTypes::str(mod->type)+mod->subject+")";
+                }
+                return part;
+            }
+            Token(){
+                complex = false;
+            }
         };
+
+        // Byte Code Token
+        struct TokenByteCode : TokenBase {
+            unsigned id;
+            unsigned type;
+            std::string str;
+            std::vector<unsigned> parameter;    // INSTRUCTIONS OR CV::Item (Depends on the type)
+            unsigned next;                      // NEXT INSTRUCTION ID
+            TokenByteCode(unsigned type);
+            TokenByteCode();
+            unsigned first();
+            void inheritModifiers(CV::Token &token);
+            std::string literal(CV::Context *ctx = NULL);
+        };
+
+
+        struct Stack {
+            std::mutex accessMutex;
+            std::unordered_map<unsigned, std::shared_ptr<CV::TokenByteCode>> instructions;
+            std::shared_ptr<CV::TokenByteCode> create(unsigned type){
+                this->accessMutex.lock();
+                auto code = std::make_shared<CV::TokenByteCode>(type);
+                this->instructions[code->id] = code;
+                this->accessMutex.unlock();
+                return code;
+            }
+        };        
+
 
         struct ItemContextPair {
             Item *item;
@@ -654,12 +734,13 @@
         std::shared_ptr<Item> runTrait(std::shared_ptr<Item> &item, const std::string &name, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<Context> &ctx, CV::ModifierEffect &effects);
         std::shared_ptr<Item> runTrait(std::shared_ptr<Item> &item, uint8_t type, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<Context> &ctx, CV::ModifierEffect &effects);   
         void AddStandardOperators(std::shared_ptr<CV::Context> &ctx);
-        std::shared_ptr<CV::Item> interpret(const std::string &input, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, bool singleReturn = false);
-        std::shared_ptr<CV::Item> interpret(const CV::Token &token, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, bool singleReturn = false);
         bool ContextStep(std::shared_ptr<CV::Context> &cv);
         void setUseColor(bool v);
         std::string ItemToText(CV::Item *item);
         std::string getPrompt();
+
+        std::shared_ptr<CV::Item> interpret(const std::string &input, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);
+
 
         static std::vector<std::shared_ptr<CV::Item>> toList(const std::vector<std::string> &strings){
             std::vector<std::shared_ptr<CV::Item>> result;

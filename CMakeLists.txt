@@ -18,7 +18,7 @@ endif()
 add_library(cv_bin ${cv_src})
 
 IF(LINUX)
-	target_link_libraries(cv_bin -pthread  -m64  -lSDL2 -lSDL2main -lopengl32 )
+	target_link_libraries(cv_bin -pthread  -m64  -lSDL2 -lSDL2main )
 ENDIF(LINUX)
 
 IF(MINGW)
