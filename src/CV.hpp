@@ -574,6 +574,35 @@
 
         };
 
+        // Used to build the Stack
+        struct DisplayItem {
+            std::string name;
+
+            unsigned insId;
+            unsigned insType;
+            unsigned itemId;
+            unsigned itemType;
+            unsigned etc;
+            unsigned origin;
+            
+            DisplayItem(){
+
+            }
+
+            void Function(unsigned insId, unsigned argN, unsigned origin = 0){ 
+                this->insId = insId;
+                this->itemType = CV::ItemTypes::FUNCTION;
+                this->etc = argN;
+                this->origin = origin;
+            }
+            
+            void set(unsigned itemType, unsigned insId, unsigned origin = 0){
+                this->insId = insId;
+                this->itemType = itemType;
+                this->origin = origin;
+            }
+
+        };
 
         struct Context : Item {
 
@@ -584,6 +613,7 @@
 
             void addTemporaryProxy(const std::string &name, unsigned id);
             bool removeTemporaryProxy(unsigned id);
+            void flushTemporaryProxy();
             unsigned findTemporaryProxy(const std::string &name);
             std::unordered_map<std::string, unsigned> tempProxies;
             
