@@ -222,6 +222,8 @@
                 PROXY,                      // Links to an already existing item
                 CONSTRUCT_LIST,             // Used to build lists
                 CONSTRUCT_CTX,              // Used to build contexts
+                CONSTRUCT_FN,               // Used to build functions
+                PROXY_FUTURE,               // Just remembers the name and modifiers
                 LITERAL,                    // Normally instructions in text that couldn't be compiled into a real BC token
                 SET,                        // 1) Can define a variable within a Context 2) Can replace an existing variable with a new one using the same name
                 MUT,                        // Can modify primitive types (Numbers and Strings)
@@ -244,6 +246,15 @@
                     case CONSTRUCT_LIST: {
                         return "CONSTRUCT_LIST";
                     } break;   
+
+                    case CONSTRUCT_FN: {
+                        return "CONSTRUCT_FN";
+                    } break; 
+
+                    case PROXY_FUTURE: {
+                        return "PROXY_FUTURE";
+                    } break;                                            
+                    
                     case SET: {
                         return "SET";
                     } break; 
@@ -423,7 +434,6 @@
 
             bool isEq(std::shared_ptr<Item> &item);
 
-            void registerTraits();
 
             std::shared_ptr<Item> copy(bool deep = true);
 
@@ -491,19 +501,21 @@
         };
 
 
-
+        struct TokenByteCode;
+        struct Stack;
         struct Function : Item {
-            std::string body;
+            std::shared_ptr<CV::TokenByteCode> entry;
             std::vector<std::string> params;
+            std::vector<unsigned> paramId;
             bool binary;
             bool threaded;
             bool async;
             bool variadic;
 
             std::vector<std::string> getParams();
-            std::string getBody();
 
             Function(const Function &other){
+
             };
 
             Function& operator=(const Function& other){
@@ -513,10 +525,9 @@
             std::function< std::shared_ptr<CV::Item> (const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<Context> &ctx) > fn;
             std::shared_ptr<CV::Item> copy(bool deep = true);
             Function();
-            Function(const std::vector<std::string> &params, const std::string &body, bool variadic = false);
             Function(const std::vector<std::string> &params, const std::function<std::shared_ptr<CV::Item> (const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<Context> &ctx)> &fn, bool variadic = false);
-            void set(const std::vector<std::string> &params, const std::string &body, bool variadic);
             void set(const std::vector<std::string> &params, const std::function<std::shared_ptr<CV::Item> (const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<Context> &ctx)> &fn, bool variadic);
+            void set(std::shared_ptr<CV::TokenByteCode> &entry, bool variadic);
             
         };    
 
@@ -568,7 +579,7 @@
         struct Context : Item {
 
             std::unordered_map<unsigned, std::shared_ptr<CV::Item>> staticValues;
-            unsigned setStaticValue(std::shared_ptr<CV::Item> &item);
+            std::shared_ptr<CV::Item> &setStaticValue(std::shared_ptr<CV::Item> &item);
             std::shared_ptr<CV::Item> &getStaticValue(unsigned id);
             void flushStaticValue();
             
@@ -661,7 +672,8 @@
             TokenByteCode();
             unsigned first();
             void inheritModifiers(CV::Token &token);
-            std::string literal(CV::Context *ctx = NULL);
+            void inheritModifiers(std::vector<std::shared_ptr<CV::ModifierPair>> &mods);
+            std::string literal(CV::Context *ctx = NULL, CV::Stack *stack = NULL);
         };
 
 
