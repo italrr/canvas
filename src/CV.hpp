@@ -223,7 +223,6 @@
                 CONSTRUCT_LIST,             // Used to build lists
                 CONSTRUCT_CTX,              // Used to build contexts
                 CONSTRUCT_FN,               // Used to build functions
-                PROXY_FUTURE,               // Just remembers the name and modifiers
                 LITERAL,                    // Normally instructions in text that couldn't be compiled into a real BC token
                 SET,                        // 1) Can define a variable within a Context 2) Can replace an existing variable with a new one using the same name
                 MUT,                        // Can modify primitive types (Numbers and Strings)
@@ -251,8 +250,8 @@
                         return "CONSTRUCT_FN";
                     } break; 
 
-                    case PROXY_FUTURE: {
-                        return "PROXY_FUTURE";
+                    case PROXY: {
+                        return "PROXY";
                     } break;                                            
                     
                     case SET: {
@@ -582,6 +581,11 @@
             std::shared_ptr<CV::Item> &setStaticValue(std::shared_ptr<CV::Item> &item);
             std::shared_ptr<CV::Item> &getStaticValue(unsigned id);
             void flushStaticValue();
+
+            void addTemporaryProxy(const std::string &name, unsigned id);
+            bool removeTemporaryProxy(unsigned id);
+            unsigned findTemporaryProxy(const std::string &name);
+            std::unordered_map<std::string, unsigned> tempProxies;
             
 
             std::unordered_map<std::string, std::shared_ptr<CV::Item>> vars;
