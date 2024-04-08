@@ -3356,6 +3356,28 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
 
         return ins;
     }else
+    if(imp == "iter"){
+
+        if(params.size() != 2){
+            cursor->setError(imp, "Provided ("+std::to_string(params.size())+") argument(s). Expects exactly 2: <[ITERABLE]> <[CODE]>.");
+            return program->create(CV::ByteCodeType::NOOP);
+        }
+        auto iter = params[0];
+        auto code = params[1];
+
+        auto iterToken = ParseInputToByteToken(iter, program, ctx, cursor);
+        if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
+
+        auto codeToken = ParseInputToByteToken(code, program, ctx, cursor);
+        if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }                
+
+        auto ins = program->create(CV::ByteCodeType::COND_LOOP);
+        ins->parameter.push_back(iterToken->id);
+        ins->parameter.push_back(codeToken->id);
+        return ins;
+
+
+    }else
     if(imp == "fn"){
         if(params.size() != 2){
             cursor->setError(imp, "Provided ("+std::to_string(params.size())+") argument(s). Expects exactly 2: <[ARGS]> <[CODE]>.");

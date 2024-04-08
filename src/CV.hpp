@@ -231,7 +231,7 @@
                 REFERRED_FN,
                 BINARY_BRANCH_COND,
                 COND_LOOP,
-                ITER,
+                ITERATION_LOOP,
                 UNDEFINED
             };
             static std::string str(unsigned type){
@@ -275,8 +275,8 @@
                         return "COND_LOOP";
                     } break;                     
 
-                    case ITER: {
-                        return "ITER";
+                    case ITERATION_LOOP: {
+                        return "ITERATION_LOOP";
                     } break; 
 
                     case MUT: {
