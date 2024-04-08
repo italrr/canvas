@@ -312,7 +312,7 @@ namespace CV {
         }
 
         static bool isNumber(const std::string &s){
-            return (s.find_first_not_of( "-.0123456789") == std::string::npos) && (s != "-" && s != "+");
+            return (s.find_first_not_of( "-.0123456789") == std::string::npos) && (s != "-" && s != "--" && s != "+" && s != "++");
         }
 
         bool isReservedWord(const std::string &input){
@@ -867,7 +867,6 @@ std::shared_ptr<CV::DisplayItem> CV::Context::findDisplayItem(const std::string 
     return std::shared_ptr<CV::DisplayItem>(NULL);
 }
 
-std::unordered_map<std::string, unsigned> tempProxies;
 
 
 
@@ -2000,7 +1999,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         }
 
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::List>(params, false));
-    }, false));    
+    }, true));    
 
 
     ctx->set("//", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
@@ -2028,7 +2027,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         }
 
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::List>(params, false));
-    }, false));    
+    }, true));    
 
     ctx->set("**", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         CV::FunctionConstraints consts;
@@ -3303,7 +3302,28 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
 
         ctx->addDisplayItem(params[0].first, v->id);        
         return ins;
-    }else   
+    }else
+    if(imp == "do"){
+        if(params.size() != 2){
+            cursor->setError(imp, "Provided ("+std::to_string(params.size())+") argument(s). Expects exactly 2: <[COND]> <[CODE]>.");
+            return program->create(CV::ByteCodeType::NOOP);
+        }
+        auto cond = params[0];
+        auto code = params[1];
+
+        auto condToken = ParseInputToByteToken(cond, program, ctx, cursor);
+        if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
+
+        auto codeToken = ParseInputToByteToken(code, program, ctx, cursor);
+        if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }                
+
+        auto ins = program->create(CV::ByteCodeType::COND_LOOP);
+
+        ins->parameter.push_back(condToken->id);
+        ins->parameter.push_back(codeToken->id);
+
+        return ins;
+    }else       
     if(imp == "if"){
         if(params.size() > 3){
             cursor->setError(imp, "Expects no more than 3 arguments: <CONDITION> <[CODE[0]...CODE[n]]> (ELSE-OPT)<[CODE[0]...CODE[n]]>.");
@@ -3691,15 +3711,31 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
             if(cursor->error){ return std::make_shared<CV::Item>(); }
             if(checkCond(cond)){
                 auto v = RunInstruction(program->instructions[entry->parameter[1]], program, tctx, cursor);
+                if(cursor->error){ return std::make_shared<CV::Item>(); }
                 return ctx->setStaticValue(v);            
             }else
             if(entry->parameter.size() > 2){
                 auto v = RunInstruction(program->instructions[entry->parameter[2]], program, tctx, cursor);
+                if(cursor->error){ return std::make_shared<CV::Item>(); }
                 return ctx->setStaticValue(v);                  
             }else{
                 return ctx->setStaticValue(std::make_shared<CV::Item>());
             }
         } break;
+
+        case CV::ByteCodeType::COND_LOOP: {
+            auto tctx = std::make_shared<CV::Context>(ctx);
+            auto cond = RunInstruction(program->instructions[entry->parameter[0]], program, tctx, cursor);
+            if(cursor->error){ return std::make_shared<CV::Item>(); }
+            auto last = ctx->setStaticValue(std::make_shared<CV::Item>());
+            while(checkCond(cond)){
+                last = RunInstruction(program->instructions[entry->parameter[1]], program, tctx, cursor);
+                cond = RunInstruction(program->instructions[entry->parameter[0]], program, tctx, cursor);
+                if(cursor->error){ return std::make_shared<CV::Item>(); }                
+            }
+            return last;
+        } break;
+
         case CV::ByteCodeType::SET: {
             auto &proxy = program->instructions[entry->first()];
             auto v = RunInstruction(proxy, program, ctx, cursor);
@@ -3718,7 +3754,7 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
     }
     return std::make_shared<CV::Item>();
 }
-static unsigned c = 0;
+
 std::shared_ptr<CV::Item> CV::interpret(const std::string &input, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
     auto program = std::make_shared<CV::Stack>();
 
@@ -3730,7 +3766,6 @@ std::shared_ptr<CV::Item> CV::interpret(const std::string &input, std::shared_pt
 
     // }
 
-    ++c;
 
     auto code = ParseInputToByteToken(input, program, ctx, cursor);
 

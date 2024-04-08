@@ -230,6 +230,8 @@
                 REFERRED_PROXY,             // It's a proxy for a data type doesn't exist when compiling. It only points to the constructor
                 REFERRED_FN,
                 BINARY_BRANCH_COND,
+                COND_LOOP,
+                ITER,
                 UNDEFINED
             };
             static std::string str(unsigned type){
@@ -268,6 +270,15 @@
                     case SET: {
                         return "SET";
                     } break; 
+
+                    case COND_LOOP: {
+                        return "COND_LOOP";
+                    } break;                     
+
+                    case ITER: {
+                        return "ITER";
+                    } break; 
+
                     case MUT: {
                         return "MUT";
                     } break;        
