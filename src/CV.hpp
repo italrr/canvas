@@ -218,7 +218,7 @@
         namespace ByteCodeType {
             enum ByteCodeType : unsigned {
                 JMP_FUNCTION = 91,          // Refers to CV Function (Can be another CompiledToken or a binary defined function)
-                JMP_INSTRUCTION,            // Refers to binary defined native instructions
+                JMP_INSTRUCTION,            // Allows jumping to a specific instruction
                 PROXY,                      // Links to an already existing item
                 CONSTRUCT_LIST,             // Used to build lists
                 CONSTRUCT_CTX,              // Used to build contexts
@@ -227,6 +227,9 @@
                 SET,                        // 1) Can define a variable within a Context 2) Can replace an existing variable with a new one using the same name
                 MUT,                        // Can modify primitive types (Numbers and Strings)
                 NOOP,
+                REFERRED_PROXY,             // It's a proxy for a data type doesn't exist when compiling. It only points to the constructor
+                REFERRED_FN,
+                BINARY_BRANCH_COND,
                 UNDEFINED
             };
             static std::string str(unsigned type){
@@ -252,7 +255,15 @@
 
                     case PROXY: {
                         return "PROXY";
-                    } break;                                            
+                    } break;              
+
+                    case REFERRED_PROXY: {
+                        return "REFERRED_PROXY";
+                    } break;              
+
+                    case REFERRED_FN: {
+                        return "REFERRED_FN";
+                    } break;          
                     
                     case SET: {
                         return "SET";
@@ -575,6 +586,7 @@
         };
 
         // Used to build the Stack
+        // TODO: should probably add some mutex here
         struct DisplayItem {
             std::string name;
 
@@ -611,11 +623,14 @@
             std::shared_ptr<CV::Item> &getStaticValue(unsigned id);
             void flushStaticValue();
 
-            void addTemporaryProxy(const std::string &name, unsigned id);
-            bool removeTemporaryProxy(unsigned id);
-            void flushTemporaryProxy();
-            unsigned findTemporaryProxy(const std::string &name);
-            std::unordered_map<std::string, unsigned> tempProxies;
+            // For helping the stack finding items (existing or not existing ones)
+            std::shared_ptr<CV::DisplayItem> addDisplayItem(const std::string &name, std::shared_ptr<CV::DisplayItem> &ditem);
+            std::shared_ptr<CV::DisplayItem> addDisplayItem(const std::string &name, unsigned insId, unsigned origin = 0); // generic
+            std::shared_ptr<CV::DisplayItem> addDisplayItemFunction(const std::string &name, unsigned insId, unsigned argN, unsigned origin = 0);
+            bool removeDisplayItem(unsigned id); // by insId
+            void flushDisplayItems();
+            std::shared_ptr<CV::DisplayItem> findDisplayItem(const std::string &name);
+            std::unordered_map<std::string, std::shared_ptr<CV::DisplayItem>> displayItems;
             
 
             std::unordered_map<std::string, std::shared_ptr<CV::Item>> vars;
