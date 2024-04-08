@@ -14,7 +14,6 @@ static unsigned lastGenId = 0;
 static bool useColorOnText = false;
 static const bool ShowHEADRef = false;
 
-static std::shared_ptr<CV::Item> GLOBAL_NIL = std::make_shared<CV::Item>();
 static const std::string GENERIC_UNDEFINED_SYMBOL_ERROR = "Undefined constructor, operator/name within this context or above, or type.";
 
 
@@ -878,7 +877,7 @@ void CV::Context::flushStaticValue(){
     this->accessMutex.unlock();
 }
 
-std::shared_ptr<CV::Item> &CV::Context::setStaticValue(std::shared_ptr<CV::Item> &item){
+std::shared_ptr<CV::Item> CV::Context::setStaticValue(const std::shared_ptr<CV::Item> &item){
     this->accessMutex.lock();
     this->staticValues[item->id] = item;
     auto &v = this->staticValues[item->id];
@@ -886,11 +885,11 @@ std::shared_ptr<CV::Item> &CV::Context::setStaticValue(std::shared_ptr<CV::Item>
     return v;
 }
 
-std::shared_ptr<CV::Item> &CV::Context::getStaticValue(unsigned id){
+std::shared_ptr<CV::Item> CV::Context::getStaticValue(unsigned id){
     this->accessMutex.lock();
     if(this->staticValues.count(id) == 0){
         this->accessMutex.unlock();
-        return head.get() ?  head->getStaticValue(id) : GLOBAL_NIL; 
+        return head.get() ?  head->getStaticValue(id) : std::shared_ptr<CV::Item>(NULL); 
     }
     auto &item = this->staticValues.find(id)->second;
     this->accessMutex.unlock();
@@ -2644,7 +2643,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         }
 
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(0));
-    }, false));        
+    }, true));        
 
     ctx->set("and", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         CV::FunctionConstraints consts;
@@ -2662,7 +2661,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         }
 
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(1));
-    }, false));    
+    }, true));    
 
     ctx->set("not", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         CV::FunctionConstraints consts;
@@ -2694,7 +2693,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
             return std::static_pointer_cast<CV::Item>(std::make_shared<CV::List>(results));
         }
         return std::make_shared<CV::Item>();
-    }, false));                  
+    }, true));                  
 
 
     ctx->set("eq", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
@@ -2715,7 +2714,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
             }
         }				
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(1));
-    }, false));     
+    }, true));     
 
 
     ctx->set("neq", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
@@ -2741,7 +2740,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
             }
         }				
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(1));
-    }, false));      
+    }, true));      
 
 
     ctx->set("gt", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
@@ -2763,7 +2762,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
             last = std::static_pointer_cast<CV::Number>(params[i])->get();
         }				
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(1));
-    }, false));    
+    }, true));    
 
 
     ctx->set("gte", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
@@ -2785,7 +2784,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
             last = std::static_pointer_cast<CV::Number>(params[i])->get();
         }				
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(1));
-    }, false));         
+    }, true));         
 
 
     ctx->set("lt", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
@@ -2807,7 +2806,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
             last = std::static_pointer_cast<CV::Number>(params[i])->get();
         }				
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(1));
-    }, false));    
+    }, true));    
 
     ctx->set("lte", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         CV::FunctionConstraints consts;
@@ -2828,7 +2827,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
             last = std::static_pointer_cast<CV::Number>(params[i])->get();
         }				
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(1));
-    }, false));   
+    }, true));   
 
 
     /*
@@ -3274,7 +3273,7 @@ static std::shared_ptr<CV::Item> solveItem(CV::Token &token, std::shared_ptr<CV:
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::String>(token.first.substr(1, token.first.length() - 2)));      
     }else
     if(token.first == "nil"){
-        return GLOBAL_NIL;
+        return std::make_shared<CV::Item>();
     }else{
         return ctx->get(token.first);
     }        
@@ -3533,10 +3532,10 @@ static std::shared_ptr<CV::TokenByteCode> ParseInputToByteToken(const std::strin
     return ParseInputToByteToken(token, program, ctx, cursor);
 }
 
-static std::shared_ptr<CV::Item> &RunInstruction(std::shared_ptr<CV::TokenByteCode> &entry, std::shared_ptr<CV::Stack> &program, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);
+static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCode> &entry, std::shared_ptr<CV::Stack> &program, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);
 
-static std::shared_ptr<CV::Item> &Execute(std::shared_ptr<CV::TokenByteCode> &entry, std::shared_ptr<CV::Stack> &program, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
-    auto &last = GLOBAL_NIL;
+static std::shared_ptr<CV::Item> Execute(std::shared_ptr<CV::TokenByteCode> &entry, std::shared_ptr<CV::Stack> &program, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
+    auto last = std::make_shared<CV::Item>();
     unsigned next = entry->id;
     do {
         auto current = program->instructions[next];
@@ -3552,7 +3551,7 @@ static std::shared_ptr<CV::Item> &Execute(std::shared_ptr<CV::TokenByteCode> &en
     return last;
 }
 
-static std::shared_ptr<CV::Item> &RunInstruction(std::shared_ptr<CV::TokenByteCode> &entry, std::shared_ptr<CV::Stack> &program, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
+static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCode> &entry, std::shared_ptr<CV::Stack> &program, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
     switch(entry->type){
         case CV::ByteCodeType::REFERRED_FN:
         case CV::ByteCodeType::JMP_FUNCTION: {
@@ -3573,27 +3572,27 @@ static std::shared_ptr<CV::Item> &RunInstruction(std::shared_ptr<CV::TokenByteCo
                 for(int i = 1; i < entry->parameter.size(); ++i){
                     auto ins = program->instructions[entry->parameter[i]];
                     auto v = RunInstruction(ins, program, tctx, cursor);
-                    if(cursor->error){ return GLOBAL_NIL; }     
+                    if(cursor->error){ return std::make_shared<CV::Item>(); }     
                     CV::ModifierEffect effects;
                     auto solved = processPreInterpretModifiers(v, ins->modifiers, cursor, ctx, effects);
-                    if(cursor->error){ return GLOBAL_NIL; }                
+                    if(cursor->error){ return std::make_shared<CV::Item>(); }                
                     processPostInterpretExpandListOrContext(solved, effects, arguments, cursor, ctx);
-                    if(cursor->error){ return GLOBAL_NIL; }        
+                    if(cursor->error){ return std::make_shared<CV::Item>(); }        
                 }
                 auto result = fn->fn(arguments, cursor, tctx);
-                if(cursor->error){ return GLOBAL_NIL; }                
+                if(cursor->error){ return std::make_shared<CV::Item>(); }                
                 return ctx->setStaticValue(result);
             // ByteCode Functions
             }else{
                 for(int i = 1; i < entry->parameter.size(); ++i){
                     auto ins = program->instructions[entry->parameter[i]];
                     auto v = RunInstruction(ins, program, tctx, cursor);
-                    if(cursor->error){ return GLOBAL_NIL; }     
+                    if(cursor->error){ return std::make_shared<CV::Item>(); }     
                     CV::ModifierEffect effects;
                     auto solved = processPreInterpretModifiers(v, ins->modifiers, cursor, ctx, effects);
-                    if(cursor->error){ return GLOBAL_NIL; }                
+                    if(cursor->error){ return std::make_shared<CV::Item>(); }                
                     processPostInterpretExpandListOrContext(solved, effects, arguments, cursor, ctx);
-                    if(cursor->error){ return GLOBAL_NIL; }        
+                    if(cursor->error){ return std::make_shared<CV::Item>(); }        
                 }
                 if(!fn->variadic){
                     for(int i = 0; i < arguments.size(); ++i){
@@ -3608,12 +3607,12 @@ static std::shared_ptr<CV::Item> &RunInstruction(std::shared_ptr<CV::TokenByteCo
                     program->instructions[insId]->parameter[0] = list->id;
                 }
                 auto result = Execute(fn->entry, program, ctx, cursor);
-                if(cursor->error){ return GLOBAL_NIL; }                
+                if(cursor->error){ return std::make_shared<CV::Item>(); }                
                 return ctx->setStaticValue(result);
             }
         };
         case CV::ByteCodeType::PROXY: {        
-            auto &v = ctx->getStaticValue(entry->first());
+            auto v = ctx->getStaticValue(entry->first());
             CV::ModifierEffect effects;
             // auto solved = processPreInterpretModifiers(v, entry->modifiers, cursor, ctx, effects);
             // std::cout << CV::ItemToText(v.get()) << std::endl;
@@ -3646,13 +3645,13 @@ static std::shared_ptr<CV::Item> &RunInstruction(std::shared_ptr<CV::TokenByteCo
             for(int i = 0; i < entry->parameter.size(); ++i){
                 auto ins = program->instructions[entry->parameter[i]];
                 auto v = RunInstruction(ins, program, ctx, cursor);
-                if(cursor->error){ return GLOBAL_NIL; }   
+                if(cursor->error){ return std::make_shared<CV::Item>(); }   
                 CV::ModifierEffect effects;
                 auto solved = processPreInterpretModifiers(v, ins->modifiers, cursor, ctx, effects);
-                if(cursor->error){ return GLOBAL_NIL; }                
+                if(cursor->error){ return std::make_shared<CV::Item>(); }                
                 std::vector<std::shared_ptr<CV::Item>> all;
                 processPostInterpretExpandListOrContext(solved, effects, all, cursor, ctx); 
-                if(cursor->error){ return GLOBAL_NIL; }
+                if(cursor->error){ return std::make_shared<CV::Item>(); }
                 // get name
                 auto name = "v"+std::to_string(i);
                 if(ins->hasModifier(CV::ModifierTypes::NAMER)){
@@ -3675,12 +3674,12 @@ static std::shared_ptr<CV::Item> &RunInstruction(std::shared_ptr<CV::TokenByteCo
             for(int i = 0; i < entry->parameter.size(); ++i){
                 auto ins = program->instructions[entry->parameter[i]];
                 auto v = RunInstruction(ins, program, ctx, cursor);
-                if(cursor->error){ return GLOBAL_NIL; }     
+                if(cursor->error){ return std::make_shared<CV::Item>(); }     
                 CV::ModifierEffect effects;
                 auto solved = processPreInterpretModifiers(v, ins->modifiers, cursor, ctx, effects);
-                if(cursor->error){ return GLOBAL_NIL; }                
+                if(cursor->error){ return std::make_shared<CV::Item>(); }                
                 processPostInterpretExpandListOrContext(solved, effects, items, cursor, ctx); 
-                if(cursor->error){ return GLOBAL_NIL; }        
+                if(cursor->error){ return std::make_shared<CV::Item>(); }        
             }
             auto result = std::static_pointer_cast<CV::Item>(std::make_shared<CV::List>(items, false));
             entry->parameter.push_back(result->id); // result is stored in the same instruction
@@ -3688,22 +3687,22 @@ static std::shared_ptr<CV::Item> &RunInstruction(std::shared_ptr<CV::TokenByteCo
         };
         case CV::ByteCodeType::BINARY_BRANCH_COND: {
             auto tctx = std::make_shared<CV::Context>(ctx);
-            auto &ins = program->instructions[entry->first()];
-            auto cond = RunInstruction(program->instructions[ins->parameter[0]], program, tctx, cursor);
-            if(cursor->error){ return GLOBAL_NIL; }
+            auto cond = RunInstruction(program->instructions[entry->parameter[0]], program, tctx, cursor);
+            if(cursor->error){ return std::make_shared<CV::Item>(); }
             if(checkCond(cond)){
-                auto v = RunInstruction(program->instructions[ins->parameter[1]], program, tctx, cursor);
+                auto v = RunInstruction(program->instructions[entry->parameter[1]], program, tctx, cursor);
                 return ctx->setStaticValue(v);            
             }else
-            if(ins->parameter.size() > 2){
-                auto v = RunInstruction(program->instructions[ins->parameter[2]], program, tctx, cursor);
+            if(entry->parameter.size() > 2){
+                auto v = RunInstruction(program->instructions[entry->parameter[2]], program, tctx, cursor);
                 return ctx->setStaticValue(v);                  
+            }else{
+                return ctx->setStaticValue(std::make_shared<CV::Item>());
             }
-            return GLOBAL_NIL;
         } break;
         case CV::ByteCodeType::SET: {
             auto &proxy = program->instructions[entry->first()];
-            auto &v = RunInstruction(proxy, program, ctx, cursor);
+            auto v = RunInstruction(proxy, program, ctx, cursor);
             proxy->parameter[0] = v->id;
 
             // std::cout << v->id << " " << CV::ItemToText(v.get()) << std::endl;
@@ -3714,10 +3713,10 @@ static std::shared_ptr<CV::Item> &RunInstruction(std::shared_ptr<CV::TokenByteCo
         };
         case CV::ByteCodeType::NOOP: {
             // Does nothing
-            return GLOBAL_NIL;
+            return std::make_shared<CV::Item>();
         } break;
     }
-    return GLOBAL_NIL;
+    return std::make_shared<CV::Item>();
 }
 static unsigned c = 0;
 std::shared_ptr<CV::Item> CV::interpret(const std::string &input, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
@@ -3742,11 +3741,11 @@ std::shared_ptr<CV::Item> CV::interpret(const std::string &input, std::shared_pt
 
 
     if(cursor->error){
-        return GLOBAL_NIL;
+        return std::make_shared<CV::Item>();
     }
     auto v = Execute(code, program, ctx, cursor);
     if(cursor->error){
-        return GLOBAL_NIL;
+        return std::make_shared<CV::Item>();
     }    
 
     // ctx->debug();

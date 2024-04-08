@@ -619,8 +619,8 @@
         struct Context : Item {
 
             std::unordered_map<unsigned, std::shared_ptr<CV::Item>> staticValues;
-            std::shared_ptr<CV::Item> &setStaticValue(std::shared_ptr<CV::Item> &item);
-            std::shared_ptr<CV::Item> &getStaticValue(unsigned id);
+            std::shared_ptr<CV::Item> setStaticValue(const std::shared_ptr<CV::Item> &item);
+            std::shared_ptr<CV::Item> getStaticValue(unsigned id);
             void flushStaticValue();
 
             // For helping the stack finding items (existing or not existing ones)
