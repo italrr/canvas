@@ -2705,10 +2705,10 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
             cursor->setError("eq", errormsg);
             return std::make_shared<CV::Item>();
         }
-        auto last = params[0];
+        auto first = params[0];
         for(int i = 1; i < params.size(); ++i){
             auto item = params[i];
-            if(!last->isEq(item)){
+            if(!first->isEq(item)){
                 return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(0));
             }
         }				
@@ -3421,7 +3421,7 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
 
         if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); } 
         auto tproxy = ctx->findDisplayItem(imp);
-        if(tproxy.get()){
+        if(tproxy.get() && !CV::Tools::isNumber(imp) && !CV::Tools::isString(imp)){
             auto ins = program->instructions[tproxy->insId];
             // If it's a proxy we send it its way
             if(ins->type == CV::ByteCodeType::PROXY){
