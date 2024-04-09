@@ -353,7 +353,7 @@
                 return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>( x % y )); 
             }, false));              
 
-
+            lib->set("pi", std::make_shared<CV::Number>(CANVAS_STDLIB_MATH_PI));
             ctx->set(LIBNAME, lib);
         }
 

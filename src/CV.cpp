@@ -1712,32 +1712,32 @@ static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV
                     item = result;
                 }
             } break;            
-            case CV::ModifierTypes::NAMER: {
-                if(!CV::Tools::isValidVarName(mod->subject)){
-                    cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::NAMER), "Invalid name '"+mod->subject+"'. The name cannot be a reserved word and/or contain prohibited symbols (Modifiers, numbers, brackets, etc).");
-                    return std::make_shared<CV::Item>();  
-                }                 
-                effects.named = mod->subject;
-                if(effects.named.size() == 0){
-                    cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::NAMER), "Namer expects a name for the item.");
-                    return std::make_shared<CV::Item>();
-                }
-                if(ctx->readOnly){
-                    cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::NAMER), "Cannot name this item '"+mod->subject+"' within this context as it's readonly.");
-                    return std::make_shared<CV::Item>();
-                }
-                if(ctx.get() == item.get()){
-                    cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::NAMER), "Naming a context within a context is prohibited (circular referencing).");
-                    return std::make_shared<CV::Item>();                    
-                }
-                std::string &varname = mod->subject;
-                if(!CV::Tools::isValidVarName(varname)){
-                    cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::NAMER), "Invalid name '"+varname+"'. The name cannot be a reserved word and/or contain prohibited symbols (Modifiers, numbers, brackets, etc).");
-                    return std::make_shared<CV::Item>();  
-                }
-                mod->used = true;
-                ctx->set(varname, item);
-            } break;        
+            // case CV::ModifierTypes::NAMER: {
+            //     if(!CV::Tools::isValidVarName(mod->subject)){
+            //         cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::NAMER), "Invalid name '"+mod->subject+"'. The name cannot be a reserved word and/or contain prohibited symbols (Modifiers, numbers, brackets, etc).");
+            //         return std::make_shared<CV::Item>();  
+            //     }                 
+            //     effects.named = mod->subject;
+            //     if(effects.named.size() == 0){
+            //         cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::NAMER), "Namer expects a name for the item.");
+            //         return std::make_shared<CV::Item>();
+            //     }
+            //     if(ctx->readOnly){
+            //         cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::NAMER), "Cannot name this item '"+mod->subject+"' within this context as it's readonly.");
+            //         return std::make_shared<CV::Item>();
+            //     }
+            //     if(ctx.get() == item.get()){
+            //         cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::NAMER), "Naming a context within a context is prohibited (circular referencing).");
+            //         return std::make_shared<CV::Item>();                    
+            //     }
+            //     std::string &varname = mod->subject;
+            //     if(!CV::Tools::isValidVarName(varname)){
+            //         cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::NAMER), "Invalid name '"+varname+"'. The name cannot be a reserved word and/or contain prohibited symbols (Modifiers, numbers, brackets, etc).");
+            //         return std::make_shared<CV::Item>();  
+            //     }
+            //     mod->used = true;
+            //     ctx->set(varname, item);
+            // } break;        
             case CV::ModifierTypes::SCOPE: {
                 if(item->type != CV::ItemTypes::CONTEXT){
                     cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::SCOPE), "Scope modifier can only be used on contexts.");
@@ -3252,15 +3252,15 @@ static std::shared_ptr<CV::Item> solveName(CV::Token &token, std::shared_ptr<CV:
     //     std::exit(1);
     // }
 
-    // CV::ModifierEffect effects;
-    // auto solved = processPreInterpretModifiers(item, token.modifiers, cursor, ctx, effects);
-    // if(cursor->error){
-    //     return item;
-    // }
-    // processPostInterpretExpandListOrContext(solved, effects, items, cursor, ctx);
-    // if(cursor->error){
-    //     return item;
-    // }    
+    CV::ModifierEffect effects;
+    auto solved = processPreInterpretModifiers(item, token.modifiers, cursor, ctx, effects);
+    if(cursor->error){
+        return item;
+    }
+    processPostInterpretExpandListOrContext(solved, effects, items, cursor, ctx);
+    if(cursor->error){
+        return item;
+    }    
     return item;
 }
 
@@ -3274,7 +3274,7 @@ static std::shared_ptr<CV::Item> solveItem(CV::Token &token, std::shared_ptr<CV:
     if(token.first == "nil"){
         return std::make_shared<CV::Item>();
     }else{
-        return ctx->get(token.first);
+        return solveName(token, ctx, cursor);
     }        
 }
 
@@ -3296,9 +3296,20 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
         if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
         auto ins = program->create(CV::ByteCodeType::SET);
         ins->inheritModifiers(token);
+
+        auto name = params[0];
+        auto pair = findTokenOrigin(name, cursor, ctx);
+
+        if(pair.item || pair.context){
+
+        }
+
+        if(!name.hasModifier(CV::ModifierTypes::SCOPE)){
+            ins->str = params[0].first;        
+            ctx->addDisplayItem(params[0].first, v->id);        
+        }
+
         ins->parameter.push_back(v->id); 
-        ins->str = params[0].first;
-        ctx->addDisplayItem(params[0].first, v->id);        
         return ins;
     }else
     if(imp == "do"){
@@ -3537,11 +3548,12 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
             return ins;
         }else{
             if(params.size() == 0){
-
                 auto ins = program->create(CV::ByteCodeType::PROXY);                
                 ins->inheritModifiers(token);      
                 ins->parameter.push_back(var->id);
+
                 ctx->addDisplayItem(imp, ins->id);
+
                 return ins;
             }else{
                 // Compile first param
@@ -3696,7 +3708,9 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
         case CV::ByteCodeType::PROXY: {        
             auto v = ctx->getStaticValue(entry->first());
             CV::ModifierEffect effects;
-
+            if(entry->hasModifier(CV::ModifierTypes::NAMER)){
+                ctx->set(entry->getModifier(CV::ModifierTypes::NAMER)->subject, v);
+            }
             return v;
         } break;
         case CV::ByteCodeType::REFERRED_PROXY: {
