@@ -232,6 +232,7 @@
                 BINARY_BRANCH_COND,
                 COND_LOOP,
                 ITERATION_LOOP,
+                INTERRUPTOR,
                 UNDEFINED
             };
             static std::string str(unsigned type){
@@ -273,11 +274,19 @@
 
                     case COND_LOOP: {
                         return "COND_LOOP";
+                    } break;     
+
+                    case BINARY_BRANCH_COND: {
+                        return "BINARY_BRANCH_COND";
                     } break;                     
 
                     case ITERATION_LOOP: {
                         return "ITERATION_LOOP";
                     } break; 
+
+                    case INTERRUPTOR: {
+                        return "INTERRUPTOR";
+                    } break;                     
 
                     case MUT: {
                         return "MUT";
@@ -726,7 +735,8 @@
             unsigned id;
             unsigned type;
             std::string str;
-            std::vector<unsigned> parameter;    // INSTRUCTIONS OR CV::Item (Depends on the type)
+            std::vector<unsigned> data;         // For Items
+            std::vector<unsigned> parameter;    // For instructions only
             unsigned next;                      // NEXT INSTRUCTION ID
             TokenByteCode(unsigned type);
             TokenByteCode();
@@ -811,7 +821,8 @@
         std::string ItemToText(CV::Item *item);
         std::string getPrompt();
 
-        std::shared_ptr<CV::Item> interpret(const std::string &input, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);
+        std::shared_ptr<CV::Item> interpret(const std::string &input, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor, bool flushTemps = true);
+        void flushContextTemps(std::shared_ptr<CV::Context> &ctx);
 
 
         static std::vector<std::shared_ptr<CV::Item>> toList(const std::vector<std::string> &strings){

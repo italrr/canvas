@@ -3298,8 +3298,6 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
         ins->inheritModifiers(token);
         ins->parameter.push_back(v->id); 
         ins->str = params[0].first;
-        
-
         ctx->addDisplayItem(params[0].first, v->id);        
         return ins;
     }else
@@ -3324,6 +3322,33 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
 
         return ins;
     }else       
+    if(imp == "skip" || imp == "stop" || imp == "continue"){
+        if(params.size() > 1){
+            cursor->setError(imp, "Provided ("+std::to_string(params.size())+") argument(s). Expects no more than 1 (or 0).");
+            return program->create(CV::ByteCodeType::NOOP);
+        }
+        auto ins = program->create(CV::ByteCodeType::INTERRUPTOR);
+        // First param is the type
+        if(imp == "skip"){
+            ins->data.push_back(CV::InterruptTypes::SKIP);
+        }else
+        if(imp == "stop"){
+            ins->data.push_back(CV::InterruptTypes::STOP);
+        }else
+        if(imp == "continue"){
+            ins->data.push_back(CV::InterruptTypes::CONTINUE);
+        }
+        // Second param is the payload (if any)
+        if(params.size() > 0){
+            auto payload = params[0];
+            auto payloadToken = ParseInputToByteToken(payload, program, ctx, cursor);
+            if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }       
+            ins->parameter.push_back(payloadToken->id);
+        }else{
+            ins->parameter.push_back(0);
+        }
+        return ins;
+    }else
     if(imp == "if"){
         if(params.size() > 3){
             cursor->setError(imp, "Expects no more than 3 arguments: <CONDITION> <[CODE[0]...CODE[n]]> (ELSE-OPT)<[CODE[0]...CODE[n]]>.");
@@ -3357,26 +3382,33 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
         return ins;
     }else
     if(imp == "iter"){
-
         if(params.size() != 2){
             cursor->setError(imp, "Provided ("+std::to_string(params.size())+") argument(s). Expects exactly 2: <[ITERABLE]> <[CODE]>.");
             return program->create(CV::ByteCodeType::NOOP);
         }
         auto iter = params[0];
         auto code = params[1];
-
+        // Allocate name
+        auto namerId = 0;
+        if(iter.hasModifier(CV::ModifierTypes::NAMER)){
+            auto iterName = program->create(CV::ByteCodeType::PROXY);
+            iterName->parameter.push_back(0);
+            auto &name = iter.getModifier(CV::ModifierTypes::NAMER)->subject;
+            ctx->addDisplayItem(name, iterName->id);
+            namerId = iterName->id;
+        }
+        // Compile iterator
         auto iterToken = ParseInputToByteToken(iter, program, ctx, cursor);
         if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
 
+        // Compile code        
         auto codeToken = ParseInputToByteToken(code, program, ctx, cursor);
         if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }                
-
-        auto ins = program->create(CV::ByteCodeType::COND_LOOP);
+        auto ins = program->create(CV::ByteCodeType::ITERATION_LOOP);
         ins->parameter.push_back(iterToken->id);
         ins->parameter.push_back(codeToken->id);
+        ins->parameter.push_back(namerId);
         return ins;
-
-
     }else
     if(imp == "fn"){
         if(params.size() != 2){
@@ -3395,8 +3427,8 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
             }
             variadic = true;
         }
-        ins->parameter.push_back(variadic);
-        ins->parameter.push_back(variadic ? 1 : literals.size());
+        ins->data.push_back(variadic);
+        ins->data.push_back(variadic ? 1 : literals.size());
         std::vector<unsigned> clearTemps;
         if(!variadic){
             for(int i = 0; i < literals.size(); ++i){
@@ -3453,8 +3485,8 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
             // Does it refer to a function?
             if(ins->type == CV::ByteCodeType::CONSTRUCT_FN){
                 auto fn = program->create(CV::ByteCodeType::REFERRED_FN);
-                auto &isVariadic = ins->parameter[0];
-                auto &argN = ins->parameter[1];
+                auto &isVariadic = ins->data[0];
+                auto &argN = ins->data[1];
                 if(!isVariadic && argN != params.size()){
                     cursor->setError(token.literal(), "Provided ("+std::to_string(params.size())+") argument(s). Expected no more than ("+std::to_string(argN)+") argument(s).");
                     return program->create(CV::ByteCodeType::NOOP);
@@ -3494,7 +3526,7 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
 
             auto ins = program->create(CV::ByteCodeType::JMP_FUNCTION);
             ins->inheritModifiers(token);            
-            ins->parameter.push_back(var->id);
+            ins->data.push_back(var->id);
             for(int i = 0; i < params.size(); ++i){
                 auto param = params[i];
                 auto v = ParseInputToByteToken(param, program, ctx, cursor);
@@ -3557,8 +3589,6 @@ static std::shared_ptr<CV::TokenByteCode> ParseInputToByteToken(CV::Token &input
             }
             instructions.push_back(ins);
         }
-
-
         return instructions[0];
     }else{
         auto v = ProcessToken(program, tokens[0], params, input.modifiers, ctx, cursor);
@@ -3582,15 +3612,25 @@ static std::shared_ptr<CV::Item> Execute(std::shared_ptr<CV::TokenByteCode> &ent
     do {
         auto current = program->instructions[next];
         last = RunInstruction(current, program, ctx, cursor);
-        // std::cout << CV::ItemToText(last.get()) << " " << current->literal() << std::endl;
-
+        if(last->type == CV::ItemTypes::INTERRUPT){
+            break;
+        }
         next = current->next;
     } while(next != 0);
-    ctx->flushDisplayItems();
-    ctx->flushStaticValue();
     // program->instructions.clear();
     // ctx->reset(true);
     return last;
+}
+
+static std::shared_ptr<CV::Item> unwrapInterrupt(const std::shared_ptr<CV::Item> &item){
+    if(item->type != CV::ItemTypes::INTERRUPT){
+        return item;
+    }else
+    if(!std::static_pointer_cast<CV::Interrupt>(item)->hasPayload()){
+        return item;
+    }else{
+        return std::static_pointer_cast<CV::Interrupt>(item)->getPayload();
+    }
 }
 
 static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCode> &entry, std::shared_ptr<CV::Stack> &program, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
@@ -3602,16 +3642,16 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
                 // We look for the function using the construct_fn instruction
                 // After a construct type finishes it'll have the actual Item's id inside its params (it's always the last one)
                 auto constrIns = program->instructions[entry->parameter[0]];
-                auto fnId = constrIns->parameter[constrIns->parameter.size()-1]; 
+                auto fnId = constrIns->data[constrIns->data.size()-1]; 
                 fn = std::static_pointer_cast<CV::Function>(ctx->getStaticValue(fnId));
             }else{
-                fn = std::static_pointer_cast<CV::Function>(ctx->getStaticValue(entry->first()));
+                fn = std::static_pointer_cast<CV::Function>(ctx->getStaticValue(entry->data[0]));
             }
             std::vector<std::shared_ptr<CV::Item>> arguments;
             auto tctx = std::make_shared<CV::Context>(ctx);
             // Binary Functions
             if(fn->binary){
-                for(int i = 1; i < entry->parameter.size(); ++i){
+                for(int i = 0; i < entry->parameter.size(); ++i){
                     auto ins = program->instructions[entry->parameter[i]];
                     auto v = RunInstruction(ins, program, tctx, cursor);
                     if(cursor->error){ return std::make_shared<CV::Item>(); }     
@@ -3623,7 +3663,7 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
                 }
                 auto result = fn->fn(arguments, cursor, tctx);
                 if(cursor->error){ return std::make_shared<CV::Item>(); }                
-                return ctx->setStaticValue(result);
+                return ctx->setStaticValue(unwrapInterrupt(result));
             // ByteCode Functions
             }else{
                 for(int i = 1; i < entry->parameter.size(); ++i){
@@ -3650,34 +3690,33 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
                 }
                 auto result = Execute(fn->entry, program, ctx, cursor);
                 if(cursor->error){ return std::make_shared<CV::Item>(); }                
-                return ctx->setStaticValue(result);
+                return ctx->setStaticValue(unwrapInterrupt(result));
             }
         };
         case CV::ByteCodeType::PROXY: {        
             auto v = ctx->getStaticValue(entry->first());
             CV::ModifierEffect effects;
-            // auto solved = processPreInterpretModifiers(v, entry->modifiers, cursor, ctx, effects);
-            // std::cout << CV::ItemToText(v.get()) << std::endl;
+
             return v;
         } break;
         case CV::ByteCodeType::REFERRED_PROXY: {
             auto ins = program->instructions[entry->parameter[0]];
-            return ctx->getStaticValue(ins->parameter[ins->parameter.size()-1]); // last param is the actual value
+            return ctx->getStaticValue(ins->data[ins->data.size()-1]); // last param is the actual value
         } break;
         case CV::ByteCodeType::CONSTRUCT_FN: {
             auto fn = std::make_shared<CV::Function>();
             // Get argument names
-            auto isVariadic = entry->parameter[0];
-            auto nArgs = entry->parameter[1];
+            auto isVariadic = entry->data[0];
+            auto nArgs = entry->data[1];
             for(auto i = 0; i < nArgs; ++i){
-                auto ins = program->instructions[ entry->parameter[ i + 2 ] ];
+                auto ins = program->instructions[ entry->parameter[ i ] ];
                 fn->params.push_back(ins->str);
                 fn->paramId.push_back(ins->id);
             }
-            fn->set(program->instructions[ entry->parameter[ nArgs + 2 ] ], isVariadic);
+            fn->set(program->instructions[ entry->parameter[ nArgs ] ], isVariadic);
             // std::cout<< fn->entry->literal() << std::endl;
             auto item = std::static_pointer_cast<CV::Item>(fn);
-            entry->parameter.push_back(item->id); // result is stored in the same instruction
+            entry->data.push_back(item->id); // result is stored in the same instruction
             return ctx->setStaticValue(item);
         } break;
         case CV::ByteCodeType::CONSTRUCT_CTX: {
@@ -3689,10 +3728,10 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
                 auto v = RunInstruction(ins, program, ctx, cursor);
                 if(cursor->error){ return std::make_shared<CV::Item>(); }   
                 CV::ModifierEffect effects;
-                auto solved = processPreInterpretModifiers(v, ins->modifiers, cursor, ctx, effects);
+                auto solved = processPreInterpretModifiers(v, ins->modifiers, cursor, nctx, effects);
                 if(cursor->error){ return std::make_shared<CV::Item>(); }                
                 std::vector<std::shared_ptr<CV::Item>> all;
-                processPostInterpretExpandListOrContext(solved, effects, all, cursor, ctx); 
+                processPostInterpretExpandListOrContext(solved, effects, all, cursor, nctx); 
                 if(cursor->error){ return std::make_shared<CV::Item>(); }
                 // get name
                 auto name = "v"+std::to_string(i);
@@ -3708,7 +3747,7 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
             for(auto &it : items){
                 nctx->set(it.first, it.second);
             }
-            entry->parameter.push_back(item->id);
+            entry->data.push_back(item->id);
             return ctx->setStaticValue(item);
         } break;
         case CV::ByteCodeType::CONSTRUCT_LIST: {
@@ -3724,7 +3763,7 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
                 if(cursor->error){ return std::make_shared<CV::Item>(); }        
             }
             auto result = std::static_pointer_cast<CV::Item>(std::make_shared<CV::List>(items, false));
-            entry->parameter.push_back(result->id); // result is stored in the same instruction
+            entry->data.push_back(result->id); // result is stored in the same instruction
             return  ctx->setStaticValue(result);            
         };
         case CV::ByteCodeType::BINARY_BRANCH_COND: {
@@ -3751,12 +3790,77 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
             if(cursor->error){ return std::make_shared<CV::Item>(); }
             auto last = ctx->setStaticValue(std::make_shared<CV::Item>());
             while(checkCond(cond)){
-                last = RunInstruction(program->instructions[entry->parameter[1]], program, tctx, cursor);
+                last = Execute(program->instructions[entry->parameter[1]], program, tctx, cursor);
+                if(cursor->error){ return last; }  
+                if(last->type == CV::ItemTypes::INTERRUPT && std::static_pointer_cast<CV::Interrupt>(last)->intType == CV::InterruptTypes::STOP){
+                    break;
+                }
                 cond = RunInstruction(program->instructions[entry->parameter[0]], program, tctx, cursor);
-                if(cursor->error){ return std::make_shared<CV::Item>(); }                
+                if(cursor->error){ return last; }                
             }
-            return last;
+            return unwrapInterrupt(last);
         } break;
+
+        case CV::ByteCodeType::INTERRUPTOR: {
+            if(entry->parameter[0] != 0){
+                auto ins = program->instructions[entry->parameter[0]];
+                auto v = RunInstruction(ins, program, ctx, cursor);
+                if(cursor->error){ return std::make_shared<CV::Item>(); }                
+                if(v->type == CV::ItemTypes::INTERRUPT){
+                    return v;
+                }
+                auto interrupt = std::make_shared<CV::Interrupt>(entry->data[0]);
+                interrupt->setPayload(v);
+                return interrupt;
+            }else{
+                return std::make_shared<CV::Interrupt>(entry->data[0]);
+            }
+        } break;
+
+        case CV::ByteCodeType::ITERATION_LOOP: {
+            auto tctx = std::make_shared<CV::Context>(ctx);
+            // Iterator
+            auto iterToken = program->instructions[entry->parameter[0]];
+            auto iteration = RunInstruction(iterToken, program, tctx, cursor);
+            // Name
+            auto updNamer = [&](std::shared_ptr<CV::Item> &item){
+                if(entry->parameter[2] == 0) return;
+                // Get proxy instruction
+                auto &proxy = program->instructions[entry->parameter[2]];
+
+                // Update value
+                proxy->parameter[0] = item->id;
+            };
+
+            if(cursor->error){ return std::make_shared<CV::Item>(); }
+
+            auto last = ctx->setStaticValue(std::make_shared<CV::Item>());
+            auto lastIndex = 0;
+            
+            auto nextItem = iteration->type != CV::ItemTypes::LIST ? iteration : std::static_pointer_cast<CV::List>(iteration)->get(lastIndex);
+            updNamer(nextItem);
+
+            while(true){
+                last = Execute(program->instructions[entry->parameter[1]], program, tctx, cursor);
+                if(cursor->error){ return std::make_shared<CV::Item>(); } 
+                if(last->type == CV::ItemTypes::INTERRUPT && std::static_pointer_cast<CV::Interrupt>(last)->intType == CV::InterruptTypes::STOP){
+                    break;
+                }                
+                if(iteration->type != CV::ItemTypes::LIST){
+                    break;
+                }else{
+                    auto list = std::static_pointer_cast<CV::List>(iteration);
+                    if(lastIndex == list->size()-1){
+                        break;
+                    }
+                    ++lastIndex;
+                    nextItem = list->get(lastIndex);
+                    updNamer(nextItem);
+                }
+            }
+            
+            return unwrapInterrupt(last);
+        } break;        
 
         case CV::ByteCodeType::SET: {
             auto &proxy = program->instructions[entry->first()];
@@ -3777,7 +3881,7 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
     return std::make_shared<CV::Item>();
 }
 
-std::shared_ptr<CV::Item> CV::interpret(const std::string &input, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
+std::shared_ptr<CV::Item> CV::interpret(const std::string &input, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor, bool flushTemps){
     auto program = std::make_shared<CV::Stack>();
 
     // if(c == 1){
@@ -3800,13 +3904,20 @@ std::shared_ptr<CV::Item> CV::interpret(const std::string &input, std::shared_pt
     if(cursor->error){
         return std::make_shared<CV::Item>();
     }
-    auto v = Execute(code, program, ctx, cursor);
+    auto v = unwrapInterrupt(Execute(code, program, ctx, cursor));
     if(cursor->error){
         return std::make_shared<CV::Item>();
-    }    
-
+    }
+    if(flushTemps){
+        flushContextTemps(ctx);    
+    }
     // ctx->debug();
 
     return v;
+}
+
+void CV::flushContextTemps(std::shared_ptr<CV::Context> &ctx){
+    ctx->flushDisplayItems();
+    ctx->flushStaticValue();   
 }
 

@@ -68,7 +68,7 @@ static void readAndExecuteFile(const std::string &input, bool relaxed){
 		if(line.size() > 0){
 			buffer += line;
 			if(CV::Tools::isLineComplete(buffer)){
-				CV::interpret(buffer, ctx, cursor);
+				CV::interpret(buffer, ctx, cursor, false);
 				// std::cout << buffer << std::endl;
 				if(cursor->error){
 					std::cout << "Line #" << cursor->line << ": " << cursor->message << std::endl;
@@ -86,6 +86,7 @@ static void readAndExecuteFile(const std::string &input, bool relaxed){
 		std::cout << "Line #" << cursor->line << ": Block wasn't properly closed"  << std::endl;
 		std::exit(1);			
 	}
+	CV::flushContextTemps(ctx);    
 }
 
 static time_t getFileLastMod(const std::string &path){
