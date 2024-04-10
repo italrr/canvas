@@ -18,7 +18,7 @@ static const std::string GENERIC_UNDEFINED_SYMBOL_ERROR = "Undefined constructor
 
 
 static std::string FunctionToText(CV::Function *fn);
-static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV::Item> &item, std::vector<CV::ModifierPair> &modifiers, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects);
+// static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV::Item> &item, std::vector<CV::ModifierPair> &modifiers, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects);
 static void processPostInterpretExpandListOrContext(std::shared_ptr<CV::Item> &solved, CV::ModifierEffect &effects, std::vector<std::shared_ptr<CV::Item>> &items, std::shared_ptr<CV::Cursor> &cursor, const std::shared_ptr<CV::Context> &ctx);
 static std::unordered_map<int, std::shared_ptr<CV::Job>> gjobs;
 
@@ -1669,7 +1669,7 @@ bool CV::FunctionConstraints::testListUniformType(std::shared_ptr<CV::List> &ite
 }
 
 
-static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV::Item> &item, std::vector<std::shared_ptr<CV::ModifierPair>> &modifiers, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+static std::shared_ptr<CV::Item> processPreInterpretConversionModifiers(std::shared_ptr<CV::Item> &item, std::vector<std::shared_ptr<CV::ModifierPair>> &modifiers, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
     effects.reset();
     for(int i = 0; i < modifiers.size(); ++i){
         auto &mod = modifiers[i];
@@ -1711,33 +1711,7 @@ static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV
                     }                    
                     item = result;
                 }
-            } break;            
-            // case CV::ModifierTypes::NAMER: {
-            //     if(!CV::Tools::isValidVarName(mod->subject)){
-            //         cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::NAMER), "Invalid name '"+mod->subject+"'. The name cannot be a reserved word and/or contain prohibited symbols (Modifiers, numbers, brackets, etc).");
-            //         return std::make_shared<CV::Item>();  
-            //     }                 
-            //     effects.named = mod->subject;
-            //     if(effects.named.size() == 0){
-            //         cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::NAMER), "Namer expects a name for the item.");
-            //         return std::make_shared<CV::Item>();
-            //     }
-            //     if(ctx->readOnly){
-            //         cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::NAMER), "Cannot name this item '"+mod->subject+"' within this context as it's readonly.");
-            //         return std::make_shared<CV::Item>();
-            //     }
-            //     if(ctx.get() == item.get()){
-            //         cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::NAMER), "Naming a context within a context is prohibited (circular referencing).");
-            //         return std::make_shared<CV::Item>();                    
-            //     }
-            //     std::string &varname = mod->subject;
-            //     if(!CV::Tools::isValidVarName(varname)){
-            //         cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::NAMER), "Invalid name '"+varname+"'. The name cannot be a reserved word and/or contain prohibited symbols (Modifiers, numbers, brackets, etc).");
-            //         return std::make_shared<CV::Item>();  
-            //     }
-            //     mod->used = true;
-            //     ctx->set(varname, item);
-            // } break;        
+            } break;                   
             case CV::ModifierTypes::SCOPE: {
                 if(item->type != CV::ItemTypes::CONTEXT){
                     cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::SCOPE), "Scope modifier can only be used on contexts.");
@@ -1757,7 +1731,39 @@ static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV
                     effects.ctxSwitch = true;
                 }
                 mod->used = true;
-            } break;   
+            } break;                                 
+        }
+    }
+    return item;
+}
+
+
+
+static std::shared_ptr<CV::Item> processPreInterpretSituationalModifiers(std::shared_ptr<CV::Item> &item, std::vector<std::shared_ptr<CV::ModifierPair>> &modifiers, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    effects.reset();
+    for(int i = 0; i < modifiers.size(); ++i){
+        auto &mod = modifiers[i];
+        if(mod->used){
+            continue;
+        }
+        switch(mod->type){
+            case CV::ModifierTypes::NAMER: {
+                if(!CV::Tools::isValidVarName(mod->subject)){
+                    cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::NAMER), "Invalid name '"+mod->subject+"'. The name cannot be a reserved word and/or contain prohibited symbols (Modifiers, numbers, brackets, etc).");
+                    return std::make_shared<CV::Item>();  
+                }                 
+                effects.named = mod->subject;
+                if(effects.named.size() == 0){
+                    cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::NAMER), "Namer expects a name for the item.");
+                    return std::make_shared<CV::Item>();
+                }
+                if(i == modifiers.size()-1){
+                    mod->used = false; 
+                }else{
+                    cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::EXPAND), "Expand modifier can only be used at the end of a modifier chain.");
+                    return item;
+                }
+            } break;        
             case CV::ModifierTypes::EXPAND: {
                 if(i == modifiers.size()-1){
                     effects.expand = true;
@@ -1812,24 +1818,24 @@ static bool checkCond(std::shared_ptr<CV::Item> &item){
     }
 };
 
-static CV::ItemContextPair findTokenOrigin(CV::Token &token, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
-    auto findName = token.first;
-    // If token has modifiers, then we proceed to process them
-    if(token.modifiers.size() > 0){
-        auto var = ctx->get(token.first);
-        if(var.get()){
-            CV::ModifierEffect effects;
-            auto solved = processPreInterpretModifiers(var, token.modifiers, cursor, ctx, effects);
-            if(cursor->error){
-                return CV::ItemContextPair(NULL, NULL, "", true);
-            }
-            if(effects.toCtx && effects.ctxTargetName.size() > 0){
-                return CV::ItemContextPair(solved.get(), effects.toCtx.get(), effects.ctxTargetName, false);
-            }
-        }
-    }
-    return ctx->getWithContext(findName);
-}
+// static CV::ItemContextPair findTokenOrigin(CV::Token &token, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
+//     auto findName = token.first;
+//     // If token has modifiers, then we proceed to process them
+//     if(token.modifiers.size() > 0){
+//         auto var = ctx->get(token.first);
+//         if(var.get()){
+//             CV::ModifierEffect effects;
+//             auto solved = processPreInterpretModifiers(var, token.modifiers, cursor, ctx, effects);
+//             if(cursor->error){
+//                 return CV::ItemContextPair(NULL, NULL, "", true);
+//             }
+//             if(effects.toCtx && effects.ctxTargetName.size() > 0){
+//                 return CV::ItemContextPair(solved.get(), effects.toCtx.get(), effects.ctxTargetName, false);
+//             }
+//         }
+//     }
+//     return ctx->getWithContext(findName);
+// }
 
 
 static bool typicalVariadicArithmeticCheck(const std::string &name, const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, int max = -1){
@@ -3244,23 +3250,20 @@ static std::shared_ptr<CV::Item> solveName(CV::Token &token, std::shared_ptr<CV:
     
     auto item = ctx->get(token.first);
 
-    // std::cout << token.first << " '" << item->id << "' " << CV::ItemToText(item.get()) << std::endl;
 
-
-    // if(token.first == "a"){
-    //     ctx->debug();
-    //     std::exit(1);
+    // CV::ModifierEffect effects;
+    // auto solved = processPreInterpretConversionModifiers(item, token.modifiers, cursor, ctx, effects);
+    // if(cursor->error){
+    //     return item;
     // }
-
-    CV::ModifierEffect effects;
-    auto solved = processPreInterpretModifiers(item, token.modifiers, cursor, ctx, effects);
-    if(cursor->error){
-        return item;
-    }
-    processPostInterpretExpandListOrContext(solved, effects, items, cursor, ctx);
-    if(cursor->error){
-        return item;
-    }    
+    // solved = processPreInterpretSituationalModifiers(item, token.modifiers, cursor, ctx, effects);
+    // if(cursor->error){
+    //     return item;
+    // }    
+    // processPostInterpretExpandListOrContext(solved, effects, items, cursor, ctx);
+    // if(cursor->error){
+    //     return item;
+    // }    
     return item;
 }
 
@@ -3292,25 +3295,29 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
             return program->create(CV::ByteCodeType::NOOP);
         }
         auto param1 = params[1];
-        auto v = ParseInputToByteToken(param1, program, ctx, cursor);
-        if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
-        auto ins = program->create(CV::ByteCodeType::SET);
-        ins->inheritModifiers(token);
-
         auto name = params[0];
-        auto pair = findTokenOrigin(name, cursor, ctx);
 
-        if(pair.item || pair.context){
+        auto v = ParseInputToByteToken(param1, program, ctx, cursor);
+        
+        if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
 
-        }
-
-        if(!name.hasModifier(CV::ModifierTypes::SCOPE)){
+        auto ins = program->create(CV::ByteCodeType::SET);
+        ins->inheritModifiers(token);            
+        
+        if(name.modifiers.size() == 0){
+            ins->data.push_back(0); // Zero means local Context set
             ins->str = params[0].first;        
-            ctx->addDisplayItem(params[0].first, v->id);        
+            ctx->addDisplayItem(params[0].first, v->id);
+            ins->parameter.push_back(0); 
+        }else{
+            auto target = ParseInputToByteToken(name, program, ctx, cursor);
+            target->inheritModifiers(name);
+            ins->data.push_back(1); // One means it's a MODIFIER_DIG_PROXY 
+            ins->parameter.push_back(target->id); 
         }
 
         ins->parameter.push_back(v->id); 
-        return ins;
+        return ins;        
     }else
     if(imp == "do"){
         if(params.size() != 2){
@@ -3482,9 +3489,30 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
         return ins;          
     }else{
         auto var = solveItem(token, ctx, cursor);       
-
-
         if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); } 
+
+        if(token.modifiers.size() > 0){
+            // If this type has any modifiers, it'll be interpreted during runtime (keyword `interpreted`)
+            // Which in that case, it'll affect performance but that's the price to
+            // pay for having modifiers. It's possible have the whole mechanic fully
+            // compileable, but it'll require a full rewrite of canvas
+            // As of right now, the biggest problem is considering traits,
+            // when they jump into the mix, since they're basically magic functions, it makes the
+            // behavior unknown up until execution. traits are supposed to be too flexible
+            // We just don't know what a trait can return pre-runtime. can be a number, a context, anything.
+            // so it's either cripple canvas by prohibiting the mix usage of modifiers
+            // or move modifier resolution to runtime (or drop the compiler completely lol)
+            // TODO:  for the very long future, build a proper compiler
+            // having stuff like this during runtime makes this more of a half-piler
+            // hopefully itll improve performance just enough to satisfy my absurd expectations
+            // from this toy project
+            auto dig = program->create(CV::ByteCodeType::MODIFIER_DIG_PROXY);
+            dig->inheritModifiers(token);
+            dig->str = imp;
+            dig->data.push_back(var->id);
+            return dig;
+        }
+
         auto tproxy = ctx->findDisplayItem(imp);
         if(tproxy.get() && !CV::Tools::isNumber(imp) && !CV::Tools::isString(imp)){
             auto ins = program->instructions[tproxy->insId];
@@ -3667,8 +3695,8 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
                     auto ins = program->instructions[entry->parameter[i]];
                     auto v = RunInstruction(ins, program, tctx, cursor);
                     if(cursor->error){ return std::make_shared<CV::Item>(); }     
-                    CV::ModifierEffect effects;
-                    auto solved = processPreInterpretModifiers(v, ins->modifiers, cursor, ctx, effects);
+                    CV::ModifierEffect effects;               
+                    auto solved = processPreInterpretSituationalModifiers(v, ins->modifiers, cursor, ctx, effects);
                     if(cursor->error){ return std::make_shared<CV::Item>(); }                
                     processPostInterpretExpandListOrContext(solved, effects, arguments, cursor, ctx);
                     if(cursor->error){ return std::make_shared<CV::Item>(); }        
@@ -3682,11 +3710,11 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
                     auto ins = program->instructions[entry->parameter[i]];
                     auto v = RunInstruction(ins, program, tctx, cursor);
                     if(cursor->error){ return std::make_shared<CV::Item>(); }     
-                    CV::ModifierEffect effects;
-                    auto solved = processPreInterpretModifiers(v, ins->modifiers, cursor, ctx, effects);
+                    CV::ModifierEffect effects;             
+                    auto solved = processPreInterpretSituationalModifiers(v, ins->modifiers, cursor, ctx, effects);
                     if(cursor->error){ return std::make_shared<CV::Item>(); }                
                     processPostInterpretExpandListOrContext(solved, effects, arguments, cursor, ctx);
-                    if(cursor->error){ return std::make_shared<CV::Item>(); }        
+                    if(cursor->error){ return std::make_shared<CV::Item>(); }      
                 }
                 if(!fn->variadic){
                     for(int i = 0; i < arguments.size(); ++i){
@@ -3742,8 +3770,12 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
                 auto v = RunInstruction(ins, program, ctx, cursor);
                 if(cursor->error){ return std::make_shared<CV::Item>(); }   
                 CV::ModifierEffect effects;
-                auto solved = processPreInterpretModifiers(v, ins->modifiers, cursor, nctx, effects);
+
+                auto solved = processPreInterpretConversionModifiers(v, ins->modifiers, cursor, ctx, effects);
                 if(cursor->error){ return std::make_shared<CV::Item>(); }                
+                solved = processPreInterpretSituationalModifiers(v, ins->modifiers, cursor, ctx, effects);
+                if(cursor->error){ return std::make_shared<CV::Item>(); }                
+
                 std::vector<std::shared_ptr<CV::Item>> all;
                 processPostInterpretExpandListOrContext(solved, effects, all, cursor, nctx); 
                 if(cursor->error){ return std::make_shared<CV::Item>(); }
@@ -3770,11 +3802,11 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
                 auto ins = program->instructions[entry->parameter[i]];
                 auto v = RunInstruction(ins, program, ctx, cursor);
                 if(cursor->error){ return std::make_shared<CV::Item>(); }     
-                CV::ModifierEffect effects;
-                auto solved = processPreInterpretModifiers(v, ins->modifiers, cursor, ctx, effects);
+                CV::ModifierEffect effects;          
+                auto solved = processPreInterpretSituationalModifiers(v, ins->modifiers, cursor, ctx, effects);
                 if(cursor->error){ return std::make_shared<CV::Item>(); }                
-                processPostInterpretExpandListOrContext(solved, effects, items, cursor, ctx); 
-                if(cursor->error){ return std::make_shared<CV::Item>(); }        
+                processPostInterpretExpandListOrContext(solved, effects, items, cursor, ctx);
+                if(cursor->error){ return std::make_shared<CV::Item>(); }  
             }
             auto result = std::static_pointer_cast<CV::Item>(std::make_shared<CV::List>(items, false));
             entry->data.push_back(result->id); // result is stored in the same instruction
@@ -3875,6 +3907,18 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
             
             return unwrapInterrupt(last);
         } break;        
+
+        case CV::ByteCodeType::MODIFIER_DIG_PROXY: {
+            auto item = ctx->get(entry->str);
+            if(!item.get()){
+                cursor->setError(entry->str, GENERIC_UNDEFINED_SYMBOL_ERROR);
+                return std::make_shared<CV::Item>();
+            }
+            CV::ModifierEffect effects;               
+            auto solved = processPreInterpretConversionModifiers(item, entry->modifiers, cursor, ctx, effects);
+            if(cursor->error){ return std::make_shared<CV::Item>(); }                
+            return solved;
+        } break;
 
         case CV::ByteCodeType::SET: {
             auto &proxy = program->instructions[entry->first()];

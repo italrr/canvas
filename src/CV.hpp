@@ -233,6 +233,7 @@
                 COND_LOOP,
                 ITERATION_LOOP,
                 INTERRUPTOR,
+                MODIFIER_DIG_PROXY,       
                 UNDEFINED
             };
             static std::string str(unsigned type){
