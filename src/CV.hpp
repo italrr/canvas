@@ -276,6 +276,10 @@
                     case COND_LOOP: {
                         return "COND_LOOP";
                     } break;     
+                    
+                    case MODIFIER_DIG_PROXY: {
+                        return "MODIFIER_DIG_PROXY";
+                    } break;
 
                     case BINARY_BRANCH_COND: {
                         return "BINARY_BRANCH_COND";
