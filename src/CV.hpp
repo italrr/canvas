@@ -682,6 +682,7 @@
             void solidify(bool downstream);
 
             std::shared_ptr<CV::Item> get(const std::string &name);
+            std::string getNameById(unsigned id);
             void reset(bool downstream);
 
             std::shared_ptr<CV::Item> copy(bool deep = true);
@@ -700,6 +701,7 @@
 
         struct TokenBase {
             std::vector<std::shared_ptr<CV::ModifierPair>> modifiers;
+            void resetModifiers();
             std::shared_ptr<CV::ModifierPair> getModifier(uint8_t type) const {
                 for(int i = 0; i < modifiers.size(); ++i){
                     if(modifiers[i]->type == type){
@@ -739,6 +741,7 @@
         struct TokenByteCode : TokenBase {
             unsigned id;
             unsigned type;
+            unsigned origin;
             std::string str;
             std::vector<unsigned> data;         // For Items
             std::vector<unsigned> parameter;    // For instructions only
