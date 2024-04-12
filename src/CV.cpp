@@ -3323,13 +3323,11 @@ static std::shared_ptr<CV::Item> solveName(CV::Token &token, unsigned &origin, s
     return solved;
 }
 
-static std::shared_ptr<CV::Item> solveItem(CV::Token &token, unsigned &origin, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor, bool &created){
+static std::shared_ptr<CV::Item> solveItem(CV::Token &token, unsigned &origin, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
     if(CV::Tools::isNumber(token.first)){
-        created = true;
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(std::stod(token.first)));
     }else
     if(CV::Tools::isString(token.first)){
-        created = true;
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::String>(token.first.substr(1, token.first.length() - 2)));      
     }else
     if(token.first == "nil"){
@@ -3557,10 +3555,9 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
         }        
         return ins;          
     }else{
-        bool created = false;
         unsigned origin = ctx->id;
 
-        auto var = solveItem(token, origin, ctx, cursor, created);       
+        auto var = solveItem(token, origin, ctx, cursor);       
         if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); } 
 
         // Solve display Items (they don't exist yet)
