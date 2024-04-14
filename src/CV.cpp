@@ -3588,6 +3588,16 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
                     if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
                     fn->parameter.push_back(v->id);
                 }
+
+                bool proxiedJMP = headMods.size() > 0;
+
+                if(proxiedJMP){
+                    auto pins = program->create(CV::ByteCodeType::PROXIED_FN_SUMMON);
+                    pins->inheritModifiers(headMods);
+                    pins->parameter.push_back(fn->id);
+                    return pins;
+                }
+
                 return fn;
             }
             // Othwerwise, we create a referred proxy
@@ -3623,6 +3633,15 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
                 if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
                 ins->parameter.push_back(v->id);
             }
+            bool proxiedJMP = headMods.size() > 0;
+
+            if(proxiedJMP){
+                auto pins = program->create(CV::ByteCodeType::PROXIED_FN_SUMMON);
+                pins->inheritModifiers(headMods);
+                pins->parameter.push_back(ins->id);
+                return pins;
+            }
+
             return ins;
         }else{
             if(params.size() == 0){
@@ -3815,6 +3834,15 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
                 return ctx->setStaticValue(unwrapInterrupt(result));
             }
         };
+        case CV::ByteCodeType::PROXIED_FN_SUMMON: {
+            auto fn = program->instructions[entry->parameter[0]];
+            auto v = RunInstruction(fn, program, ctx, cursor);
+            if(cursor->error){ return std::make_shared<CV::Item>(); }        
+            CV::ModifierEffect effects;
+            auto solved = processPreInterpretConversionModifiers(v, entry->modifiers, cursor, ctx, effects);
+            if(cursor->error){ return std::make_shared<CV::Item>(); }                
+            return solved;
+        } break;
         case CV::ByteCodeType::PROXY: {        
             auto v = ctx->getStaticValue(entry->first());
             CV::ModifierEffect effects;
@@ -4082,8 +4110,8 @@ std::shared_ptr<CV::Item> CV::interpret(const std::string &input, std::shared_pt
 
     auto code = ParseInputToByteToken(input, program, ctx, cursor);
 
-    DebugByteCode(code, ctx.get(), program.get());
-    std::cout << "\n\n\n" << std::endl;
+    // DebugByteCode(code, ctx.get(), program.get());
+    // std::cout << "\n\n\n" << std::endl;
     // std::exit(1);
     // std::cout << code->literal(ctx.get(), program.get()) << std::endl;
 

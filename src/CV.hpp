@@ -229,6 +229,7 @@
                 NOOP,
                 REFERRED_PROXY,             // It's a proxy for a data type doesn't exist when compiling. It only points to the constructor
                 REFERRED_FN,
+                PROXIED_FN_SUMMON,
                 BINARY_BRANCH_COND,
                 COND_LOOP,
                 ITERATION_LOOP,
@@ -244,6 +245,10 @@
                     case JMP_INSTRUCTION: {
                         return "JMP_INSTRUCTION";
                     } break;    
+
+                    case PROXIED_FN_SUMMON: {
+                        return "PROXIED_FN_SUMMON";
+                    } break;
 
                     case CONSTRUCT_CTX: {
                         return "CONSTRUCT_CTX";
