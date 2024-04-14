@@ -4110,7 +4110,7 @@ std::shared_ptr<CV::Item> CV::interpret(const std::string &input, std::shared_pt
 
     auto code = ParseInputToByteToken(input, program, ctx, cursor);
 
-    // DebugByteCode(code, ctx.get(), program.get());
+    DebugByteCode(code, ctx.get(), program.get());
     // std::cout << "\n\n\n" << std::endl;
     // std::exit(1);
     // std::cout << code->literal(ctx.get(), program.get()) << std::endl;

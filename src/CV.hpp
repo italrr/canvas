@@ -230,6 +230,8 @@
                 REFERRED_PROXY,             // It's a proxy for a data type doesn't exist when compiling. It only points to the constructor
                 REFERRED_FN,
                 PROXIED_FN_SUMMON,
+                FN_SUMMON_ASYNC,
+                FN_SUMMON_UNTETHER,
                 BINARY_BRANCH_COND,
                 COND_LOOP,
                 ITERATION_LOOP,
@@ -239,6 +241,12 @@
             };
             static std::string str(unsigned type){
                 switch(type){
+                    case FN_SUMMON_ASYNC: {
+                        return "FN_SUMMON_ASYNC";
+                    } break;
+                    case FN_SUMMON_UNTETHER: {
+                        return "FN_SUMMON_UNTETHER";
+                    } break;                                        
                     case JMP_FUNCTION: {
                         return "JMP_FUNCTION";
                     } break;
