@@ -809,7 +809,6 @@ static void ThreadedFunction(std::shared_ptr<CV::Job> job, std::shared_ptr<CV::C
     while(job->getStatus() == CV::JobStatus::IDLE){ CV::Tools::sleep(20); }
     auto last = std::make_shared<CV::Item>();
     while(job->getStatus() == CV::JobStatus::RUNNING){
-        // last = runJob(job->fn, job->params, job->cursor, ctx, job);
         auto result = Execute(job->entry, job->program, ctx, job->cursor);
         if(result->type != CV::ItemTypes::INTERRUPT && std::static_pointer_cast<CV::Interrupt>(result)->intType != CV::InterruptTypes::CONTINUE){
             job->setStatus(CV::JobStatus::DONE);

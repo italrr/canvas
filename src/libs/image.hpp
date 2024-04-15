@@ -57,7 +57,7 @@
         };
 
         static void registerLibrary(std::shared_ptr<CV::Context> &ctx){
-            auto lib = std::make_shared<CV::Context>(CV::Context());
+            auto lib = std::make_shared<CV::Context>(ctx);
             lib->copyable = false;
             lib->readOnly = true;
             lib->solid = true;
