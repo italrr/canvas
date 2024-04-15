@@ -230,8 +230,8 @@
                 REFERRED_PROXY,             // It's a proxy for a data type doesn't exist when compiling. It only points to the constructor
                 REFERRED_FN,
                 PROXIED_FN_SUMMON,
-                FN_SUMMON_ASYNC,
-                FN_SUMMON_UNTETHER,
+                SUMMON_ASYNC,
+                SUMMON_UNTETHER,
                 BINARY_BRANCH_COND,
                 COND_LOOP,
                 ITERATION_LOOP,
@@ -241,11 +241,11 @@
             };
             static std::string str(unsigned type){
                 switch(type){
-                    case FN_SUMMON_ASYNC: {
-                        return "FN_SUMMON_ASYNC";
+                    case SUMMON_ASYNC: {
+                        return "SUMMON_ASYNC";
                     } break;
-                    case FN_SUMMON_UNTETHER: {
-                        return "FN_SUMMON_UNTETHER";
+                    case SUMMON_UNTETHER: {
+                        return "SUMMON_UNTETHER";
                     } break;                                        
                     case JMP_FUNCTION: {
                         return "JMP_FUNCTION";
@@ -582,10 +582,10 @@
         struct Job : Item {
             __CV_NUMBER_NATIVE_TYPE id;
             std::shared_ptr<CV::Item> payload;
-            std::shared_ptr<CV::Job> callback;
-            std::vector<std::shared_ptr<CV::Item>> params;
-            std::shared_ptr<CV::Function> fn;
+            std::shared_ptr<CV::TokenByteCode> entry;
             std::shared_ptr<Cursor> cursor;
+            std::shared_ptr<CV::Stack> program;
+            
             int jobType;
             int status;
             std::thread thread;
@@ -602,20 +602,17 @@
 
             Job();
 
-            void set(int type, std::shared_ptr<CV::Function> &fn, std::vector<std::shared_ptr<CV::Item>> &params);
-            std::shared_ptr<CV::Job> setCallBack(std::shared_ptr<CV::Function> &cb);
+            void set(int type, std::shared_ptr<CV::TokenByteCode> &entry, std::shared_ptr<CV::Stack> &program);
 
             Job(const Job &other){
                 this->id = other.id;
-                this->params = other.params;
-                this->fn = other.fn;
+                this->entry = other.entry;
                 this->type = other.type;
                 this->status = other.status;
             };
             Job& operator=(const Job& other){
                 this->id = other.id;                
-                this->params = other.params;
-                this->fn = other.fn;
+                this->entry = other.entry;
                 this->type = other.type;                
                 this->status = other.status;
                 return *this;

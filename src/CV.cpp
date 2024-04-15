@@ -20,6 +20,10 @@ static const std::string GENERIC_UNDEFINED_SYMBOL_ERROR = "Undefined constructor
 static std::string FunctionToText(CV::Function *fn);
 // static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV::Item> &item, std::vector<CV::ModifierPair> &modifiers, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects);
 static void processPostInterpretExpandListOrContext(std::shared_ptr<CV::Item> &solved, CV::ModifierEffect &effects, std::vector<std::shared_ptr<CV::Item>> &items, std::shared_ptr<CV::Cursor> &cursor, const std::shared_ptr<CV::Context> &ctx);
+static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCode> &entry, std::shared_ptr<CV::Stack> &program, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);
+static std::shared_ptr<CV::Item> Execute(std::shared_ptr<CV::TokenByteCode> &entry, std::shared_ptr<CV::Stack> &program, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);
+static std::shared_ptr<CV::Item> unwrapInterrupt(const std::shared_ptr<CV::Item> &item);
+
 static std::unordered_map<int, std::shared_ptr<CV::Job>> gjobs;
 
 std::unordered_map<std::string, CV::Trait> GENERIC_TRAITS = {
@@ -806,14 +810,25 @@ static void ThreadedFunction(std::shared_ptr<CV::Job> job, std::shared_ptr<CV::C
     auto last = std::make_shared<CV::Item>();
     while(job->getStatus() == CV::JobStatus::RUNNING){
         // last = runJob(job->fn, job->params, job->cursor, ctx, job);
+        auto result = Execute(job->entry, job->program, ctx, job->cursor);
+        if(result->type != CV::ItemTypes::INTERRUPT && std::static_pointer_cast<CV::Interrupt>(result)->intType != CV::InterruptTypes::CONTINUE){
+            job->setStatus(CV::JobStatus::DONE);
+            last = unwrapInterrupt(result);
+        }        
     }
     job->setPayload(last);
     job->setStatus(CV::JobStatus::DONE);
 }
 
 static void AsyncFunction(std::shared_ptr<CV::Job> &job, std::shared_ptr<CV::Context> &ctx){
-    // auto result = runJob(job->fn, job->params, job->cursor, ctx, job);
-    // job->setPayload(result);
+    auto result = Execute(job->entry, job->program, ctx, job->cursor);
+    if(result->type != CV::ItemTypes::INTERRUPT && std::static_pointer_cast<CV::Interrupt>(result)->intType != CV::InterruptTypes::CONTINUE){
+        job->setStatus(CV::JobStatus::DONE);
+    }
+    if(job->getStatus() == CV::JobStatus::DONE){
+        auto pl = unwrapInterrupt(result);
+        job->setPayload(pl);
+    }
 }
 
 std::shared_ptr<CV::DisplayItem> CV::Context::addDisplayItemFunction(const std::string &name, unsigned insId, unsigned argN, unsigned origin){
@@ -956,21 +971,21 @@ bool CV::ContextStep(std::shared_ptr<CV::Context> &ctx){
         }
     }
 
-    auto runCb = [&](std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Job> &job){
-        auto cb = job->callback;
-        if(cb->jobType == CV::JobType::CALLBACK){
-            std::vector<std::shared_ptr<CV::Item>> items;
-            if(job->hasPayload()){
-                items.push_back(job->getPayload());
-            }
-            // auto result = runJob(cb->fn, items, cb->cursor, ctx, cb);
-            // cb->setPayload(result);
-            cb->setStatus(JobStatus::DONE);
-        }else{
-            cb->cursor->setError("JOB|CALLBACK", "Non-Callback Job '"+CV::Tools::removeTrailingZeros(cb->id)+"' attached as Callback.");
-            cb->setStatus(JobStatus::DONE);
-        }
-    };
+    // auto runCb = [&](std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Job> &job){
+    //     auto cb = job->callback;
+    //     if(cb->jobType == CV::JobType::CALLBACK){
+    //         std::vector<std::shared_ptr<CV::Item>> items;
+    //         if(job->hasPayload()){
+    //             items.push_back(job->getPayload());
+    //         }
+    //         // auto result = runJob(cb->fn, items, cb->cursor, ctx, cb);
+    //         // cb->setPayload(result);
+    //         cb->setStatus(JobStatus::DONE);
+    //     }else{
+    //         cb->cursor->setError("JOB|CALLBACK", "Non-Callback Job '"+CV::Tools::removeTrailingZeros(cb->id)+"' attached as Callback.");
+    //         cb->setStatus(JobStatus::DONE);
+    //     }
+    // };
 
     // Delete finished jobs
     ctx->accessMutex.lock();
@@ -986,11 +1001,11 @@ bool CV::ContextStep(std::shared_ptr<CV::Context> &ctx){
             /*
                 RUN CALL BACK                
             */
-            if(job->callback.get()){
-                ctx->accessMutex.unlock();
-                runCb(ctx, job);
-                ctx->accessMutex.lock();
-            }
+            // if(job->callback.get()){
+            //     ctx->accessMutex.unlock();
+            //     runCb(ctx, job);
+            //     ctx->accessMutex.lock();
+            // }
             /*
                 Then delete
             */
@@ -1058,29 +1073,29 @@ CV::Job::Job(){
     this->status = CV::JobStatus::IDLE;
 }
 
-void CV::Job::set(int type, std::shared_ptr<CV::Function> &fn, std::vector<std::shared_ptr<CV::Item>> &params){
+void CV::Job::set(int type, std::shared_ptr<CV::TokenByteCode> &entry, std::shared_ptr<CV::Stack> &program){
     this->accessMutex.lock();
     this->status = CV::JobStatus::IDLE;
-    this->fn = fn;
-    this->params = params;
+    this->entry = entry;
+    this->program = program;
     this->jobType = type;
     this->accessMutex.unlock();
 }
 
-std::shared_ptr<CV::Job> CV::Job::setCallBack(std::shared_ptr<CV::Function> &cb){
-    auto job = std::make_shared<CV::Job>();
-    job->accessMutex.lock();
-    job->cursor = this->cursor;
-    job->fn = cb;
-    job->jobType = CV::JobType::CALLBACK;
-    job->status = CV::JobStatus::RUNNING;
-    job->accessMutex.unlock();
+// std::shared_ptr<CV::Job> CV::Job::setCallBack(std::shared_ptr<CV::Function> &cb){
+//     auto job = std::make_shared<CV::Job>();
+//     job->accessMutex.lock();
+//     job->cursor = this->cursor;
+//     job->fn = cb;
+//     job->jobType = CV::JobType::CALLBACK;
+//     job->status = CV::JobStatus::RUNNING;
+//     job->accessMutex.unlock();
 
-    this->accessMutex.lock();
-    this->callback = job;
-    this->accessMutex.unlock();
-    return job;
-}
+//     this->accessMutex.lock();
+//     this->callback = job;
+//     this->accessMutex.unlock();
+//     return job;
+// }
 
 CV::ItemContextPair CV::Context::getWithContext(const std::string &name){
     this->accessMutex.lock();
@@ -3094,46 +3109,6 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>( v ));
     });        
 
-
-    registerTrait(CV::ItemTypes::FUNCTION, "async", [](std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
-        if(subject->type == CV::ItemTypes::NIL){
-            return subject;
-        }
-        auto fn = std::static_pointer_cast<CV::Function>(subject);
-        if(fn->async){
-            cursor->setError("FUNCTION|async", "This function already started asynchronously.");            
-            return std::make_shared<Item>();
-        }
-        if(fn->threaded){
-            cursor->setError("FUNCTION|async", "This function already started threaded.");            
-            return std::make_shared<Item>();
-        }        
-        auto copy = std::static_pointer_cast<Function>(fn->copy());
-        copy->async = true;
-        copy->threaded = false;
-        return std::static_pointer_cast<CV::Item>(copy);
-    }); 
-
-
-    registerTrait(CV::ItemTypes::FUNCTION, "untether", [](std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
-        if(subject->type == CV::ItemTypes::NIL){
-            return subject;
-        }
-        auto fn = std::static_pointer_cast<CV::Function>(subject);
-        if(fn->async){
-            cursor->setError("FUNCTION|untether", "This function already started asynchronously.");            
-            return std::make_shared<Item>();
-        }
-        if(fn->threaded){
-            cursor->setError("FUNCTION|untether", "This function already started threaded.");            
-            return std::make_shared<Item>();
-        }         
-        auto copy = std::static_pointer_cast<Function>(fn->copy());
-        copy->async = false;
-        copy->threaded = true;
-        return std::static_pointer_cast<CV::Item>(copy);
-    });         
-
     registerTrait(CV::ItemTypes::FUNCTION, "n-args", [](std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
        if(subject->type == CV::ItemTypes::NIL){
             return subject;
@@ -3191,7 +3166,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         return job->getPayload();
     });   
 
-    registerTrait(CV::ItemTypes::JOB, "kill", [](std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    registerTrait(CV::ItemTypes::JOB, "await", [](std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return subject;
         }
@@ -3359,7 +3334,7 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
 
         auto ins = program->create(CV::ByteCodeType::SET);
         ins->origin = ctx->id;
-        ins->inheritModifiers(token);            
+        ins->inheritModifiers(headMods);           
         
         if(name.modifiers.size() == 0){
             ins->data.push_back(0); // Zero means local Context set
@@ -3377,6 +3352,15 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
         ins->parameter.push_back(v->id); 
         return ins;        
     }else
+    if(imp == "async" || imp == "untether"){
+        auto code = params[0];
+        auto codeToken = ParseInputToByteToken(code, program, ctx, cursor);
+        if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
+        auto ins = program->create(imp == "async" ? CV::ByteCodeType::SUMMON_ASYNC : CV::ByteCodeType::SUMMON_UNTETHER);
+        ins->inheritModifiers(headMods);            
+        ins->parameter.push_back(codeToken->id);
+        return ins;
+    }else
     if(imp == "do"){
         if(params.size() != 2){
             cursor->setError(imp, "Provided ("+std::to_string(params.size())+") argument(s). Expects exactly 2: <[COND]> <[CODE]>.");
@@ -3392,6 +3376,7 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
         if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }                
 
         auto ins = program->create(CV::ByteCodeType::COND_LOOP);
+        ins->inheritModifiers(headMods);            
         ins->origin = ctx->id;
 
         ins->parameter.push_back(condToken->id);
@@ -3405,6 +3390,7 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
             return program->create(CV::ByteCodeType::NOOP);
         }
         auto ins = program->create(CV::ByteCodeType::INTERRUPTOR);
+        ins->inheritModifiers(headMods);                  
         ins->origin = ctx->id;
         // First param is the type
         if(imp == "skip"){
@@ -3446,6 +3432,7 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
         if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }                
 
         auto ins = program->create(CV::ByteCodeType::BINARY_BRANCH_COND);
+        ins->inheritModifiers(headMods);                         
         ins->origin = ctx->id;
         ins->parameter.push_back(condToken->id);
         ins->parameter.push_back(truebToken->id);
@@ -3484,6 +3471,7 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
         auto codeToken = ParseInputToByteToken(code, program, ctx, cursor);
         if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }                
         auto ins = program->create(CV::ByteCodeType::ITERATION_LOOP);
+        ins->inheritModifiers(headMods);                         
         ins->origin = ctx->id;
         ins->parameter.push_back(iterToken->id);
         ins->parameter.push_back(codeToken->id);
@@ -3616,7 +3604,6 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
         ctx->setStaticValue(var);       
         if(var->type == CV::ItemTypes::FUNCTION){
             auto fn = std::static_pointer_cast<CV::Function>(var);
-
             if(!fn->variadic && params.size() != fn->params.size()){
                 cursor->setError(token.literal(), "Provided ("+std::to_string(params.size())+") argument(s). Expected no more than ("+std::to_string(fn->params.size())+") argument(s).");
                 return program->create(CV::ByteCodeType::NOOP);
@@ -3788,6 +3775,7 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
             }else{
                 fn = std::static_pointer_cast<CV::Function>(ctx->getStaticValue(entry->data[0]));
             }
+
             std::vector<std::shared_ptr<CV::Item>> arguments;
             auto tctx = std::make_shared<CV::Context>(ctx);
             // Binary Functions
@@ -3833,7 +3821,24 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
                 if(cursor->error){ return std::make_shared<CV::Item>(); }                
                 return ctx->setStaticValue(unwrapInterrupt(result));
             }
-        };
+        } break;
+        case CV::ByteCodeType::SUMMON_ASYNC:
+        case CV::ByteCodeType::SUMMON_UNTETHER: {
+            auto job = std::make_shared<CV::Job>();
+            auto c = std::make_shared<CV::Cursor>();
+            job->cursor = c;
+            job->set(entry->type == CV::ByteCodeType::SUMMON_ASYNC ? CV::JobType::ASYNC : CV::JobType::THREAD, program->instructions[entry->parameter[0]], program);
+            ctx->addJob(job);        
+            ctx->setStaticValue(job);
+            auto item = std::static_pointer_cast<CV::Item>(job);
+            CV::ModifierEffect effects;
+            auto solved = processPreInterpretConversionModifiers(item, entry->modifiers, cursor, ctx, effects);
+            if(cursor->error){ return std::make_shared<CV::Item>(); }                
+            if(solved->id != item->id){
+                ctx->setStaticValue(solved);
+            }
+            return solved;
+        } break;
         case CV::ByteCodeType::PROXIED_FN_SUMMON: {
             auto fn = program->instructions[entry->parameter[0]];
             auto v = RunInstruction(fn, program, ctx, cursor);
@@ -4123,6 +4128,8 @@ std::shared_ptr<CV::Item> CV::interpret(const std::string &input, std::shared_pt
     if(cursor->error){
         return std::make_shared<CV::Item>();
     }
+
+    while(ctx->getJobNumber() > 0) CV:: Tools::sleep(20);
 
     if(flushTemps){
         flushContextTemps(ctx);    
