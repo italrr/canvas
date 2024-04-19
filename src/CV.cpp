@@ -1776,7 +1776,7 @@ static std::shared_ptr<CV::Item> processPreInterpretSituationalModifiers(std::sh
                     cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::NAMER), "Namer modifier can only be used at the end of a modifier chain.");
                     return item;
                 }
-                if(effects.named.size() == 0){
+                if(mod->subject.size() == 0){
                     cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::NAMER), "Namer expects a name for the item.");
                     return std::make_shared<CV::Item>();
                 }
@@ -1794,7 +1794,7 @@ static std::shared_ptr<CV::Item> processPreInterpretSituationalModifiers(std::sh
                 if(i == modifiers.size()-1){
                     mod->used = false; 
                 }else{
-                    cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::EXPAND), "Expand modifier can only be used at the end of a modifier chain.");
+                    cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::NAMER), "Expand modifier can only be used at the end of a modifier chain.");
                     return item;
                 }
             } break;        
@@ -3463,7 +3463,10 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
             namerId = iterName->id;
         }
         // Compile iterator
+        iter.modifiers.clear();
         auto iterToken = ParseInputToByteToken(iter, program, ctx, cursor);
+
+        
         if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
 
         // Compile code        
@@ -3896,7 +3899,6 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
                 auto v = RunInstruction(ins, program, ctx, cursor);
                 if(cursor->error){ return std::make_shared<CV::Item>(); }   
                 CV::ModifierEffect effects;
-
                 auto solved = processPreInterpretConversionModifiers(v, ins->modifiers, cursor, ctx, effects);
                 if(cursor->error){ return std::make_shared<CV::Item>(); }                
                 solved = processPreInterpretSituationalModifiers(v, ins->modifiers, cursor, ctx, effects);
@@ -4006,6 +4008,7 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
             // Iterator
             auto iterToken = program->instructions[entry->parameter[0]];
             auto iteration = RunInstruction(iterToken, program, tctx, cursor);
+
             // Name
             auto updNamer = [&](std::shared_ptr<CV::Item> &item){
                 if(entry->parameter[2] == 0) return;
@@ -4025,7 +4028,9 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
             updNamer(nextItem);
 
             while(true){
+                std::cout << "S " << program->instructions[entry->parameter[1]]->literal() << std::endl;
                 last = Execute(program->instructions[entry->parameter[1]], program, tctx, cursor);
+                std::cout << "E" << std::endl;
                 if(cursor->error){ return std::make_shared<CV::Item>(); } 
                 if(last->type == CV::ItemTypes::INTERRUPT && std::static_pointer_cast<CV::Interrupt>(last)->intType == CV::InterruptTypes::STOP){
                     break;
@@ -4128,9 +4133,8 @@ std::shared_ptr<CV::Item> CV::interpret(const std::string &input, std::shared_pt
         return std::make_shared<CV::Item>();
     }
 
-    while(ctx->getJobNumber() > 0) CV:: Tools::sleep(20);
-
     if(flushTemps){
+        while(ctx->getJobNumber() > 0) CV:: Tools::sleep(20);
         flushContextTemps(ctx);    
     }
 
