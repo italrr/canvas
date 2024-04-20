@@ -69,6 +69,7 @@ static void readAndExecuteFile(const std::string &input, bool relaxed){
 			buffer += line;
 			if(CV::Tools::isLineComplete(buffer)){
 				CV::interpret(buffer, ctx, cursor, false);
+				ctx->flushDisplayItems(); // After every interpret previously "presented" values should be compiled and properly stored by next line of the file
 				// std::cout << buffer << std::endl;
 				if(cursor->error){
 					std::cout << "Line #" << cursor->line << ": " << cursor->message << std::endl;
@@ -155,9 +156,10 @@ int main(int argc, char* argv[]){
 		img::registerLibrary(ctx);	
 
 		ctx->solidify(true);
+
 		std::thread loop(&RunContextIsDone);
 		auto lastMod = getFileLastMod(dashFile->val);
-		bool reexecute = true;		
+		bool reexecute = true;	
 		if(dynamic){
 			printCVEntry(false, relaxed ? "DYNAMIC & RELAXED MODE" : "DYNAMIC MODE");
 		}

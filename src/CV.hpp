@@ -669,7 +669,8 @@
             
 
             std::unordered_map<std::string, std::shared_ptr<CV::Item>> vars;
-            std::shared_ptr<Context> head;
+            std::shared_ptr<Context> upper;
+            std::shared_ptr<Context> top;
             bool readOnly;
             uint64_t createdAt;
 
