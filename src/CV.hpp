@@ -220,16 +220,17 @@
                 JMP_FUNCTION = 91,          // Refers to CV Function (Can be another CompiledToken or a binary defined function)
                 FORWARD_INS,                
                 PROXY,                      // Links to an already existing item
+                CONSTRUCT_PROXY,
                 CONSTRUCT_LIST,             // Used to build lists
                 CONSTRUCT_CTX,              // Used to build contexts
                 CONSTRUCT_FN,               // Used to build functions
+                CONSTRUCT_CALLBACK,
                 LITERAL,                    // Normally instructions in text that couldn't be compiled into a real BC token
                 SET,                        // 1) Can define a variable within a Context 2) Can replace an existing variable with a new one using the same name
                 MUT,                        // Can modify primitive types (Numbers and Strings)
                 NOOP,
                 REFERRED_PROXY,             // It's a proxy for a data type doesn't exist when compiling. It only points to the constructor
                 REFERRED_FN,
-                PROXIED_FN_SUMMON,
                 SUMMON_ASYNC,
                 SUMMON_UNTETHER,
                 BINARY_BRANCH_COND,
@@ -244,18 +245,25 @@
                     case SUMMON_ASYNC: {
                         return "SUMMON_ASYNC";
                     } break;
+                    
                     case SUMMON_UNTETHER: {
                         return "SUMMON_UNTETHER";
-                    } break;                                        
+                    } break;
+
                     case JMP_FUNCTION: {
                         return "JMP_FUNCTION";
                     } break;
+
                     case FORWARD_INS: {
                         return "FORWARD_INS";
                     } break;    
 
-                    case PROXIED_FN_SUMMON: {
-                        return "PROXIED_FN_SUMMON";
+                    case CONSTRUCT_PROXY: {
+                        return "CONSTRUCT_PROXY";
+                    } break;
+                    
+                    case CONSTRUCT_CALLBACK: {
+                        return "CONSTRUCT_CALLBACK";
                     } break;
 
                     case CONSTRUCT_CTX: {
@@ -308,10 +316,12 @@
 
                     case MUT: {
                         return "MUT";
-                    } break;        
+                    } break;    
+
                     case NOOP: {
                         return "NOOP";
-                    } break;                        
+                    } break;     
+
                     case UNDEFINED:
                     default: {
                         return "UNDEFINED";
@@ -344,8 +354,7 @@
         namespace JobType {
             enum JobType : int {
                 ASYNC,
-                THREAD,
-                CALLBACK
+                THREAD
             };
             static std::string str(int t){
                 switch(t){
@@ -354,10 +363,7 @@
                     };
                     case JobType::THREAD: {
                         return "THREAD";
-                    };
-                    case JobType::CALLBACK: {
-                        return "CALLBACK";
-                    };                    
+                    };                  
                     default: {
                         return "UNDEFINED";
                     }
@@ -583,9 +589,13 @@
             __CV_NUMBER_NATIVE_TYPE id;
             std::shared_ptr<CV::Item> payload;
             std::shared_ptr<CV::TokenByteCode> entry;
+            std::shared_ptr<CV::Job> callback;
             std::shared_ptr<Cursor> cursor;
             std::shared_ptr<CV::Stack> program;
-            
+
+            unsigned inherited;
+            bool isCallback;
+            bool ready;
             int jobType;
             int status;
             std::thread thread;
@@ -594,6 +604,7 @@
             void setStatus(int nstatus);
             int getStatus();
 
+            void setCallback(std::shared_ptr<CV::Job> &cb);
             std::shared_ptr<CV::Item> getPayload();
             void setPayload(std::shared_ptr<CV::Item> &item);
             bool hasPayload();
@@ -671,6 +682,7 @@
             std::unordered_map<std::string, std::shared_ptr<CV::Item>> vars;
             std::shared_ptr<Context> upper;
             std::shared_ptr<Context> top;
+            bool temporary;
             bool readOnly;
             uint64_t createdAt;
 

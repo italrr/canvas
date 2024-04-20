@@ -19,10 +19,10 @@ def run_test(test):
 
 cases = [
     # Test function definition
-    TestCase("fn [a b c][+ a b c]", "[fn [a b c] [[+ a b c]]]", True),
+    TestCase("fn [a b c][+ a b c]", "[fn [a b c] [BYTECODE]]", True),
     
     # Test Context definion and access
-    TestCase("[set a [fn [a b c][+ a b c]]][a 1 2 3]", "[[fn [a b c] [[+ a b c]]] 6]", True),
+    TestCase("[set a [fn [a b c][+ a b c]]][a 1 2 3]", "6", True),
     
     # Test `type` trait
     TestCase("5|type", "'NUMBER'", True),
@@ -74,10 +74,13 @@ cases = [
     TestCase("eq 5.2 1.2", "0", True),
 
     # Copy trait
-    TestCase("l-sort|copy", "[fn [c l] [BINARY]]", True),
+    TestCase("proxy l-sort", "[fn [c l] [BINARY]]", True),
 
-    # on / untether
-    TestCase("on [+|untether [l-gen 1 1000]^] [fn [v][io:out v]]", "[JOB 0 'CALLBACK' 'RUNNING']500500", True)    
+    # with / untether
+    TestCase("[with [untether [+ [l-gen 1 1000]^]] [+ 1 inherited]]|await", "500501", True), 
+    
+    # with / async
+    TestCase("[with [with [async [+ 0 1]] [+ inherited 1]] [+ inherited 1]]|await", "3", True)    
 ]
 
 print("ABOUT TO START TEST CASES FOR CANVAS")
