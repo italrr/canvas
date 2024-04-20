@@ -218,7 +218,7 @@
         namespace ByteCodeType {
             enum ByteCodeType : unsigned {
                 JMP_FUNCTION = 91,          // Refers to CV Function (Can be another CompiledToken or a binary defined function)
-                JMP_INSTRUCTION,            // Allows jumping to a specific instruction
+                FORWARD_INS,                
                 PROXY,                      // Links to an already existing item
                 CONSTRUCT_LIST,             // Used to build lists
                 CONSTRUCT_CTX,              // Used to build contexts
@@ -250,8 +250,8 @@
                     case JMP_FUNCTION: {
                         return "JMP_FUNCTION";
                     } break;
-                    case JMP_INSTRUCTION: {
-                        return "JMP_INSTRUCTION";
+                    case FORWARD_INS: {
+                        return "FORWARD_INS";
                     } break;    
 
                     case PROXIED_FN_SUMMON: {
@@ -711,22 +711,68 @@
         };        
 
         struct TokenBase {
+            mutable std::mutex modMutex;
             std::vector<std::shared_ptr<CV::ModifierPair>> modifiers;
-            void resetModifiers();
+            void resetModifiers(){
+                modMutex.lock();
+                for(int i = 0; i < this->modifiers.size(); ++i){
+                    this->modifiers[i]->used = false;
+                }
+                modMutex.unlock();
+            }
+
+            TokenBase(TokenBase &other){
+                this->modifiers = other.modifiers;
+            }
+
+            TokenBase(const TokenBase &other){
+                this->modifiers = other.modifiers;
+            }
+
+            TokenBase(){
+            }            
+            
+            TokenBase& operator=(TokenBase& other){
+                return *this;
+            }      
+
+            TokenBase& operator=(const TokenBase& other){
+                return *this;
+            }                   
+
             std::shared_ptr<CV::ModifierPair> getModifier(uint8_t type) const {
+                modMutex.lock();
                 for(int i = 0; i < modifiers.size(); ++i){
                     if(modifiers[i]->type == type){
-                        return modifiers[i];
+                        auto v = modifiers[i]; 
+                        modMutex.unlock();
+                        return v;
                     }
                 }
+                modMutex.unlock();
                 return std::shared_ptr<CV::ModifierPair>(NULL);
             }
+            unsigned getModifierNumber(){
+                modMutex.lock();
+                auto n = modifiers.size();
+                modMutex.unlock();
+                return n;
+            }
+            
+            void clearModifiers(){
+                modMutex.lock();
+                modifiers.clear();
+                modMutex.unlock();
+            }
             bool hasModifier(uint8_t type){
+                modMutex.lock();
                 for(int i = 0; i < modifiers.size(); ++i){
                     if(modifiers[i]->type == type){
+                        modMutex.unlock();
                         return true;
                     }
                 }
+                modMutex.unlock();
                 return false;
             }
         }; 
@@ -753,6 +799,7 @@
             unsigned id;
             unsigned type;
             unsigned origin;
+            bool expirable;
             std::string str;
             std::vector<unsigned> data;         // For Items
             std::vector<unsigned> parameter;    // For instructions only
