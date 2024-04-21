@@ -144,6 +144,7 @@ int main(int argc, char* argv[]){
 	}
 	CV::setUseColor(dashC->valid);	
 	ctx->copyable = false;
+	ctx->setTop(ctx);
 
 	if(dashFile.get() && dashFile->valid){
 		if(dashRepl.get() && dashRepl->valid){

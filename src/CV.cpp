@@ -760,6 +760,21 @@ std::string CV::Context::getNameById(unsigned id){
     return "";
 }
 
+
+
+std::shared_ptr<CV::Item> CV::Context::getLocal(const std::string &name){
+    this->accessMutex.lock();
+    auto it = vars.find(name);
+    if(it == vars.end()){
+        this->accessMutex.unlock();
+        return std::shared_ptr<CV::Item>(NULL);
+    }
+    auto v = it->second;
+    this->accessMutex.unlock();
+    return v;
+}
+
+
 std::shared_ptr<CV::Item> CV::Context::get(const std::string &name){
     this->accessMutex.lock();
     auto it = vars.find(name);
@@ -785,14 +800,6 @@ std::shared_ptr<CV::Item> CV::Context::copy(bool deep){
 }
 
 void CV::Context::setTop(std::shared_ptr<CV::Context> &nctx){
-    auto ctop = this->get("top");
-    if(ctop.get()){
-        return;
-    }
-    if(ctop.get() == this){
-        // Avoid redundancy
-        return;
-    }
     this->top = nctx;
     this->set("top", nctx);
 }
@@ -894,6 +901,12 @@ bool CV::Context::removeDisplayItem(unsigned id){
 
 void CV::Context::flushDisplayItems(){
     this->accessMutex.lock();
+    // downstream
+    for(auto &it : this->staticValues){
+        if(it.second->type == CV::ItemTypes::CONTEXT){
+            std::static_pointer_cast<CV::Context>(it.second)->flushDisplayItems();
+        }
+    }
     this->displayItems.clear();
     this->accessMutex.unlock();
 }
@@ -916,11 +929,22 @@ std::shared_ptr<CV::DisplayItem> CV::Context::findDisplayItem(const std::string 
 
 void CV::Context::flushStaticValue(){
     this->accessMutex.lock();
+    for(auto &it : this->staticValues){
+        if(it.second->type == CV::ItemTypes::CONTEXT){
+            std::static_pointer_cast<CV::Context>(it.second)->flushStaticValue();
+        }
+    }
     this->staticValues.clear();
     this->accessMutex.unlock();
 }
 
 std::shared_ptr<CV::Item> CV::Context::setStaticValue(const std::shared_ptr<CV::Item> &item){
+    // If the item is a context and it has no top, then it must be top itself. 
+    // When creating a context always pass the head context to the constructor
+    // this is because this is the main way to distinguish between the top and every other 
+    if(item->type == CV::ItemTypes::CONTEXT && !std::static_pointer_cast<CV::Context>(item)->top.get()){
+        return item;
+    }
     if(this->temporary && this->upper.get()){
         return this->upper->setStaticValue(item);
     }
@@ -956,6 +980,37 @@ void CV::Context::addJob(std::shared_ptr<Job> &job){
     job->id = genId();
     gAddJob(job->id, job);
     this->jobs.push_back(job);
+
+
+
+
+    this->accessMutex.unlock();
+}
+
+void CV::Context::startJobs(){
+    this->accessMutex.lock();
+
+            std::cout << "lol" << std::endl;
+
+    for(int i = 0; i < this->jobs.size(); ++i){
+        auto &j = this->jobs[i];
+        if(j->getStatus() == CV::JobStatus::CREATED){
+            j->setStatus(CV::JobStatus::IDLE);
+        }
+    }
+    // downstream
+    for(auto &it : this->vars){
+        if(it.second.get() == this) continue;
+        if(it.second->type == CV::ItemTypes::CONTEXT && it.first != "top"){
+            std::static_pointer_cast<CV::Context>(it.second)->startJobs();
+        }
+    }
+    for(auto &it : this->staticValues){
+        if(it.second->type == CV::ItemTypes::CONTEXT){
+            std::static_pointer_cast<CV::Context>(it.second)->startJobs();
+        }
+    }
+    
     this->accessMutex.unlock();
 }
 
@@ -963,6 +1018,8 @@ std::shared_ptr<CV::Item> CV::Job::copy(bool deep){
     // Job cannot be copied
     return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Job>());
 }
+
+static int count = 0;
 bool CV::ContextStep(std::shared_ptr<CV::Context> &ctx){
     
     bool busy = false;
@@ -972,13 +1029,23 @@ bool CV::ContextStep(std::shared_ptr<CV::Context> &ctx){
     std::vector<std::shared_ptr<CV::Job>> _jobs;
     for(int i = 0; i < ctx->jobs.size(); ++i){
         _jobs.push_back(ctx->jobs[i]);
-    }
+    }   
+
+    // for(int i = 0; i < ctx->jobs.size(); ++i){
+
+    //     std::cout << ctx->id << " " << CV::ItemToText(ctx->jobs[i].get()) << std::endl;
+    // }
+
     ctx->accessMutex.unlock();
 
     // Run jobs
     std::vector<__CV_NUMBER_NATIVE_TYPE> done;
     for(int i = 0; i < _jobs.size(); ++i){
         auto &job = _jobs[i];
+        if(job->getStatus() == CV::JobStatus::CREATED){
+            job->setStatus(CV::JobStatus::IDLE);                    
+            continue;
+        }
         if(job->getStatus() != CV::JobStatus::DONE && job->ready){
             if(job->getStatus() == JobStatus::IDLE){
                 if(job->jobType == CV::JobType::THREAD){
@@ -1044,13 +1111,24 @@ bool CV::ContextStep(std::shared_ptr<CV::Context> &ctx){
     ctx->accessMutex.lock();
     for(auto &it : ctx->vars){
         auto &var = it.second;
-        if(var->type == CV::ItemTypes::CONTEXT){
-            auto ctx = std::static_pointer_cast<Context>(var);
-            if(ctx->copyable){ // the copyable check is to avoid a circle referencing with "top". gonna have  to find a better way to do this
-                busy = busy || CV::ContextStep(ctx);
-            }
+        if(var->type == CV::ItemTypes::CONTEXT && it.first != "top"){
+            auto cctx = std::static_pointer_cast<Context>(var);
+            ctx->accessMutex.unlock();
+            busy = CV::ContextStep(cctx) || busy;
+            ctx->accessMutex.lock();
+
         }
-    }
+    }  
+    for(auto &it : ctx->staticValues){
+        auto &var = it.second;
+        if(var->type == CV::ItemTypes::CONTEXT){
+            auto cctx = std::static_pointer_cast<Context>(var);
+            ctx->accessMutex.unlock();
+            busy = CV::ContextStep(cctx) || busy;
+            ctx->accessMutex.lock();
+
+        }
+    }    
     ctx->accessMutex.unlock();
 
     return busy;
@@ -1101,13 +1179,13 @@ CV::Job::Job(){
     this->id = 0;
     this->type = ItemTypes::JOB;
     this->copyable = false;
-    this->status = CV::JobStatus::IDLE;
+    this->status = CV::JobStatus::CREATED;
     this->inherited = 0;
 }
 
 void CV::Job::set(int type, std::shared_ptr<CV::TokenByteCode> &entry, std::shared_ptr<CV::Stack> &program){
     this->accessMutex.lock();
-    this->status = CV::JobStatus::IDLE;
+    this->status = CV::JobStatus::CREATED;
     this->entry = entry;
     this->program = program;
     this->jobType = type;
@@ -1157,7 +1235,6 @@ CV::ItemContextPair CV::Context::getWithContext(std::shared_ptr<CV::Item> &item)
 }        
 
 std::shared_ptr<CV::Item> CV::Context::set(const std::string &name, const std::shared_ptr<CV::Item> &item){
-    auto v = get(name);
     this->accessMutex.lock();
     this->vars[name] = item;
     this->accessMutex.unlock();    
@@ -1175,8 +1252,11 @@ CV::Context::Context(std::shared_ptr<CV::Context> &ctx){
     this->readOnly = false;    
     this->type = CV::ItemTypes::CONTEXT;        
     this->upper = ctx;
-    this->setTop(ctx);
     this->temporary = false;
+    auto ftop = this->get("top");
+    if(ftop.get()){
+        this->top = std::static_pointer_cast<CV::Context>(ftop);
+    }
 }    
 
 void CV::Context::solidify(bool downstream){
@@ -1273,7 +1353,7 @@ std::string CV::ItemToText(CV::Item *item){
         };
         case CV::ItemTypes::JOB: {
             auto job = static_cast<CV::Job*>(item);
-            return Tools::setTextColor(Tools::Color::GREEN)+"[JOB "+Tools::removeTrailingZeros(job->id)+" '"+JobType::str(job->jobType)+"' '"+JobStatus::str(job->status)+"']"+Tools::setTextColor(Tools::Color::RESET);
+            return Tools::setTextColor(Tools::Color::GREEN)+"[JOB ("+(job->ready ? "R" : " " )+") "+(job->isCallback ? "CALLBACK " : "")+Tools::removeTrailingZeros(job->id)+" '"+JobType::str(job->jobType)+"' '"+JobStatus::str(job->status)+"']"+Tools::setTextColor(Tools::Color::RESET);
         };  
 
         case CV::ItemTypes::INTERRUPT: {
@@ -1777,6 +1857,11 @@ static std::shared_ptr<CV::Item> processPreInterpretConversionModifiers(std::sha
                     cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::SCOPE), "Scope modifier can only be used on contexts.");
                     return item;
                 }
+                // Context switching token
+                if(mod->subject.size() == 0 && i == modifiers.size()-1){
+                    return item;
+                }else
+                // Everything else
                 if(mod->subject.size() > 0){        
                     auto subsequent = std::static_pointer_cast<CV::Context>(item)->get(mod->subject);
                     if(!subsequent){
@@ -1798,6 +1883,38 @@ static std::shared_ptr<CV::Item> processPreInterpretConversionModifiers(std::sha
 }
 
 
+static void validateNamerMod(std::vector<std::shared_ptr<CV::ModifierPair>> &modifiers, std::shared_ptr<CV::Cursor> &cursor){
+    for(int i = 0; i < modifiers.size(); ++i){
+        auto &mod = modifiers[i];
+        if(mod->used){
+            continue;
+        }
+        switch(mod->type){
+            case CV::ModifierTypes::NAMER: {
+                if(i < modifiers.size()-1){
+                    cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::NAMER), "Namer modifier can only be used at the end of a modifier chain.");
+                    return;
+                }
+                if(mod->subject.size() == 0){
+                    cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::NAMER), "Namer expects a name for the item.");
+                    return;
+                }
+
+                if(!CV::Tools::isValidVarName(mod->subject)){
+                    cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::NAMER), "Invalid name '"+mod->subject+"'. The name cannot be a reserved word and/or contain prohibited symbols (Modifiers, numbers, brackets, etc).");
+                    return;  
+                }       
+
+                if(i == modifiers.size()-1){
+                    return;
+                }else{
+                    cursor->setError(CV::ModifierTypes::str(CV::ModifierTypes::NAMER), "Namer modifier can only be used at the end of a modifier chain.");
+                    return;
+                }
+            }
+        }
+    }
+}
 
 static std::shared_ptr<CV::Item> processPreInterpretSituationalModifiers(std::shared_ptr<CV::Item> &item, std::vector<std::shared_ptr<CV::ModifierPair>> &modifiers, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
     effects.reset();
@@ -3208,6 +3325,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         }
         auto job = std::static_pointer_cast<CV::Job>(subject);
         while(job->getStatus() != CV::JobStatus::DONE){
+            // std::cout << CV::ItemToText(job.get()) << std::endl;
             CV::Tools::sleep(20);
         }
         return job->getPayload();
@@ -3375,14 +3493,39 @@ static bool constructModCheck(CV::Token &token, std::shared_ptr<CV::Cursor> &cur
     return false;
 }
 
-static std::shared_ptr<CV::TokenByteCode> solveForwardIns(std::shared_ptr<CV::Stack> &program, std::shared_ptr<CV::TokenByteCode> &ins, std::vector<std::shared_ptr<CV::ModifierPair>> &headMods){
+static std::shared_ptr<CV::TokenByteCode> postTokenCreationFinalization(std::shared_ptr<CV::Stack> &program, std::shared_ptr<CV::TokenByteCode> &ins, std::vector<std::shared_ptr<CV::ModifierPair>> &headMods, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
+    
+    auto r = ins;
+
     if(headMods.size() > 0){
         auto fins = program->create(CV::ByteCodeType::FORWARD_INS);
         fins->parameter.push_back(ins->id);
         fins->inheritModifiers(headMods);
-        return fins;
+        r = fins;
     }
-    return ins;
+
+    if(r->hasModifier(CV::ModifierTypes::NAMER)){
+        validateNamerMod(ins->modifiers, cursor);
+        if(cursor->error){
+            return ins;
+        }
+        auto namer = r->getModifier(CV::ModifierTypes::NAMER);
+        ctx->addDisplayItem(namer->subject, r->id, ctx->id);
+    }
+
+    return r;
+}
+
+static std::shared_ptr<CV::Context> solveLocalCtx(std::shared_ptr<CV::TokenByteCode> &ins, std::shared_ptr<CV::Context> &ctx){
+    if(ins->id == ctx->id){
+        return ctx;
+    }
+    for(auto &it : ctx->staticValues){
+        if(it.second->id == ins->origin){
+            return std::static_pointer_cast<CV::Context>(it.second);
+        }
+    }
+    return ctx;
 }
 
 static std::shared_ptr<CV::TokenByteCode> ProcessToken(
@@ -3405,7 +3548,9 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
         auto targetToken = ParseInputToByteToken(target, program, ctx, cursor, true); // Tells it to not execute any functions
         if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
 
-        return solveForwardIns(program, targetToken, headMods);        
+        auto fins = postTokenCreationFinalization(program, targetToken, headMods, ctx, cursor);        
+        if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
+        return fins;      
     }else
     if(imp == "with"){
         if(constructModCheck(token, cursor, false)){
@@ -3445,7 +3590,9 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
         ins->parameter.push_back(codeToken->id);
         ins->parameter.push_back(inherited->id);
 
-        return solveForwardIns(program, ins, headMods);        
+        auto fins = postTokenCreationFinalization(program, ins, headMods, nctx, cursor);        
+        if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
+        return fins;
     }else
     if(imp == "mut"){
         if(constructModCheck(token, cursor, false)){
@@ -3473,7 +3620,9 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
         ins->parameter.push_back(tokenTarget->id);
         ins->parameter.push_back(tokenValue->id);
 
-        return solveForwardIns(program, ins, headMods);
+        auto fins = postTokenCreationFinalization(program, ins, headMods, ctx, cursor);        
+        if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
+        return fins;        
     }else
     if(imp == "set"){
         if(constructModCheck(token, cursor, false)){
@@ -3486,6 +3635,7 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
         auto param1 = params[1];
         auto name = params[0];
 
+
         auto v = ParseInputToByteToken(param1, program, ctx, cursor, false); // future tells it to not summon function calls basically
         if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
         v->inheritModifiers(param1);
@@ -3495,6 +3645,7 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
         ins->inheritModifiers(token);           
         
         if(name.getModifierNumber() == 0){
+
             ins->data.push_back(0); // Zero means local Context set
             ins->str = params[0].first;        
             ctx->addDisplayItem(params[0].first, v->id);
@@ -3508,7 +3659,10 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
         }
 
         ins->parameter.push_back(v->id); 
-        return solveForwardIns(program, ins, headMods);
+
+        auto fins = postTokenCreationFinalization(program, ins, headMods, ctx, cursor);        
+        if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
+        return fins; 
     }else
     if(imp == "async" || imp == "untether"){
         if(constructModCheck(token, cursor, false)){
@@ -3522,7 +3676,9 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
         ins->origin = ctx->id;
         ins->inheritModifiers(token);            
         ins->parameter.push_back(codeToken->id);
-        return solveForwardIns(program, ins, headMods);
+        auto fins = postTokenCreationFinalization(program, ins, headMods, ctx, cursor);        
+        if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
+        return fins; 
     }else
     if(imp == "do"){
         if(constructModCheck(token, cursor, false)){
@@ -3551,7 +3707,9 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
         ins->parameter.push_back(condToken->id);
         ins->parameter.push_back(codeToken->id);
 
-        return solveForwardIns(program, ins, headMods);
+        auto fins = postTokenCreationFinalization(program, ins, headMods, ctx, cursor);        
+        if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
+        return fins; 
     }else       
     if(imp == "skip" || imp == "stop" || imp == "continue"){
         if(constructModCheck(token, cursor, false)){
@@ -3580,7 +3738,9 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
         }else{
             ins->parameter.push_back(0);
         }
-        return solveForwardIns(program, ins, headMods);
+        auto fins = postTokenCreationFinalization(program, ins, headMods, ctx, cursor);        
+        if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
+        return fins; 
     }else
     if(imp == "if"){
         if(constructModCheck(token, cursor, false)){
@@ -3619,7 +3779,9 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
             ins->parameter.push_back(falsebToken->id);
         }
 
-        return solveForwardIns(program, ins, headMods);
+        auto fins = postTokenCreationFinalization(program, ins, headMods, ctx, cursor);        
+        if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
+        return fins; 
     }else
     if(imp == "iter"){
         if(constructModCheck(token, cursor, true)){
@@ -3659,7 +3821,10 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
         ins->parameter.push_back(iterToken->id);
         ins->parameter.push_back(codeToken->id);
         ins->parameter.push_back(namerId);
-        return solveForwardIns(program, ins, headMods);
+
+        auto fins = postTokenCreationFinalization(program, ins, headMods, ctx, cursor);        
+        if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
+        return fins; 
     }else
     if(imp == "fn"){
         if(constructModCheck(token, cursor, false)){
@@ -3714,7 +3879,10 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
         for(int i = 0; i < clearTemps.size(); ++i){
             ctx->removeDisplayItem(clearTemps[i]);
         }
-        return solveForwardIns(program, ins, headMods);
+
+        auto fins = postTokenCreationFinalization(program, ins, headMods, ctx, cursor);        
+        if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
+        return fins; 
     }else
     if(imp == "ct"){
         if(constructModCheck(token, cursor, false)){
@@ -3723,28 +3891,77 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
         auto ins = program->create(CV::ByteCodeType::CONSTRUCT_CTX);
         ins->origin = ctx->id;
         ins->inheritModifiers(token);
+
         for(int i = 0; i < params.size(); ++i){
             auto param = params[i];
             auto v = ParseInputToByteToken(param, program, ctx, cursor);
             if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
             ins->parameter.push_back(v->id);
         }        
-        return solveForwardIns(program, ins, headMods);     
+        
+        auto fins = postTokenCreationFinalization(program, ins, headMods, ctx, cursor);        
+        if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
+        return fins;   
     }else{
         unsigned origin = ctx->id;
 
         auto var = solveItem(token, origin, ctx, cursor);       
         if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); } 
 
-        // Solve display Items (they don't exist yet)
         auto tproxy = ctx->findDisplayItem(imp);
+
+        // Inline context switching
+        if(token.getModifierNumber() > 0 && token.getLastModifier()->type == CV::ModifierTypes::SCOPE && token.getLastModifier()->subject == ""){
+
+            if(!var.get()){
+                cursor->setError(imp, GENERIC_UNDEFINED_SYMBOL_ERROR);
+                return program->create(CV::ByteCodeType::NOOP);                    
+            }
+            
+            if(params.size() == 0){
+                cursor->setError(imp, "Inline context switching expects at least one imperative block.");
+                return program->create(CV::ByteCodeType::NOOP);                
+            }
+
+            token.removeLastModifier(); //removes dangling scope modifier
+            // Because this is supposed to be an already existing context, we should try solving it now
+            CV::ModifierEffect effects;
+            auto solved = processPreInterpretConversionModifiers(var, token.modifiers, cursor, ctx, effects);
+            if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }        
+
+            if(var->type != CV::ItemTypes::CONTEXT){
+                cursor->setError(imp, "Context Switching: This refers a non-context object.");
+                return program->create(CV::ByteCodeType::NOOP);                     
+            }
+            
+            auto nctx = std::static_pointer_cast<CV::Context>(solved);
+            ctx->setStaticValue(nctx);
+
+            for(int i = 0; i < params.size(); ++i){
+                auto code = params[i];
+                auto codeToken = ParseInputToByteToken(code, program, nctx, cursor);
+                if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); } 
+                if(i == params.size()-1){
+                    return codeToken;
+                }
+            }
+        }
+        // If it's not a variable nor a displayValue then it's undefined
+        if(!var.get() && !tproxy.get()){
+            cursor->setError(imp, GENERIC_UNDEFINED_SYMBOL_ERROR);
+            return program->create(CV::ByteCodeType::NOOP);   
+        }        
+
+        // Solve display Items (they don't exist yet)
         if(tproxy.get() && !CV::Tools::isNumber(imp) && !CV::Tools::isString(imp)){
             auto ins = program->instructions[tproxy->insId];
             // If it's a proxy we send it its way
-            if(ins->type == CV::ByteCodeType::PROXY){
+            if(ins->type == CV::ByteCodeType::PROXY && params.size() == 0){
                 ins->inheritModifiers(token);   
-                return solveForwardIns(program, ins, headMods);
-            }
+                auto fins = postTokenCreationFinalization(program, ins, headMods, ctx, cursor);        
+                if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
+                return fins; 
+            }else
             // Does it refer to a function?
             if(ins->type == CV::ByteCodeType::CONSTRUCT_FN){
                 auto fn = program->create(CV::ByteCodeType::REFERRED_FN);
@@ -3766,23 +3983,26 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
                 }
 
 
-                return solveForwardIns(program, fn, headMods);
+                auto fins = postTokenCreationFinalization(program, fn, headMods, ctx, cursor);        
+                if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
+                return fins; 
+            }else
+            if(params.size() == 0){
+                // Othwerwise, we create a referred proxy
+                auto ref = program->create(CV::ByteCodeType::REFERRED_PROXY);
+                ref->origin = origin;
+                ref->inheritModifiers(token);   
+                ref->parameter.push_back(ins->id);
+                auto fins = postTokenCreationFinalization(program, ref, headMods, ctx, cursor);        
+                if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
+                return fins; 
             }
-            // Othwerwise, we create a referred proxy
-            auto ref = program->create(CV::ByteCodeType::REFERRED_PROXY);
-            ref->origin = origin;
-            ref->inheritModifiers(token);   
-            ref->parameter.push_back(ins->id);
-            return solveForwardIns(program, ref, headMods);
         }
 
-        if(!var.get()){
-            cursor->setError(imp, GENERIC_UNDEFINED_SYMBOL_ERROR);
-            return program->create(CV::ByteCodeType::NOOP);   
+        if(var.get()){
+            ctx->setStaticValue(var);       
         }
-
-        ctx->setStaticValue(var);       
-        if(var->type == CV::ItemTypes::FUNCTION && !future){
+        if(var.get() && var->type == CV::ItemTypes::FUNCTION && !future){
             auto fn = std::static_pointer_cast<CV::Function>(var);
             
 
@@ -3803,9 +4023,11 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
                 ins->parameter.push_back(v->id);
             }
 
-            return solveForwardIns(program, ins, headMods);
+            auto fins = postTokenCreationFinalization(program, ins, headMods, ctx, cursor);        
+            if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
+            return fins; 
         }else{
-            if(params.size() == 0){
+            if(params.size() == 0 && var.get()){
                 auto ins = program->create(CV::ByteCodeType::PROXY);                
                 ins->origin = origin;
                 ins->inheritModifiers(token);      
@@ -3813,7 +4035,9 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
 
                 ctx->addDisplayItem(imp, ins->id);
 
-                return solveForwardIns(program, ins, headMods);
+                auto fins = postTokenCreationFinalization(program, ins, headMods, ctx, cursor);        
+                if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
+                return fins; 
             }else{
                 // Compile first param
                 auto firstItem = ParseInputToByteToken(token, program, ctx, cursor);
@@ -3832,7 +4056,9 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
                     ins->parameter.push_back(compiled->id);
                 }
                 ctx->addDisplayItem(imp, ins->id);
-                return solveForwardIns(program, ins, headMods);
+                auto fins = postTokenCreationFinalization(program, ins, headMods, ctx, cursor);        
+                if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
+                return fins; 
             }
         }
     }
@@ -3866,8 +4092,25 @@ static std::shared_ptr<CV::TokenByteCode> ParseInputToByteToken(CV::Token &input
             auto &token = tokens[i];
             auto ins = ParseInputToByteToken(token, program, ctx, cursor, future);
             if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
+            // Contexts are executed right away and the instruction discarded
+            // (dirty hack) This is a fix to context switching when the context is defined inline ( [set c [ct 10~n]][c: n] )
+
+
+            if(ins->type == CV::ByteCodeType::FORWARD_INS){
+                std::cout << program->instructions[ins->parameter[0]]->literal() << std::endl;
+            }
+
+            if( (ins->type == CV::ByteCodeType::SET && ins->data[0] == 0 && program->instructions[ins->parameter[1]]->type == CV::ByteCodeType::CONSTRUCT_CTX) ||
+                (ins->type == CV::ByteCodeType::FORWARD_INS && program->instructions[ins->parameter[0]]->type == CV::ByteCodeType::CONSTRUCT_CTX) ){
+                RunInstruction(ins, program, ctx, cursor);
+                if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
+                tokens.erase(tokens.begin() + i); --i;
+                continue;
+            }
             if(i > 0){
-                instructions[instructions.size()-1]->next = ins->id;
+                auto &before = instructions[instructions.size()-1];
+                if(before->id == ins->id) continue; // avoid loops
+                before->next = ins->id;
             }
             instructions.push_back(ins);
         }
@@ -3938,7 +4181,8 @@ static std::shared_ptr<CV::Item> unwrapInterrupt(const std::shared_ptr<CV::Item>
     }
 }
 
-static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCode> &entry, std::shared_ptr<CV::Stack> &program, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
+static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCode> &entry, std::shared_ptr<CV::Stack> &program, std::shared_ptr<CV::Context> &_ctx, std::shared_ptr<CV::Cursor> &cursor){
+    auto ctx = solveLocalCtx(entry, _ctx);
     switch(entry->type){
         case CV::ByteCodeType::REFERRED_FN:
         case CV::ByteCodeType::JMP_FUNCTION: {
@@ -4056,7 +4300,19 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
             if(cursor->error){ return std::make_shared<CV::Item>(); }        
             CV::ModifierEffect effects;
             auto solved = processPreInterpretConversionModifiers(v, entry->modifiers, cursor, ctx, effects);
-            if(cursor->error){ return std::make_shared<CV::Item>(); }                
+            if(cursor->error){ return std::make_shared<CV::Item>(); }  
+            solved = processPreInterpretSituationalModifiers(solved, entry->modifiers, cursor, ctx, effects);
+            if(cursor->error){ return std::make_shared<CV::Item>(); }                                        
+
+            if(entry->hasModifier(CV::ModifierTypes::NAMER)){
+                if(ctx->readOnly){
+                    cursor->setError(entry->getModifier(CV::ModifierTypes::NAMER)->subject, "Cannot MAME within this context as it is readonly.");
+                    return std::make_shared<CV::Item>();                  
+                }                 
+                ctx->set(entry->getModifier(CV::ModifierTypes::NAMER)->subject, solved);
+            }
+            entry->data.push_back(solved->id);
+            ctx->setStaticValue(solved);
             return solved;
         } break;
         case CV::ByteCodeType::PROXY: {        
@@ -4076,15 +4332,8 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
             return solved;
         } break;
         case CV::ByteCodeType::REFERRED_PROXY: {
-            auto ins = program->instructions[entry->parameter[0]];
-            CV::ModifierEffect effects;
-            auto v = ctx->getStaticValue(ins->data[ins->data.size()-1]);
-            auto solved = processPreInterpretConversionModifiers(v, entry->modifiers, cursor, ctx, effects);
-            ctx->setStaticValue(solved);
-            if(effects.toCtx){
-                entry->origin = effects.toCtx->id; // we replace the referral to the actual value's origin (if it's within a context that is)
-            }
-            return solved;
+            auto &ins = program->instructions[entry->parameter[0]];
+            return ctx->getStaticValue(ins->data[ins->data.size()-1]);
         } break;
         case CV::ByteCodeType::CONSTRUCT_FN: {
             auto fn = std::make_shared<CV::Function>();
@@ -4361,7 +4610,7 @@ std::shared_ptr<CV::Item> CV::interpret(const std::string &input, std::shared_pt
 
     auto code = ParseInputToByteToken(input, program, ctx, cursor);
 
-    DebugByteCode(code, ctx.get(), program.get());
+    // DebugByteCode(code, ctx.get(), program.get());
     // std::cout << "\n\n\n" << std::endl;
     // std::exit(1);
     // std::cout << code->literal(ctx.get(), program.get()) << std::endl;
@@ -4375,8 +4624,14 @@ std::shared_ptr<CV::Item> CV::interpret(const std::string &input, std::shared_pt
         return std::make_shared<CV::Item>();
     }
 
+    // std::cout << "XDD" << std::endl;
+    // ctx->startJobs();
+    // std::cout << "nah" << std::endl;
+
     if(flushTemps){
-        while(ctx->getJobNumber() > 0) CV:: Tools::sleep(20);
+        while(ctx->getJobNumber() > 0){
+            CV::Tools::sleep(20);
+        }
         flushContextTemps(ctx);    
     }
 

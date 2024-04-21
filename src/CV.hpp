@@ -224,7 +224,9 @@
                 CONSTRUCT_LIST,             // Used to build lists
                 CONSTRUCT_CTX,              // Used to build contexts
                 CONSTRUCT_FN,               // Used to build functions
-                CONSTRUCT_CALLBACK,
+                CONSTRUCT_CALLBACK,         // Allows to attach a callback job to an already existing job
+                INLINE_CTX_SWITCH,          // For existing contexts
+                REFERRED_INLINE_CTX_SWITCH, // For contexts that don't exist yet
                 LITERAL,                    // Normally instructions in text that couldn't be compiled into a real BC token
                 SET,                        // 1) Can define a variable within a Context 2) Can replace an existing variable with a new one using the same name
                 MUT,                        // Can modify primitive types (Numbers and Strings)
@@ -261,7 +263,7 @@
                     case CONSTRUCT_PROXY: {
                         return "CONSTRUCT_PROXY";
                     } break;
-                    
+
                     case CONSTRUCT_CALLBACK: {
                         return "CONSTRUCT_CALLBACK";
                     } break;
@@ -333,12 +335,16 @@
 
         namespace JobStatus {
             enum JobStatus : int {
+                CREATED,
                 IDLE,
                 RUNNING,
                 DONE
             };
             static std::string str(int t){
                 switch(t){
+                    case CV::JobStatus::CREATED: {
+                        return "CREATED";
+                    };
                     case CV::JobStatus::IDLE:{
                         return "IDLE";
                     };
@@ -693,6 +699,7 @@
             
 
             unsigned getJobNumber();
+            void startJobs();
 
             Context(const Context &other){
                 this->type = CV::ItemTypes::CONTEXT;        
@@ -705,6 +712,7 @@
             void solidify(bool downstream);
 
             std::shared_ptr<CV::Item> get(const std::string &name);
+            std::shared_ptr<CV::Item> getLocal(const std::string &name);
             std::string getNameById(unsigned id);
             void reset(bool downstream);
 
@@ -751,6 +759,17 @@
             TokenBase& operator=(const TokenBase& other){
                 return *this;
             }                   
+
+            std::shared_ptr<CV::ModifierPair> getLastModifier() const {
+                return this->modifiers.size() > 0 ? this->modifiers[this->modifiers.size()-1] : std::shared_ptr<CV::ModifierPair>(NULL);
+            }
+
+            void removeLastModifier(){
+                if(this->modifiers.size() == 0){
+                    return;
+                }
+                this->modifiers.erase(this->modifiers.begin() + this->modifiers.size());
+            }
 
             std::shared_ptr<CV::ModifierPair> getModifier(uint8_t type) const {
                 modMutex.lock();
