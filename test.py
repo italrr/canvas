@@ -52,7 +52,7 @@ cases = [
     TestCase("[1 2 [3 4 [5 6 [7 8 [9 10 [11 12]]]]]]", "[1 2 [3 4 [5 6 [7 8 [9 10 [11 12]]]]]]", True),
 
     # Complex list defition and trait stress test
-    TestCase("[set k 10][+ k k][set w [ct 1500~n]][w: ** n][set m [k w]][m|0|inv]", "[10 20 [ct 2250000~n] 2250000 [10 [ct 2250000~n]] -10]", True),
+    TestCase("[set k 10][+ k k][set w [ct 1500~n]][w: [** n]][set m [k w]][+ m|0|inv w:n]", "2249990", True),
 
     # l-flat
     TestCase("l-flat [1 2 [3 4 [5 6 [7 8 [9 10 [11 12]]]]]]", "[1 2 3 4 5 6 7 8 9 10 11 12]", True),
@@ -94,3 +94,6 @@ for case in cases:
     print(f"[{n}/{len(cases)}] EXPECTED: '{case.command}' {'==' if case.expEqual else '!='} '{case.expected}' | GOT: '{result[1]}' [{'SUCCESS' if result[0] else 'FAILURE'}]")
 
 print(f"DONE. SUCEEDED {len(cases)-failed} | FAILED {failed}")
+
+if failed == 0:
+    print("\n\n\n<---------------------ALL TEST PASSED YAY!!!--------------------->")

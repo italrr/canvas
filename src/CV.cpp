@@ -4333,7 +4333,13 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
         } break;
         case CV::ByteCodeType::REFERRED_PROXY: {
             auto &ins = program->instructions[entry->parameter[0]];
-            return ctx->getStaticValue(ins->data[ins->data.size()-1]);
+            auto v = ctx->getStaticValue(ins->data[ins->data.size()-1]);
+            CV::ModifierEffect effects;
+            auto solved = processPreInterpretConversionModifiers(v, entry->modifiers, cursor, ctx, effects);
+            if(cursor->error){ return std::make_shared<CV::Item>(); }        
+            solved = processPreInterpretSituationalModifiers(solved, entry->modifiers, cursor, ctx, effects);
+            if(cursor->error){ return std::make_shared<CV::Item>(); }   
+            return solved;
         } break;
         case CV::ByteCodeType::CONSTRUCT_FN: {
             auto fn = std::make_shared<CV::Function>();
