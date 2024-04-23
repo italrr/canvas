@@ -200,6 +200,9 @@
                     case InterruptTypes::STOP:{
                         return "STOP";
                     };    
+                    case InterruptTypes::CONTINUE:{
+                        return "CONTINUE";
+                    };                        
                     default: {
                         return "UNDEFINED";    
                     }        
@@ -508,6 +511,8 @@
         struct List : Item {
 
             std::vector<std::shared_ptr<Item>> data;
+            void clear();
+            void append(std::shared_ptr<CV::Item> &item);
 
             List(const List &other){
             };
@@ -566,12 +571,12 @@
         struct Function : Item {
             std::shared_ptr<CV::TokenByteCode> entry;
             std::vector<std::string> params;
-            std::vector<unsigned> paramId;
+            std::string body;
             bool binary;
             bool threaded;
             bool async;
             bool variadic;
-
+    
             std::vector<std::string> getParams();
 
             Function(const Function &other){
@@ -588,6 +593,7 @@
             Function(const std::vector<std::string> &params, const std::function<std::shared_ptr<CV::Item> (const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<Context> &ctx)> &fn, bool variadic = false);
             void set(const std::vector<std::string> &params, const std::function<std::shared_ptr<CV::Item> (const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<Context> &ctx)> &fn, bool variadic);
             void set(std::shared_ptr<CV::TokenByteCode> &entry, bool variadic);
+            void set(const std::vector<std::string> &params, std::string &body, bool variadic);
             
         };    
 
@@ -669,6 +675,10 @@
         };
 
         struct Context : Item {
+
+            std::unordered_map<unsigned, std::shared_ptr<CV::Item>> proxiedValues;
+            std::shared_ptr<CV::Item> setProxiedValue(const std::shared_ptr<CV::Item> &item);
+            std::shared_ptr<CV::Item> getProxiedValue(unsigned id);            
 
             std::unordered_map<unsigned, std::shared_ptr<CV::Item>> staticValues;
             std::shared_ptr<CV::Item> setStaticValue(const std::shared_ptr<CV::Item> &item);
@@ -831,7 +841,7 @@
             unsigned type;
             unsigned origin;
             bool expirable;
-            std::string str;
+            std::vector<std::string> str;
             std::vector<unsigned> data;         // For Items
             std::vector<unsigned> parameter;    // For instructions only
             unsigned next;                      // NEXT INSTRUCTION ID
