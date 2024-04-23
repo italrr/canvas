@@ -11,8 +11,8 @@
         static std::string LIBNAME = "img";
         static std::mutex accessMutex;   
 
-        static std::shared_ptr<CV::Context> createImageHandle(const std::string &format, __CV_NUMBER_NATIVE_TYPE w, __CV_NUMBER_NATIVE_TYPE h){
-            auto ctx = std::make_shared<CV::Context>();
+        static std::shared_ptr<CV::Context> createImageHandle(std::shared_ptr<CV::Context> &origin, const std::string &format, __CV_NUMBER_NATIVE_TYPE w, __CV_NUMBER_NATIVE_TYPE h){
+            auto ctx = std::make_shared<CV::Context>(origin);
             ctx->set("format", std::make_shared<CV::String>(format));
             ctx->set("width", std::make_shared<CV::Number>(w));
             ctx->set("height", std::make_shared<CV::Number>(h));
@@ -207,7 +207,7 @@
                     numbers.push_back(std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(0)));
                 }
 
-                auto handle = createImageHandle(format->get(), width->get(), height->get());
+                auto handle = createImageHandle(ctx, format->get(), width->get(), height->get());
                 n = CV::Tools::ticks();
                 handle->set("data", std::make_shared<CV::List>(numbers, true));
 

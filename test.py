@@ -19,7 +19,7 @@ def run_test(test):
 
 cases = [
     # Test function definition
-    TestCase("fn [a b c][+ a b c]", "[fn [a b c] [BYTECODE]]", True),
+    TestCase("fn [a b c][+ a b c]", "[fn [a b c] [[+ a b c]]]", True),
     
     # Test Context definion and access
     TestCase("[set a [fn [a b c][+ a b c]]][a 1 2 3]", "6", True),
