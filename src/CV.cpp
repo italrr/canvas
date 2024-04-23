@@ -3956,9 +3956,16 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
     if(imp == "ct"){
         if(constructModCheck(token, cursor, false)){
             return program->create(CV::ByteCodeType::NOOP);
-        }        
+        }
+
+        auto pins = program->create(CV::ByteCodeType::PROXY);
+        pins->origin = ctx->id;
+        pins->data.push_back(0); 
+        
+
         auto ins = program->create(CV::ByteCodeType::CONSTRUCT_CTX);
         ins->origin = ctx->id;
+        ins->parameter.push_back(pins->id);
         ins->inheritModifiers(token);
 
         for(int i = 0; i < params.size(); ++i){
@@ -4018,20 +4025,29 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
         if(!var.get() && !tproxy.get()){
             cursor->setError(imp, GENERIC_UNDEFINED_SYMBOL_ERROR);
             return program->create(CV::ByteCodeType::NOOP);   
-        }        
-        // TODO FIX THISSSS!!!
+        }       
+
+
         // Solve display Items (they don't exist yet)
-        if(tproxy.get() && !CV::Tools::isNumber(imp) && !CV::Tools::isString(imp)){
+        if(tproxy.get() && token.getModifierNumber() == 0 && params.size() == 0){
 
             auto ins = program->instructions[tproxy->insId];
             // If it's a proxy we send it its way
-            if(ins->type == CV::ByteCodeType::PROXY && params.size() == 0){
+            if(ins->type == CV::ByteCodeType::PROXY){
+                // std::cout << imp << " " << tproxy->name << " " << ins->literal() << " " << token.literal() << std::endl;
                 ins->inheritModifiers(token);   
                 auto fins = postTokenCreationFinalization(program, ins, headMods, ctx, cursor);        
                 if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
                 return fins; 
             }else
-            if(params.size() == 0){
+            if(var.get()){
+                ctx->setStaticValue(var);  
+                auto ins = program->create(CV::ByteCodeType::PROXY);                
+                ins->origin = origin;
+                ins->inheritModifiers(token);      
+                ins->data.push_back(var->id);
+                return ins;
+            }else{
                 // Othwerwise, we create a referred proxy
                 auto ref = program->create(CV::ByteCodeType::REFERRED_PROXY);
                 ref->origin = origin;
@@ -4047,6 +4063,7 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
             ctx->setStaticValue(var);       
         }
         if(var.get() && var->type == CV::ItemTypes::FUNCTION && !future){
+
             auto fn = std::static_pointer_cast<CV::Function>(var);
 
             if(!fn->variadic && params.size() != fn->params.size()){
@@ -4103,10 +4120,10 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
                     } 
                 }
 
-                auto bodyBody = ParseInputToByteToken(fn->body, program, ctx, cursor);
+                auto bodyToken = ParseInputToByteToken(fn->body, program, ctx, cursor);
                 if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
 
-                ins->parameter[1] = bodyBody->id;
+                ins->parameter[1] = bodyToken->id;
 
                 for(int i = 0; i < clearTemps.size(); ++i){
                     ctx->removeDisplayItem(clearTemps[i]);
@@ -4126,7 +4143,6 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
                 ins->origin = origin;
                 ins->inheritModifiers(token);      
                 ins->data.push_back(var->id);
-                ctx->addDisplayItem(imp, ins->id);
 
                 auto fins = postTokenCreationFinalization(program, ins, headMods, ctx, cursor);        
                 if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
@@ -4134,6 +4150,11 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
 
                 return fins; 
             }else{
+
+                auto pins = program->create(CV::ByteCodeType::PROXY);
+                pins->origin = ctx->id;
+                pins->data.push_back(0);
+
                 // Compile first param
                 auto firstItem = ParseInputToByteToken(token, program, ctx, cursor);
                 if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
@@ -4142,6 +4163,7 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
                 auto ins = program->create(CV::ByteCodeType::CONSTRUCT_LIST);
                 ins->origin = origin;
                 ins->inheritModifiers(token);
+                ins->parameter.push_back(pins->id);
                 ins->parameter.push_back(firstItem->id);
                 for(int i = 0; i < params.size(); ++i){
                     auto param = params[i];
@@ -4190,6 +4212,9 @@ static std::shared_ptr<CV::TokenByteCode> ParseInputToByteToken(CV::Token &input
             // Functions and contexts definitions are executed right away
             if( (ins->type == CV::ByteCodeType::SET && ins->data[0] == 0 && program->instructions[ins->parameter[1]]->type == CV::ByteCodeType::CONSTRUCT_CTX) ||
                 (ins->type == CV::ByteCodeType::FORWARD_INS && program->instructions[ins->parameter[0]]->type == CV::ByteCodeType::CONSTRUCT_CTX) ){
+                if(ins->type == CV::ByteCodeType::SET){
+                    ctx->removeDisplayItem(ins->parameter[1]);
+                }
                 RunInstruction(ins, program, ctx, cursor);
                 if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
                 tokens.erase(tokens.begin() + i); --i;
@@ -4197,6 +4222,9 @@ static std::shared_ptr<CV::TokenByteCode> ParseInputToByteToken(CV::Token &input
             }else
             if( (ins->type == CV::ByteCodeType::SET && ins->data[0] == 0 && program->instructions[ins->parameter[1]]->type == CV::ByteCodeType::CONSTRUCT_FN) ||
                 (ins->type == CV::ByteCodeType::FORWARD_INS && program->instructions[ins->parameter[0]]->type == CV::ByteCodeType::CONSTRUCT_FN) ){
+                if(ins->type == CV::ByteCodeType::SET){
+                    ctx->removeDisplayItem(ins->parameter[1]);
+                }                    
                 RunInstruction(ins, program, ctx, cursor);
                 if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
                 tokens.erase(tokens.begin() + i); --i;
@@ -4209,6 +4237,7 @@ static std::shared_ptr<CV::TokenByteCode> ParseInputToByteToken(CV::Token &input
             }
             instructions.push_back(ins);
         }
+        ctx->flushDisplayItems();
         return instructions[0];
     }else
     if(tokens.size() == 1 && tokens[0].complex){
@@ -4302,6 +4331,8 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
                 if(cursor->error){ return std::make_shared<CV::Item>(); } 
                 resultProxy->data[0] = result->id;               
                 return ctx->setStaticValue(unwrapInterrupt(result));
+
+
             // ByteCode Functions
             }else{
                 auto codeToken = program->instructions[entry->parameter[1]];
@@ -4324,6 +4355,7 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
                     ctx->setStaticValue(variadicList);
                     lstProxyIns->data[0] = variadicList->id;
                 }
+
 
                 auto result = Execute(codeToken, program, ctx, cursor);
                 resultProxy->data[0] = result->id;
@@ -4400,10 +4432,7 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
                 }                 
                 ctx->set(entry->getModifier(CV::ModifierTypes::NAMER)->subject, solved);
             }
-            if(entry->data.size() == 0){
-                entry->data.push_back(0);
-            }
-            entry->data[0] = solved->id;
+
             ctx->setStaticValue(solved);
             return solved;
         } break;
@@ -4457,7 +4486,7 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
             auto nctx = std::make_shared<CV::Context>(ctx);
             std::unordered_map<std::string, std::shared_ptr<CV::Item>> items;
             auto item = std::static_pointer_cast<CV::Item>(nctx);
-            for(int i = 0; i < entry->parameter.size(); ++i){
+            for(int i = 1; i < entry->parameter.size(); ++i){
                 auto ins = program->instructions[entry->parameter[i]];
                 auto v = RunInstruction(ins, program, ctx, cursor);
                 if(cursor->error){ return std::make_shared<CV::Item>(); }   
@@ -4490,12 +4519,12 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
             auto solved = processPreInterpretConversionModifiers(item, entry->modifiers, cursor, ctx, effects);
             if(cursor->error){ return std::make_shared<CV::Item>(); } 
 
-            entry->data.push_back(item->id);
+            program->instructions[entry->parameter[0]]->data[0] = solved->id;
             return ctx->setStaticValue(solved);
         } break;
         case CV::ByteCodeType::CONSTRUCT_LIST: {
             std::vector<std::shared_ptr<CV::Item>> items;
-            for(int i = 0; i < entry->parameter.size(); ++i){
+            for(int i = 1; i < entry->parameter.size(); ++i){
                 auto ins = program->instructions[entry->parameter[i]];
                 auto v = RunInstruction(ins, program, ctx, cursor);
                 if(cursor->error){ return std::make_shared<CV::Item>(); }     
@@ -4511,8 +4540,7 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
             CV::ModifierEffect effects;          
             auto solved = processPreInterpretConversionModifiers(result, entry->modifiers, cursor, ctx, effects);
             if(cursor->error){ return std::make_shared<CV::Item>(); }                
-            // Store result in instruction's data (Must be the actual list)
-            entry->data.push_back(result->id);
+            program->instructions[entry->parameter[0]]->data[0] = solved->id;
             return  ctx->setStaticValue(solved);            
         };
         case CV::ByteCodeType::BINARY_BRANCH_COND: {
