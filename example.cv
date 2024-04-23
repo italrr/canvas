@@ -1,4 +1,4 @@
-set ratio [* 4 1]
+set ratio [* 4 2]
 set width [* ratio 8]
 set height [* ratio 8]
 io:out 'Creating ' width 'x' height ' RGB image' '\n'
@@ -6,13 +6,13 @@ set target [img:create 'RGB' width height]
 
 set c 0
 iter|3 [target:data]~pixel [
-    [set y [math:floor [math:mod c target:width]]]
-    [set x [math:floor [/ c target:width]]]
+    [set y [+ 1 [+ c target:width]]]
+    [set x [+ 1 [/ c target:width]]]
     [set r [/ [+ x 1] target:width]]
     [set g [/ [+ y 1] target:height]]
     [mut pixel|0 [- 1 r]]
     [mut pixel|1 [- 1 g]]
-    [mut pixel|2 [- 1 [math:clamp [+ r g] 0 0.5]]]
+    [mut pixel|2 [- 1 [+ [+ r g] 0 0.5]]]
     [++ c]
 ]
 
