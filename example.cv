@@ -1,4 +1,4 @@
-set ratio [* 8 2]
+set ratio [* 4 1]
 set width [* ratio 8]
 set height [* ratio 8]
 io:out 'Creating ' width 'x' height ' RGB image' '\n'

@@ -576,7 +576,7 @@
             bool threaded;
             bool async;
             bool variadic;
-    
+
             std::vector<std::string> getParams();
 
             Function(const Function &other){
@@ -857,6 +857,10 @@
         struct Stack {
             std::mutex accessMutex;
             std::unordered_map<unsigned, std::shared_ptr<CV::TokenByteCode>> instructions;
+
+            // std::vector<std::shared_ptr<CV::TokenByteCode>> instructions;
+            
+
             std::shared_ptr<CV::TokenByteCode> create(unsigned type){
                 this->accessMutex.lock();
                 auto code = std::make_shared<CV::TokenByteCode>(type);

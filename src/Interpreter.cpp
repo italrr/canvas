@@ -105,6 +105,8 @@ static bool wasFileModified(const std::string &path, time_t oldMTime) {
     return currentTime > oldMTime;
 } 
 
+void showTimes();
+
 int main(int argc, char* argv[]){
 
 	std::vector<std::string> params;
@@ -180,6 +182,7 @@ int main(int argc, char* argv[]){
 				}
 			}
 		} while(dynamic || ctx->getJobNumber() > 0);
+		showTimes();
 		finished = true;
 		loop.join();
 		return 0;
