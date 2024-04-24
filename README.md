@@ -1,9 +1,9 @@
 # canvas [~]
 
-**canvas** is an esoteric, dynamic, pseudo-functional, psudo-procedural, programming/scripting language designed with expressiveness and hackability in mind. It's heavily inspired by JavaScript, and LISP, a tad little bit of Python, but it's mostly my own creation. This project is nowhere near close to completion but it's come close enough for some usability.
+**canvas** is an esoteric, dynamic, pseudo-functional, psudo-procedural, programming/scripting language designed with expressiveness and hackability in mind. It's heavily inspired by JavaScript, and LISP, a little bit of Python, but it's mostly my own creation. This project is nowhere near close to completion but it's come close enough for some usability.
 
 ## Documentation
-- [Standard Operators](./docs/Spec.md).
+- TODO
 
 Short summary:
 
@@ -18,7 +18,6 @@ Short summary:
 - Atypical but powerful control flow known as inline context switching.
 - Recursion is encouraged
 - Parallelism and concurrency are first class citizens
-- Honestly? Downright different (Hopefully within reason). This project still needs to be proven, so don't expect anything serious for now.
 
 Typical **canvas** _imperative_ expression structure
 ```
@@ -38,10 +37,10 @@ Modifiers are (sometimes complex) abstractions that can be used to drive the con
 - `~`: **The Namer**. It basically allows to rename (or name) a variable on the fly (on the current context). It's also used to define variables within Contexts. Examples:
     - `5~n`
     - `[ct 2.5~n 15~r]`
-    - `[l-range 1 10]~list`
-- `:`: **The Scope**. It allows switching contexts. Either directly accessing a specific variable within that context or complety switch the current context in the flow. Examples:
+    - `[l-gen 1 10]~list`
+- `:`: **The Scope**. It allows switching contexts. Either directly accessing a specific variable within that context or complety switching the current context in the flow. Examples:
     - `set test [ct 10~n]` -> `test:n`: Should print 10.
-    - `set test [ct 10~n]` -> `test: + 1 1`: Should increase `n` within `test` to 11.
+    - `set test [ct 10~n]` -> `test: ++ n`: Should increase `n` within `test` to 11.
 - `|`: **The Trait**. It allows accessing/executing traits inate to specific types. See next section.
 - `^`: **The Expander** or simply Expand. It's a handy modifier that basically takes a list and expands it to make it so every item it contains will take a space within the arguments list. For example, the operator `+` will sum all arguments you give it (variadic). What if you want to sum all numbers within a List? That's where Expand comes in. See:
     ```
@@ -78,17 +77,7 @@ CV> [1 2 3 4]|length
 
 For example `[1 2 3]|length`. The List type has a trait called `length` that will return the number of items.
 
-Another example `'Test'|reverse`. The String type has a `reverse` trait will essentially reverse the string. It makes a copy of the original. Traits facilitate asynchronous code. For example Jobs are essentially items returned by functions that were given the modifier `|async`
-or `|untether`. This Job item possess a special type of powerful trait called "await", that will essentially wait for the async or untether execution to finish:
-
-```
-CV> [+|async [l-range 1 20000]^]
-[JOB 3 'ASYNC' 'IDLE']
-
-CV> [+|async [l-range 1 20000]^]|await
-200010000
-```
-Normally the async/untether traits would return an object that can links the data being proceesed with other threads, but `|await` will force the current Context to wait for this Job to finish and haul its payload.
+Another example `'Test'|reverse`. The String type has a `reverse` trait will essentially reverse the string. It makes a copy of the original.
 
 
 # Introspection or Metaprogramming

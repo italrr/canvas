@@ -2094,7 +2094,6 @@ static bool checkCond(std::shared_ptr<CV::Item> &item){
 
 static bool typicalVariadicArithmeticCheck(const std::string &name, const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, int max = -1){
 
-    return true;
     CV::FunctionConstraints consts;
     consts.setMinParams(2);
     if(max != -1){
@@ -2134,7 +2133,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         for(int i = 1; i < params.size(); ++i){
             r += std::static_pointer_cast<CV::Number>(params[i])->get();
         }
-        return params[0];
+        return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(r));
     }, true));
 
     ctx->set("-", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
@@ -2145,7 +2144,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         for(int i = 1; i < params.size(); ++i){
             r -= std::static_pointer_cast<CV::Number>(params[i])->get();
         }
-        return params[0];
+        return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(r));
     }, true));
     ctx->set("*", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         if(!typicalVariadicArithmeticCheck("*", params, cursor)){
@@ -4307,44 +4306,15 @@ static std::shared_ptr<CV::Item> unwrapInterrupt(const std::shared_ptr<CV::Item>
     }
 }
 
-static uint64_t setTimes = 0;
-static uint64_t ctxSetTimes = 0;
-static uint64_t mutTimes = 0;
-static uint64_t mutTargetTimes = 0;
-static uint64_t mutValueTimes = 0;
-static uint64_t jumpFnTimes = 0;
-static uint64_t forwardInsTimes = 0;
-static uint64_t forwardInsMods = 0;
-static uint64_t solveLocalCtxTimes = 0;
-static uint64_t referredProxyTimes = 0;
-static uint64_t proxyTimes = 0;
-
 
 
 
 void showTimes(){
-    std::cout << "\n\n\n";
-    std::cout << "Set times " << setTimes << std::endl;
-    std::cout << "ctxSetTimes  " << ctxSetTimes << std::endl;
-    std::cout << "Mut times " << mutTimes << std::endl;
-    std::cout << "mutTargetTimes " << mutTargetTimes << std::endl;
-    std::cout << "mutValueTimes " << mutValueTimes << std::endl;
-    std::cout << "forwardInsTimes " << forwardInsTimes << std::endl;
-    std::cout << "forwardInsMods " << forwardInsMods << std::endl;
-    std::cout << "solveLocalCtxTimes " << solveLocalCtxTimes << std::endl;
-    std::cout << "referredProxyTimes " << referredProxyTimes << std::endl;
-    std::cout << "proxyTimes " << proxyTimes << std::endl;
 
-
-
-    
-    std::cout << "jumpfn times " << jumpFnTimes << std::endl;
 }
 
 static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCode> &entry, std::shared_ptr<CV::Stack> &program, std::shared_ptr<CV::Context> &_ctx, std::shared_ptr<CV::Cursor> &cursor){
-    auto t = CV::Tools::ticks();
     auto ctx = solveLocalCtx(entry, _ctx);
-    solveLocalCtxTimes += CV::Tools::ticks()-t;
     switch(entry->type){
 
         case CV::ByteCodeType::JMP_FUNCTION: {
@@ -4359,13 +4329,8 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
                 for(int i = 1; i < entry->parameter.size(); ++i){
                     auto ins = program->instructions[entry->parameter[i]];
 
-            uint64_t __start = CV::Tools::ticks();
 
                     auto v = RunInstruction(ins, program, tctx, cursor);
-            if(ins->type == CV::ByteCodeType::JMP_FUNCTION){
-                insbin  = true;
-                jumpFnTimes += CV::Tools::ticks()-__start;      
-            }
 
 
                     if(cursor->error){ return std::make_shared<CV::Item>(); }     
@@ -4378,9 +4343,7 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
                 }
                 auto s = CV::Tools::ticks();
                 auto result = fn->fn(arguments, cursor, tctx);
-                if(insbin){
-                jumpFnTimes += CV::Tools::ticks()-s;
-                }
+
                 if(cursor->error){ return std::make_shared<CV::Item>(); } 
                 resultProxy->data[0] = result->id; 
 
@@ -4474,7 +4437,6 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
             return solved;
         } break;
         case CV::ByteCodeType::FORWARD_INS: {
-            uint64_t __start = CV::Tools::ticks();
 
             auto ins = program->instructions[entry->parameter[0]];
 
@@ -4483,7 +4445,6 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
             // std::cout << ins->literal() << std::endl;
 
             if(cursor->error){ return std::make_shared<CV::Item>(); }  
-            uint64_t __start2 = CV::Tools::ticks();
 
             CV::ModifierEffect effects;
             auto solved = processPreInterpretConversionModifiers(v, entry->modifiers, cursor, ctx, effects);
@@ -4491,7 +4452,6 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
             solved = processPreInterpretSituationalModifiers(solved, entry->modifiers, cursor, ctx, effects);
             if(cursor->error){ return std::make_shared<CV::Item>(); }     
 
-            forwardInsMods += CV::Tools::ticks()-__start2;      
 
             if(entry->hasModifier(CV::ModifierTypes::NAMER)){
                 if(ctx->readOnly){
@@ -4500,12 +4460,10 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
                 }                 
                 ctx->set(entry->getModifier(CV::ModifierTypes::NAMER)->subject, solved);
             }
-            forwardInsTimes += CV::Tools::ticks()-__start;      
             ctx->setStaticValue(solved);
             return solved;
         } break;
         case CV::ByteCodeType::PROXY: {    
-            auto __start = CV::Tools::ticks();    
             auto v = ctx->getStaticValue(entry->data[0]);
             if(!v.get()){
                 cursor->setError(CV::ByteCodeType::str(entry->type), "Refers to an undefined value.");
@@ -4523,11 +4481,9 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
             if(cursor->error){ return std::make_shared<CV::Item>(); }        
             solved = processPreInterpretSituationalModifiers(solved, entry->modifiers, cursor, ctx, effects);
             if(cursor->error){ return std::make_shared<CV::Item>(); }   
-            proxyTimes += CV::Tools::ticks() - __start;                    
             return solved;
         } break;
         case CV::ByteCodeType::REFERRED_PROXY: {
-            auto __start = CV::Tools::ticks();
             auto ins = program->instructions[entry->parameter[0]];
             auto v = RunInstruction(ins, program, ctx, cursor);
             if(cursor->error){ return std::make_shared<CV::Item>(); }  
@@ -4536,7 +4492,6 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
             if(cursor->error){ return std::make_shared<CV::Item>(); }        
             solved = processPreInterpretSituationalModifiers(solved, entry->modifiers, cursor, ctx, effects);
             if(cursor->error){ return std::make_shared<CV::Item>(); }
-            if(ins->type == CV::ByteCodeType::JMP_FUNCTION) referredProxyTimes += CV::Tools::ticks()-__start;   
             return solved;
         } break;
         case CV::ByteCodeType::CONSTRUCT_FN: {
@@ -4758,7 +4713,6 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
         } break;
 
         case CV::ByteCodeType::MUT: {
-            uint64_t __start = CV::Tools::ticks();
             
             auto targetIns = program->instructions[entry->parameter[0]];
 
@@ -4767,14 +4721,12 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
 
             uint64_t __start3 = CV::Tools::ticks();
             auto v = RunInstruction(valueIns, program, ctx, cursor);
-            if(valueIns->type == CV::ByteCodeType::JMP_FUNCTION) mutValueTimes += CV::Tools::ticks()-__start3;      
 
 
             if(cursor->error){ return std::make_shared<CV::Item>(); }                
             
             uint64_t __start2 = CV::Tools::ticks();            
             auto t = RunInstruction(targetIns, program, ctx, cursor);
-            mutTargetTimes += CV::Tools::ticks()-__start2;      
 
             if(cursor->error){ return std::make_shared<CV::Item>(); }
 
@@ -4795,7 +4747,6 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
                 return std::make_shared<CV::Item>();
             }
 
-            mutTimes += CV::Tools::ticks()-__start;      
 
 
             return t;
@@ -4826,7 +4777,6 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
                 }
                 uint64_t __start = CV::Tools::ticks();
                 ctx->set(entry->str[0], v);
-                ctxSetTimes += CV::Tools::ticks()-__start;      
             // Set within a context
             }else{
                 auto name = program->instructions[entry->parameter[0]];
@@ -4840,10 +4790,8 @@ static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCod
                 auto originName = rmtCtx->getNameById(target->id);
                 uint64_t __start = CV::Tools::ticks();
                 rmtCtx->set(originName, v);
-                ctxSetTimes += CV::Tools::ticks()-__start;      
 
             }
-            setTimes += CV::Tools::ticks()-__start;      
             return v;
         };
         case CV::ByteCodeType::NOOP: {
