@@ -12,7 +12,7 @@
 
     #define __CV_NUMBER_NATIVE_TYPE double
 
-    static const __CV_NUMBER_NATIVE_TYPE CANVAS_LANG_VERSION[3] = { 1, 2, 0 };
+    static const __CV_NUMBER_NATIVE_TYPE CANVAS_LANG_VERSION[3] = { 0, 1, 0 }; // BETA
 
     namespace CV {
 
