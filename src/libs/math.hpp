@@ -1,369 +1,364 @@
-#ifndef CANVAS_STDLIB_MATH_HPP
-    #define CANVAS_STDLIB_MATH_HPP
-
-    #include "../cv.hpp"
-
-    /*
-        STANDARD LIBRARY `math`
-        
-        math includes typical math functions such as sin, cos, atan, etc.
+#ifndef CANVAS_STD_LIBRARY_MATH_HPP
+    #define CANVAS_STD_LIBRARY_MATH_HPP
     
-    */
-
-    #include <stdio.h>
-    #include <iostream>
     #include <cmath>
     #include <random>
 
-    #define CANVAS_STDLIB_MATH_PI 3.14159265358979323846
+    #include "../CV.hpp"
 
     namespace math {
-
-        static std::string LIBNAME = "math";
+        static const __CV_NUMBER_NATIVE_TYPE CANVAS_STDLIB_MATH_PI = 3.14159265358979323846;
+        static const std::string LIBNAME = "math";
         static std::mt19937 rng(std::time(nullptr));
-
-        static void registerLibrary(std::shared_ptr<CV::Item> &ctx){
-            auto lib = std::make_shared<CV::ProtoType>(CV::ProtoType());
-
-            lib->registerProperty("sin", std::make_shared<CV::FunctionType>(CV::FunctionType([](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
-                    if(operands.size() < 1){
-                        cursor->setError("operator '"+LIBNAME+":sin': expects at least 1 operand");
-                        return std::make_shared<CV::Item>(CV::Item());						
-                    }
-                    if(operands.size() > 1){
-                        cursor->setError("operator '"+LIBNAME+":sin': expects no more than 1 operand");
-                        return std::make_shared<CV::Item>(CV::Item());						
-                    }
-                    if(operands[0]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator '"+LIBNAME+":sin': argument(0) must be a NUMBER");
-                        return std::make_shared<CV::Item>(CV::Item());	                        
-                    }
-                    return CV::create(std::sin(*static_cast<double*>(operands[0]->data)));	   
-                }, {}
-            )));	
+        static std::mutex accessMutex; 
 
 
-            lib->registerProperty("cos", std::make_shared<CV::FunctionType>(CV::FunctionType([](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
-                    if(operands.size() < 1){
-                        cursor->setError("operator '"+LIBNAME+":cos': expects at least 1 operand");
-                        return std::make_shared<CV::Item>(CV::Item());						
+        static void registerLibrary(std::shared_ptr<CV::Context> &ctx){
+            auto lib = std::make_shared<CV::Context>(ctx);
+            lib->copyable = false;
+            lib->readOnly = true;
+            lib->solid = true;
+
+            lib->set("sin", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
+                static const std::string name = "sin";
+                CV::FunctionConstraints consts;
+                consts.setMinParams(1);
+                consts.allowNil = false;
+                consts.allowMisMatchingTypes = false;
+                consts.setExpectType(CV::ItemTypes::NUMBER);
+                std::string errormsg;
+                if(!consts.test(params, errormsg)){
+                    cursor->setError(LIBNAME+":"+name, errormsg);
+                    return std::make_shared<CV::Item>();
+                }
+                if(params.size() == 1){
+                    auto n = std::sin(std::static_pointer_cast<CV::Number>(params[0])->get());
+                    return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(n));
+                }else{
+                    std::vector<std::shared_ptr<CV::Item>> results;
+                    for(int i = 0; i < params.size(); ++i){
+                        auto n = std::sin(std::static_pointer_cast<CV::Number>(params[i])->get());
+                        results.push_back(std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(n)));
                     }
-                    if(operands.size() > 1){
-                        cursor->setError("operator '"+LIBNAME+":cos': expects no more than 1 operand");
-                        return std::make_shared<CV::Item>(CV::Item());						
-                    }
-                    if(operands[0]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator '"+LIBNAME+":cos': argument(0) must be a NUMBER");
-                        return std::make_shared<CV::Item>(CV::Item());	                        
-                    }
-                    return CV::create(std::cos(*static_cast<double*>(operands[0]->data)));	   
-                }, {}
-            )));	   
+                    return std::static_pointer_cast<CV::Item>(std::make_shared<CV::List>(results, false));
+                }
+                return std::make_shared<CV::Item>();
+            }, true)); 
 
 
-            lib->registerProperty("tan", std::make_shared<CV::FunctionType>(CV::FunctionType([](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
-                    if(operands.size() < 1){
-                        cursor->setError("operator '"+LIBNAME+":tan': expects at least 1 operand");
-                        return std::make_shared<CV::Item>(CV::Item());						
+            lib->set("cos", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
+                static const std::string name = "cos";
+                CV::FunctionConstraints consts;
+                consts.setMinParams(1);
+                consts.allowNil = false;
+                consts.allowMisMatchingTypes = false;
+                consts.setExpectType(CV::ItemTypes::NUMBER);
+                std::string errormsg;
+                if(!consts.test(params, errormsg)){
+                    cursor->setError(LIBNAME+":"+name, errormsg);
+                    return std::make_shared<CV::Item>();
+                }
+                if(params.size() == 1){
+                    auto n = std::cos(std::static_pointer_cast<CV::Number>(params[0])->get());
+                    return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(n));
+                }else{
+                    std::vector<std::shared_ptr<CV::Item>> results;
+                    for(int i = 0; i < params.size(); ++i){
+                        auto n = std::cos(std::static_pointer_cast<CV::Number>(params[i])->get());
+                        results.push_back(std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(n)));
                     }
-                    if(operands.size() > 1){
-                        cursor->setError("operator '"+LIBNAME+":tan': expects no more than 1 operand");
-                        return std::make_shared<CV::Item>(CV::Item());						
-                    }
-                    if(operands[0]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator '"+LIBNAME+":tan': argument(0) must be a NUMBER");
-                        return std::make_shared<CV::Item>(CV::Item());	                        
-                    }
-                    return CV::create(std::tan(*static_cast<double*>(operands[0]->data)));	   
-                }, {}
-            )));	    
+                    return std::static_pointer_cast<CV::Item>(std::make_shared<CV::List>(results, false));
+                }
+                return std::make_shared<CV::Item>();
+            }, true));      
 
 
+            lib->set("tan", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
+                static const std::string name = "tan";
+                CV::FunctionConstraints consts;
+                consts.setMinParams(1);
+                consts.allowNil = false;
+                consts.allowMisMatchingTypes = false;
+                consts.setExpectType(CV::ItemTypes::NUMBER);
+                std::string errormsg;
+                if(!consts.test(params, errormsg)){
+                    cursor->setError(LIBNAME+":"+name, errormsg);
+                    return std::make_shared<CV::Item>();
+                }
+                if(params.size() == 1){
+                    auto n = std::tan(std::static_pointer_cast<CV::Number>(params[0])->get());
+                    return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(n));
+                }else{
+                    std::vector<std::shared_ptr<CV::Item>> results;
+                    for(int i = 0; i < params.size(); ++i){
+                        auto n = std::tan(std::static_pointer_cast<CV::Number>(params[i])->get());
+                        results.push_back(std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(n)));
+                    }
+                    return std::static_pointer_cast<CV::Item>(std::make_shared<CV::List>(results, false));
+                }
+                return std::make_shared<CV::Item>();
+            }, true));                     
 
-            lib->registerProperty("atan", std::make_shared<CV::FunctionType>(CV::FunctionType([](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
-                    if(operands.size() < 2){
-                        cursor->setError("operator '"+LIBNAME+":atan': expects at least 2 operand");
-                        return std::make_shared<CV::Item>(CV::Item());						
-                    }
-                    if(operands.size() > 2){
-                        cursor->setError("operator '"+LIBNAME+":atan': expects no more than 2 operand");
-                        return std::make_shared<CV::Item>(CV::Item());						
-                    }
-                    if(operands[0]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator '"+LIBNAME+":atan': argument(0) must be a NUMBER");
-                        return std::make_shared<CV::Item>(CV::Item());	                        
-                    }
-                    if(operands[1]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator '"+LIBNAME+":atan': argument(1) must be a NUMBER");
-                        return std::make_shared<CV::Item>(CV::Item());	                        
-                    }                    
-
-                    return CV::create(std::atan2(*static_cast<double*>(operands[0]->data), *static_cast<double*>(operands[1]->data)));	   
-                }, {}
-            )));	                     
-
-
-
-            lib->registerProperty("round", std::make_shared<CV::FunctionType>(CV::FunctionType([](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
-                    if(operands.size() < 1){
-                        cursor->setError("operator '"+LIBNAME+":round': expects at least 1 operand");
-                        return std::make_shared<CV::Item>(CV::Item());						
-                    }
-                    if(operands.size() > 1){
-                        cursor->setError("operator '"+LIBNAME+":round': expects no more than 1 operand");
-                        return std::make_shared<CV::Item>(CV::Item());						
-                    }
-                    if(operands[0]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator '"+LIBNAME+":round': argument(0) must be a NUMBER");
-                        return std::make_shared<CV::Item>(CV::Item());	                        
-                    }
-                    return CV::create(std::round(*static_cast<double*>(operands[0]->data)));	   
-                }, {}
-            )));
-
-
-            lib->registerProperty("floor", std::make_shared<CV::FunctionType>(CV::FunctionType([](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
-                    if(operands.size() < 1){
-                        cursor->setError("operator '"+LIBNAME+":floor': expects at least 1 operand");
-                        return std::make_shared<CV::Item>(CV::Item());						
-                    }
-                    if(operands.size() > 1){
-                        cursor->setError("operator '"+LIBNAME+":floor': expects no more than 1 operand");
-                        return std::make_shared<CV::Item>(CV::Item());						
-                    }
-                    if(operands[0]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator '"+LIBNAME+":floor': argument(0) must be a NUMBER");
-                        return std::make_shared<CV::Item>(CV::Item());	                        
-                    }
-                    return CV::create(std::floor(*static_cast<double*>(operands[0]->data)));	   
-                }, {}
-            )));            
+            lib->set("atan", std::make_shared<CV::Function>(std::vector<std::string>({"y", "x"}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
+                static const std::string name = "atan";
+                CV::FunctionConstraints consts;
+                consts.setMinParams(2);
+                consts.setMaxParams(2);
+                consts.allowNil = false;
+                consts.allowMisMatchingTypes = false;
+                consts.setExpectType(CV::ItemTypes::NUMBER);
+                std::string errormsg;
+                if(!consts.test(params, errormsg)){
+                    cursor->setError(LIBNAME+":"+name, errormsg);
+                    return std::make_shared<CV::Item>();
+                }
+                auto y = std::static_pointer_cast<CV::Number>(params[0])->get();
+                auto x = std::static_pointer_cast<CV::Number>(params[1])->get();
+                return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(std::atan2(y, x)));
+            }, false));                     
 
 
-            lib->registerProperty("ceil", std::make_shared<CV::FunctionType>(CV::FunctionType([](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
-                    if(operands.size() < 1){
-                        cursor->setError("operator '"+LIBNAME+":ceil': expects at least 1 operand");
-                        return std::make_shared<CV::Item>(CV::Item());						
+            lib->set("round", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
+                static const std::string name = "round";
+                CV::FunctionConstraints consts;
+                consts.setMinParams(1);
+                consts.allowNil = false;
+                consts.allowMisMatchingTypes = false;
+                consts.setExpectType(CV::ItemTypes::NUMBER);
+                std::string errormsg;
+                if(!consts.test(params, errormsg)){
+                    cursor->setError(LIBNAME+":"+name, errormsg);
+                    return std::make_shared<CV::Item>();
+                }
+                if(params.size() == 1){
+                    auto n = std::round(std::static_pointer_cast<CV::Number>(params[0])->get());
+                    return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(n));
+                }else{
+                    std::vector<std::shared_ptr<CV::Item>> results;
+                    for(int i = 0; i < params.size(); ++i){
+                        auto n = std::round(std::static_pointer_cast<CV::Number>(params[i])->get());
+                        results.push_back(std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(n)));
                     }
-                    if(operands.size() > 1){
-                        cursor->setError("operator '"+LIBNAME+":ceil': expects no more than 1 operand");
-                        return std::make_shared<CV::Item>(CV::Item());						
-                    }
-                    if(operands[0]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator '"+LIBNAME+":ceil': argument(0) must be a NUMBER");
-                        return std::make_shared<CV::Item>(CV::Item());	                        
-                    }
-                    return CV::create(std::ceil(*static_cast<double*>(operands[0]->data)));	   
-                }, {}
-            )));     
+                    return std::static_pointer_cast<CV::Item>(std::make_shared<CV::List>(results, false));
+                }
+                return std::make_shared<CV::Item>();
+            }, true));    
 
 
 
-            lib->registerProperty("abs", std::make_shared<CV::FunctionType>(CV::FunctionType([](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
-                    if(operands.size() < 1){
-                        cursor->setError("operator '"+LIBNAME+":abs': expects at least 1 operand");
-                        return std::make_shared<CV::Item>(CV::Item());						
+            lib->set("floor", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
+                static const std::string name = "floor";
+                CV::FunctionConstraints consts;
+                consts.setMinParams(1);
+                consts.allowNil = false;
+                consts.allowMisMatchingTypes = false;
+                consts.setExpectType(CV::ItemTypes::NUMBER);
+                std::string errormsg;
+                if(!consts.test(params, errormsg)){
+                    cursor->setError(LIBNAME+":"+name, errormsg);
+                    return std::make_shared<CV::Item>();
+                }
+                if(params.size() == 1){
+                    auto n = std::floor(std::static_pointer_cast<CV::Number>(params[0])->get());
+                    return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(n));
+                }else{
+                    std::vector<std::shared_ptr<CV::Item>> results;
+                    for(int i = 0; i < params.size(); ++i){
+                        auto n = std::floor(std::static_pointer_cast<CV::Number>(params[i])->get());
+                        results.push_back(std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(n)));
                     }
-                    if(operands.size() > 1){
-                        cursor->setError("operator '"+LIBNAME+":abs': expects no more than 1 operand");
-                        return std::make_shared<CV::Item>(CV::Item());						
+                    return std::static_pointer_cast<CV::Item>(std::make_shared<CV::List>(results, false));
+                }
+                return std::make_shared<CV::Item>();
+            }, true));    
+
+
+            lib->set("ceil", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
+                static const std::string name = "ceil";
+                CV::FunctionConstraints consts;
+                consts.setMinParams(1);
+                consts.allowNil = false;
+                consts.allowMisMatchingTypes = false;
+                consts.setExpectType(CV::ItemTypes::NUMBER);
+                std::string errormsg;
+                if(!consts.test(params, errormsg)){
+                    cursor->setError(LIBNAME+":"+name, errormsg);
+                    return std::make_shared<CV::Item>();
+                }
+                if(params.size() == 1){
+                    auto n = std::ceil(std::static_pointer_cast<CV::Number>(params[0])->get());
+                    return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(n));
+                }else{
+                    std::vector<std::shared_ptr<CV::Item>> results;
+                    for(int i = 0; i < params.size(); ++i){
+                        auto n = std::ceil(std::static_pointer_cast<CV::Number>(params[i])->get());
+                        results.push_back(std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(n)));
                     }
-                    if(operands[0]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator '"+LIBNAME+":abs': argument(0) must be a NUMBER");
-                        return std::make_shared<CV::Item>(CV::Item());	                        
+                    return std::static_pointer_cast<CV::Item>(std::make_shared<CV::List>(results, false));
+                }
+                return std::make_shared<CV::Item>();
+            }, true));      
+
+
+            lib->set("deg-rads", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
+                static const std::string name = "deg-rads";
+                CV::FunctionConstraints consts;
+                consts.setMinParams(1);
+                consts.allowNil = false;
+                consts.allowMisMatchingTypes = false;
+                consts.setExpectType(CV::ItemTypes::NUMBER);
+                std::string errormsg;
+                if(!consts.test(params, errormsg)){
+                    cursor->setError(LIBNAME+":"+name, errormsg);
+                    return std::make_shared<CV::Item>();
+                }
+                if(params.size() == 1){
+                    auto n = std::static_pointer_cast<CV::Number>(params[0])->get() * 0.01745329251994329576923690768489;
+                    return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(n));
+                }else{
+                    std::vector<std::shared_ptr<CV::Item>> results;
+                    for(int i = 0; i < params.size(); ++i){
+                        auto n = std::static_pointer_cast<CV::Number>(params[i])->get() * 0.01745329251994329576923690768489;
+                        results.push_back(std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(n)));
                     }
-                    return CV::create(std::abs(*static_cast<double*>(operands[0]->data)));	   
-                }, {}
-            )));                                    
+                    return std::static_pointer_cast<CV::Item>(std::make_shared<CV::List>(results, false));
+                }
+                return std::make_shared<CV::Item>();
+            }, true));          
 
 
-            lib->registerProperty("sqrt", std::make_shared<CV::FunctionType>(CV::FunctionType([](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
-                    if(operands.size() < 1){
-                        cursor->setError("operator '"+LIBNAME+":sqrt': expects at least 1 operand");
-                        return std::make_shared<CV::Item>(CV::Item());						
+            lib->set("rads-degs", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
+                static const std::string name = "rads-degs";
+                CV::FunctionConstraints consts;
+                consts.setMinParams(1);
+                consts.allowNil = false;
+                consts.allowMisMatchingTypes = false;
+                consts.setExpectType(CV::ItemTypes::NUMBER);
+                std::string errormsg;
+                if(!consts.test(params, errormsg)){
+                    cursor->setError(LIBNAME+":"+name, errormsg);
+                    return std::make_shared<CV::Item>();
+                }
+                if(params.size() == 1){
+                    auto n = std::static_pointer_cast<CV::Number>(params[0])->get() * 0.01745329251994329576923690768489;
+                    n = (n/CANVAS_STDLIB_MATH_PI*180.0) + (n > 0.0 ? 0.0 : 360.0);
+                    return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(n));
+                }else{
+                    std::vector<std::shared_ptr<CV::Item>> results;
+                    for(int i = 0; i < params.size(); ++i){
+                        auto n = std::static_pointer_cast<CV::Number>(params[0])->get() * 0.01745329251994329576923690768489;
+                        n = (n/CANVAS_STDLIB_MATH_PI*180.0) + (n > 0.0 ? 0.0 : 360.0);
+                        results.push_back(std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(n)));
                     }
-                    if(operands.size() > 1){
-                        cursor->setError("operator '"+LIBNAME+":sqrt': expects no more than 1 operand");
-                        return std::make_shared<CV::Item>(CV::Item());						
-                    }
-                    if(operands[0]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator '"+LIBNAME+":sqrt': argument(0) must be a NUMBER");
-                        return std::make_shared<CV::Item>(CV::Item());	                        
-                    }
-                    return CV::create(std::sqrt(*static_cast<double*>(operands[0]->data)));	   
-                }, {}
-            )));   
-
-            lib->registerProperty("deg-rads", std::make_shared<CV::FunctionType>(CV::FunctionType([](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
-                    if(operands.size() < 1){
-                        cursor->setError("operator '"+LIBNAME+":deg-rads': expects at least 1 operand");
-                        return std::make_shared<CV::Item>(CV::Item());						
-                    }
-                    if(operands.size() > 1){
-                        cursor->setError("operator '"+LIBNAME+":deg-rads': expects no more than 1 operand");
-                        return std::make_shared<CV::Item>(CV::Item());						
-                    }
-                    if(operands[0]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator '"+LIBNAME+":deg-rads': argument(0) must be a NUMBER");
-                        return std::make_shared<CV::Item>(CV::Item());	                        
-                    }
-                    return CV::create(*static_cast<double*>(operands[0]->data) * 0.01745329251994329576923690768489);	   
-                }, {}
-            )));   
-
-
-            lib->registerProperty("rads-degs", std::make_shared<CV::FunctionType>(CV::FunctionType([](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
-                    if(operands.size() < 1){
-                        cursor->setError("operator '"+LIBNAME+":deg-rads': expects at least 1 operand");
-                        return std::make_shared<CV::Item>(CV::Item());						
-                    }
-                    if(operands.size() > 1){
-                        cursor->setError("operator '"+LIBNAME+":deg-rads': expects no more than 1 operand");
-                        return std::make_shared<CV::Item>(CV::Item());						
-                    }
-                    if(operands[0]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator '"+LIBNAME+":deg-rads': argument(0) must be a NUMBER");
-                        return std::make_shared<CV::Item>(CV::Item());	                        
-                    }
-                    
-
-                    double rads = *static_cast<double*>(operands[0]->data);
-                    return CV::create( (rads/CANVAS_STDLIB_MATH_PI*180.0) + (rads > 0.0 ? 0.0 : 360.0) );	   
-                }, {}
-            )));              
-
-
-            lib->registerProperty("max", std::make_shared<CV::FunctionType>(CV::FunctionType([](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
-                    if(operands.size() < 2){
-                        cursor->setError("operator '"+LIBNAME+":max': expects at least 2 operand");
-                        return std::make_shared<CV::Item>(CV::Item());						
-                    }
-                    if(operands.size() > 2){
-                        cursor->setError("operator '"+LIBNAME+":max': expects no more than 2 operand");
-                        return std::make_shared<CV::Item>(CV::Item());						
-                    }
-                    if(operands[0]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator '"+LIBNAME+":max': argument(0) must be a NUMBER");
-                        return std::make_shared<CV::Item>(CV::Item());	                        
-                    }
-                    if(operands[1]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator '"+LIBNAME+":max': argument(1) must be a NUMBER");
-                        return std::make_shared<CV::Item>(CV::Item());	                        
-                    }                    
-
-                    return CV::create(std::max(*static_cast<double*>(operands[0]->data), *static_cast<double*>(operands[1]->data)));	   
-                }, {}
-            )));	   
-
-
-            lib->registerProperty("pow", std::make_shared<CV::FunctionType>(CV::FunctionType([](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
-                    if(operands.size() < 2){
-                        cursor->setError("operator '"+LIBNAME+":pow': expects at least 2 operand");
-                        return std::make_shared<CV::Item>(CV::Item());						
-                    }
-                    if(operands.size() > 2){
-                        cursor->setError("operator '"+LIBNAME+":pow': expects no more than 2 operand");
-                        return std::make_shared<CV::Item>(CV::Item());						
-                    }
-                    if(operands[0]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator '"+LIBNAME+":pow': argument(0) must be a NUMBER");
-                        return std::make_shared<CV::Item>(CV::Item());	                        
-                    }
-                    if(operands[1]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator '"+LIBNAME+":pow': argument(1) must be a NUMBER");
-                        return std::make_shared<CV::Item>(CV::Item());	                        
-                    }                    
-
-                    return CV::create(std::pow(*static_cast<double*>(operands[0]->data), *static_cast<double*>(operands[1]->data)));	   
-                }, {}
-            )));                              
-
-            lib->registerProperty("min", std::make_shared<CV::FunctionType>(CV::FunctionType([](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
-                    if(operands.size() < 2){
-                        cursor->setError("operator '"+LIBNAME+":min': expects at least 2 operand");
-                        return std::make_shared<CV::Item>(CV::Item());						
-                    }
-                    if(operands.size() > 2){
-                        cursor->setError("operator '"+LIBNAME+":min': expects no more than 2 operand");
-                        return std::make_shared<CV::Item>(CV::Item());						
-                    }
-                    if(operands[0]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator '"+LIBNAME+":min': argument(0) must be a NUMBER");
-                        return std::make_shared<CV::Item>(CV::Item());	                        
-                    }
-                    if(operands[1]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator '"+LIBNAME+":min': argument(1) must be a NUMBER");
-                        return std::make_shared<CV::Item>(CV::Item());	                        
-                    }                    
-
-                    return CV::create(std::min(*static_cast<double*>(operands[0]->data), *static_cast<double*>(operands[1]->data)));	   
-                }, {}
-            )));	                     
-
-            lib->registerProperty("clamp", std::make_shared<CV::FunctionType>(CV::FunctionType([](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
-                    if(operands.size() < 3){
-                        cursor->setError("operator '"+LIBNAME+":clamp': expects at least 3 operand");
-                        return std::make_shared<CV::Item>(CV::Item());						
-                    }
-                    if(operands.size() > 3){
-                        cursor->setError("operator '"+LIBNAME+":clamp': expects no more than 3 operand");
-                        return std::make_shared<CV::Item>(CV::Item());						
-                    }
-                    if(operands[0]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator '"+LIBNAME+":clamp': argument(0) must be a NUMBER");
-                        return std::make_shared<CV::Item>(CV::Item());	                        
-                    }
-                    if(operands[1]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator '"+LIBNAME+":clamp': argument(1) must be a NUMBER");
-                        return std::make_shared<CV::Item>(CV::Item());	                        
-                    }    
-                    if(operands[2]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator '"+LIBNAME+":clamp': argument(2) must be a NUMBER");
-                        return std::make_shared<CV::Item>(CV::Item());	                        
-                    }                                      
-
-                    return CV::create(std::min(std::max(*static_cast<double*>(operands[0]->data), *static_cast<double*>(operands[1]->data)), *static_cast<double*>(operands[2]->data)));	   
-                }, {}
-            )));
+                    return std::static_pointer_cast<CV::Item>(std::make_shared<CV::List>(results, false));
+                }
+                return std::make_shared<CV::Item>();
+            }, true));          
 
 
 
-
-            lib->registerProperty("rand-int", std::make_shared<CV::FunctionType>(CV::FunctionType([](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
-                    if(operands.size() < 2){
-                        cursor->setError("operator '"+LIBNAME+":rand-int': expects at least 2 operand");
-                        return std::make_shared<CV::Item>(CV::Item());						
-                    }
-                    if(operands.size() > 2){
-                        cursor->setError("operator '"+LIBNAME+":rand-int': expects no more than 2 operand");
-                        return std::make_shared<CV::Item>(CV::Item());						
-                    }
-                    if(operands[0]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator '"+LIBNAME+":rand-int': argument(0) must be a NUMBER");
-                        return std::make_shared<CV::Item>(CV::Item());	                        
-                    }
-                    if(operands[1]->type != CV::ItemTypes::NUMBER){
-                        cursor->setError("operator '"+LIBNAME+":rand-int': argument(1) must be a NUMBER");
-                        return std::make_shared<CV::Item>(CV::Item());	                        
-                    }                    
-
-
-                    auto min = *static_cast<double*>(operands[0]->data);
-                    auto max = *static_cast<double*>(operands[1]->data);
-
-                    std::uniform_int_distribution<int> uni(min,max);        
-                    return CV::create(uni(rng));	   
-                }, {}
-            )));            	
+            lib->set("max", std::make_shared<CV::Function>(std::vector<std::string>({"a", "b"}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
+                static const std::string name = "max";
+                CV::FunctionConstraints consts;
+                consts.setMinParams(2);
+                consts.setMaxParams(2);
+                consts.allowNil = false;
+                consts.allowMisMatchingTypes = false;
+                consts.setExpectType(CV::ItemTypes::NUMBER);
+                std::string errormsg;
+                if(!consts.test(params, errormsg)){
+                    cursor->setError(LIBNAME+":"+name, errormsg);
+                    return std::make_shared<CV::Item>();
+                }
+                auto y = std::static_pointer_cast<CV::Number>(params[0])->get();
+                auto x = std::static_pointer_cast<CV::Number>(params[1])->get();
+                return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(std::max(y, x)));
+            }, false));       
 
 
-            lib->registerProperty("pi", CV::create(CANVAS_STDLIB_MATH_PI));
+            lib->set("min", std::make_shared<CV::Function>(std::vector<std::string>({"a", "b"}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
+                static const std::string name = "min";
+                CV::FunctionConstraints consts;
+                consts.setMinParams(2);
+                consts.setMaxParams(2);
+                consts.allowNil = false;
+                consts.allowMisMatchingTypes = false;
+                consts.setExpectType(CV::ItemTypes::NUMBER);
+                std::string errormsg;
+                if(!consts.test(params, errormsg)){
+                    cursor->setError(LIBNAME+":"+name, errormsg);
+                    return std::make_shared<CV::Item>();
+                }
+                auto y = std::static_pointer_cast<CV::Number>(params[0])->get();
+                auto x = std::static_pointer_cast<CV::Number>(params[1])->get();
+                return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(std::max(y, x)));
+            }, false)); 
 
 
-            ctx->registerProperty(LIBNAME, std::static_pointer_cast<CV::Item>(lib));
-        }   
+            lib->set("clamp", std::make_shared<CV::Function>(std::vector<std::string>({"n", "min", "max"}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
+                static const std::string name = "clamp";
+                CV::FunctionConstraints consts;
+                consts.setMinParams(3);
+                consts.setMaxParams(3);
+                consts.allowNil = false;
+                consts.allowMisMatchingTypes = false;
+                consts.setExpectType(CV::ItemTypes::NUMBER);
+                std::string errormsg;
+                if(!consts.test(params, errormsg)){
+                    cursor->setError(LIBNAME+":"+name, errormsg);
+                    return std::make_shared<CV::Item>();
+                }
+                auto n = std::static_pointer_cast<CV::Number>(params[0])->get();
+                auto min = std::static_pointer_cast<CV::Number>(params[1])->get();
+                auto max = std::static_pointer_cast<CV::Number>(params[2])->get();
+                return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(std::min(std::max(n, min), max)));
+            }, false));                                                            
 
-    }
+
+            lib->set("rng", std::make_shared<CV::Function>(std::vector<std::string>({"min", "max"}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
+                static const std::string name = "rng";
+                CV::FunctionConstraints consts;
+                consts.setMinParams(2);
+                consts.setMaxParams(2);
+                consts.allowNil = false;
+                consts.allowMisMatchingTypes = false;
+                consts.setExpectType(CV::ItemTypes::NUMBER);
+                std::string errormsg;
+                if(!consts.test(params, errormsg)){
+                    cursor->setError(LIBNAME+":"+name, errormsg);
+                    return std::make_shared<CV::Item>();
+                }
+                auto x = std::static_pointer_cast<CV::Number>(params[0])->get();
+                auto y = std::static_pointer_cast<CV::Number>(params[1])->get();
+                std::uniform_int_distribution<int> uni(x, y);  
+                return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(uni(rng))); 
+            }, false));
+
+
+            lib->set("mod", std::make_shared<CV::Function>(std::vector<std::string>({"x", "y"}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
+                static const std::string name = "mod";
+                CV::FunctionConstraints consts;
+                consts.setMinParams(2);
+                consts.setMaxParams(2);
+                consts.allowNil = false;
+                consts.allowMisMatchingTypes = false;
+                consts.setExpectType(CV::ItemTypes::NUMBER);
+                std::string errormsg;
+                if(!consts.test(params, errormsg)){
+                    cursor->setError(LIBNAME+":"+name, errormsg);
+                    return std::make_shared<CV::Item>();
+                }
+                auto x = (int)std::static_pointer_cast<CV::Number>(params[0])->get();
+                auto y = (int)std::static_pointer_cast<CV::Number>(params[1])->get(); 
+                return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>( x % y )); 
+            }, false));              
+
+            lib->set("pi", std::make_shared<CV::Number>(CANVAS_STDLIB_MATH_PI));
+            ctx->set(LIBNAME, lib);
+        }
+
+    } 
+    
 
 
 #endif

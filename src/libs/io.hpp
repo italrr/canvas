@@ -1,52 +1,57 @@
-#ifndef CANVAS_STDLIB_IO_HPP
-    #define CANVAS_STDLIB_IO_HPP
-
-    #include "../cv.hpp"
-
-    /*
-        STANDARD LIBRARY `IO`
-        
-        IO includes buffer manipulation such as files, stdout, stdin, and stderr
+#ifndef CANVAS_STD_LIBRARY_IO_HPP
+    #define CANVAS_STD_LIBRARY_IO_HPP
     
-    */
-
     #include <stdio.h>
-    #include <iostream>
 
-    static void ___WRITE_STDOUT(const std::string &v){
-        int n = v.size();
-        for(int i = 0; i < v.size(); ++i){
-            putchar(v[i]);
-        }
-    }
+    #include "../CV.hpp"
 
     namespace io {
-
         static std::string LIBNAME = "io";
+        static std::mutex accessMutex; 
 
-        static void registerLibrary(std::shared_ptr<CV::Item> &ctx){
-            auto lib = std::make_shared<CV::ProtoType>(CV::ProtoType());
+        static void ___WRITE_STDOUT(const std::string &v){
+            int n = v.size();
+            accessMutex.lock();
+            std::cout << v;
+            accessMutex.unlock();
+    }        
 
-            lib->registerProperty("out", std::make_shared<CV::FunctionType>(CV::FunctionType([](const std::vector<std::shared_ptr<CV::Item>> &operands, std::shared_ptr<CV::Item> &ctx, CV::Cursor *cursor){
-                    
-                    if(operands.size() < 1){
-                        cursor->setError("operator '"+LIBNAME+":out': expects at least 1 operand");
-                        return std::make_shared<CV::Item>(CV::Item());						
+        static void registerLibrary(std::shared_ptr<CV::Context> &ctx){
+            auto lib = std::make_shared<CV::Context>(ctx);
+            lib->copyable = false;
+            lib->readOnly = true;
+            lib->solid = true;
+
+            lib->set("out", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
+                CV::FunctionConstraints consts;
+                consts.setMinParams(1);
+                consts.allowNil = false;
+                consts.allowMisMatchingTypes = true;
+
+                std::string errormsg;
+                if(!consts.test(params, errormsg)){
+                    cursor->setError(LIBNAME+"':'out", errormsg);
+                    return std::make_shared<CV::Item>();
+                }
+
+                for(int i = 0; i < params.size(); ++i){
+                    if(params[i]->type == CV::ItemTypes::STRING){
+                        auto str = std::static_pointer_cast<CV::String>(params[i]);
+                        ___WRITE_STDOUT(str->get());
+                    }else{
+                        ___WRITE_STDOUT(CV::ItemToText(params[i].get()));
                     }
+                }
 
-                    for(int i = 0; i < operands.size(); ++i){
-                        ___WRITE_STDOUT(operands[i]->str(false));
-                    }
+                return std::make_shared<CV::Item>();
+            }, true)); 
 
 
-                    return CV::create(1);
-                }, {}
-            )));	
+            ctx->set(LIBNAME, lib);
+        }
 
-            ctx->registerProperty(LIBNAME, std::static_pointer_cast<CV::Item>(lib));
-        }   
-
-    }
+    } 
+    
 
 
 #endif
