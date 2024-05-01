@@ -12,7 +12,7 @@
 
     #define __CV_NUMBER_NATIVE_TYPE double
 
-    static const __CV_NUMBER_NATIVE_TYPE CANVAS_LANG_VERSION[3] = { 0, 1, 0 }; // BETA
+    static const __CV_NUMBER_NATIVE_TYPE CANVAS_LANG_VERSION[3] = { 0, 2, 0 }; // BETA
 
     namespace CV {
 
@@ -688,6 +688,8 @@
             // For helping the stack finding items (existing or not existing ones)
             std::shared_ptr<CV::DisplayItem> addDisplayItem(const std::string &name, std::shared_ptr<CV::DisplayItem> &ditem);
             std::shared_ptr<CV::DisplayItem> addDisplayItem(const std::string &name, unsigned insId, unsigned origin = 0); // generic
+            std::shared_ptr<CV::DisplayItem> addDisplayItemTyped(const std::string &name, unsigned insId, std::shared_ptr<CV::Item> &item);
+            std::shared_ptr<CV::DisplayItem> addDisplayItemTyped(const std::string &name, unsigned insId, unsigned type);
             std::shared_ptr<CV::DisplayItem> addDisplayItemFunction(const std::string &name, unsigned insId, unsigned argN, unsigned origin = 0);
             bool removeDisplayItem(unsigned id); // by insId
             void flushDisplayItems();
