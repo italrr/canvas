@@ -879,6 +879,28 @@ static void AsyncFunction(std::shared_ptr<CV::Job> &job, std::shared_ptr<CV::Con
     }
 }
 
+std::shared_ptr<CV::DisplayItem> CV::Context::addDisplayItemTyped(const std::string &name, unsigned insId, unsigned type){
+    this->accessMutex.lock();
+    auto ditem = std::make_shared<CV::DisplayItem>();
+    ditem->set(type, insId, 0);
+    ditem->name = name;
+    ditem->insType = CV::ByteCodeType::PROXY;
+    this->displayItems[name] = ditem;
+    this->accessMutex.unlock();
+    return ditem;
+}
+
+std::shared_ptr<CV::DisplayItem> CV::Context::addDisplayItemTyped(const std::string &name, unsigned insId, std::shared_ptr<CV::Item> &item){
+    this->accessMutex.lock();
+    auto ditem = std::make_shared<CV::DisplayItem>();
+    ditem->set(item->type, insId, 0);
+    ditem->name = name;
+    ditem->insType = CV::ByteCodeType::PROXY;
+    this->displayItems[name] = ditem;
+    this->accessMutex.unlock();
+    return ditem;
+}
+
 std::shared_ptr<CV::DisplayItem> CV::Context::addDisplayItemFunction(const std::string &name, unsigned insId, unsigned argN, unsigned origin){
     this->accessMutex.lock();
     auto ditem = std::make_shared<CV::DisplayItem>();
@@ -2110,6 +2132,49 @@ static bool typicalVariadicArithmeticCheck(const std::string &name, const std::v
     return true;
 };
 
+// It's used to quickly execute a function Item with param Items. no proxies, no instructions, CRASHING THIS COMPUTER WITH NO SURVIVORS.
+// (Practical but slow as excrement)
+static std::shared_ptr<CV::Item> divergentFunction(
+                    std::shared_ptr<CV::Function> &fn,
+                    std::vector<std::shared_ptr<CV::Item>> &params,
+                    std::shared_ptr<CV::Cursor> &cursor,
+                    std::shared_ptr<CV::Context> &ctx){
+
+    
+    if(fn->params.size() != params.size()){
+        cursor->setError(CV::ItemToText(fn.get()), "Provided ("+std::to_string(params.size())+") argument(s). Expected exactly ("+std::to_string(fn->params.size())+") argument(s).");
+        return std::make_shared<CV::Item>();
+    }
+
+    auto program = std::make_shared<CV::Stack>();
+    auto nctx = std::make_shared<CV::Context>(ctx);
+    
+    // define function within context
+    std::string fnName = "anon-fn-"+std::to_string(genId());
+    nctx->set(fnName, fn);
+
+    // Expression
+    std::string expression = fnName;
+
+    // define params
+    std::vector<std::string> names;
+    for(int i = 0; i < params.size(); ++i){
+        names.push_back("anon-fn-param-"+std::to_string(genId()));
+    }
+    for(int i = 0; i < params.size(); ++i){
+        nctx->set(names[i], params[i]);
+        expression += " "+names[i];
+    }
+    // Compile command
+    auto code = ParseInputToByteToken(expression, program, nctx, cursor);
+    if(cursor->error){ return std::make_shared<CV::Item>(); } 
+    // Run it
+    auto r = RunInstruction(code, program, nctx, cursor);
+    if(cursor->error){ return std::make_shared<CV::Item>(); }     
+
+    return r;
+}
+
 void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
 
     registerGenericTraits();
@@ -2422,11 +2487,12 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         list->accessMutex.lock();
         for(int i = 0; i < list->data.size(); ++i){
             auto args = std::vector<std::shared_ptr<CV::Item>>{list->data[i]};
-            // auto result = runFunction(criteria, args, cursor, ctx);
-            // if(checkCond(result)){
-            //     continue;
-            // }
-            items.push_back(list->get(i));
+            auto result = divergentFunction(criteria, args, cursor, ctx);
+            if(cursor->error) { return std::make_shared<CV::Item>(); }
+            if(checkCond(result)){
+                continue;
+            }
+            items.push_back(list->data[i]);
         }        
         list->accessMutex.unlock();
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::List>(items, false));
@@ -2585,7 +2651,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
 
         std::string errormsg;
         if(!consts.test(params, errormsg)){
-            cursor->setError("<<", errormsg);
+            cursor->setError("l-pop", errormsg);
             return std::make_shared<CV::Item>();
         }
 
@@ -2747,7 +2813,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
 
         std::string errormsg;
         if(!consts.test(params, errormsg)){
-            cursor->setError("l-reverse", errormsg);
+            cursor->setError("s-reverse", errormsg);
             return std::make_shared<CV::Item>();
         }
 
@@ -3198,7 +3264,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>( (int)std::static_pointer_cast<CV::Number>(subject)->get() % 2 != 0));
     }); 
 
-    registerTrait(CV::ItemTypes::NUMBER, "is-odd", [](std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
+    registerTrait(CV::ItemTypes::NUMBER, "is-even", [](std::shared_ptr<Item> &subject, const std::string &value, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects){
         if(subject->type == CV::ItemTypes::NIL){
             return subject;
         }
@@ -3347,9 +3413,9 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         }
         auto func = std::static_pointer_cast<CV::Function>(subject);
         func->accessMutex.lock();
-        // auto v = func->binary ? "[BINARY]" : func->body;
+        auto v = func->binary ? "[BINARY]" : func->body;
         func->accessMutex.unlock();
-        return std::static_pointer_cast<CV::Item>(std::make_shared<CV::String>(  ""  ));    
+        return std::static_pointer_cast<CV::Item>(std::make_shared<CV::String>(  v  ));    
     });  
 
 
@@ -3488,7 +3554,6 @@ void CV::TokenByteCode::inheritModifiers(CV::Token &token){
         this->modifiers.push_back(token.modifiers[i]);
     }
     this->modMutex.unlock();
-    // token.clearModifiers();
 }
 
 void CV::TokenByteCode::inheritModifiers(std::vector<std::shared_ptr<CV::ModifierPair>> &mods){
@@ -3498,7 +3563,6 @@ void CV::TokenByteCode::inheritModifiers(std::vector<std::shared_ptr<CV::Modifie
         this->modifiers.push_back(mods[i]);
     }
     this->modMutex.unlock();
-    // mods.clear();
 }
 
 static std::shared_ptr<CV::Item> solveName(CV::Token &token, unsigned &origin, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
@@ -3594,6 +3658,50 @@ static std::shared_ptr<CV::Context> solveLocalCtx(std::shared_ptr<CV::TokenByteC
     return ctx;
 }
 
+
+static std::shared_ptr<CV::Item> dereferProxyIns(
+                                    std::shared_ptr<CV::Stack> &program,
+                                    std::shared_ptr<CV::TokenByteCode> &ins,
+                                    std::shared_ptr<CV::Context> &ctx,
+                                    std::shared_ptr<CV::Cursor> &cursor){
+
+    if(ins->type == CV::ByteCodeType::FORWARD_INS){
+        auto item = RunInstruction(ins, program, ctx, cursor);
+        if(cursor->error){ return std::make_shared<CV::Item>(); }
+        return item;
+    }
+    if(ins->type != CV::ByteCodeType::PROXY){
+        return std::make_shared<CV::Item>();
+    }
+    auto target = ins->data[0];
+    if(target == 0){
+        return std::make_shared<CV::Item>();
+    }
+    return ctx->getStaticValue(target);
+}
+
+static unsigned getTypeFromProxyIns(
+                                    std::shared_ptr<CV::Stack> &program,
+                                    std::shared_ptr<CV::TokenByteCode> &ins,
+                                    std::shared_ptr<CV::Context> &ctx,
+                                    std::shared_ptr<CV::Cursor> &cursor){
+
+    if(ins->type == CV::ByteCodeType::FORWARD_INS){
+        auto item = RunInstruction(ins, program, ctx, cursor);
+        if(cursor->error){ return CV::ItemTypes::NIL; }
+        return item->type;
+    }
+    if(ins->type != CV::ByteCodeType::PROXY){
+        return CV::ItemTypes::NIL;
+    }
+    auto target = ins->data[0];
+    if(target == 0){
+        return CV::ItemTypes::NIL;
+    }
+    auto item = ctx->getStaticValue(target);
+    return item.get() ? item->type : CV::ItemTypes::NIL;
+}
+
 static std::shared_ptr<CV::TokenByteCode> ProcessToken(
                                             std::shared_ptr<CV::Stack> &program, CV::Token &token,
                                             const std::vector<CV::Token> &params, std::vector<std::shared_ptr<CV::ModifierPair>> &headMods,
@@ -3601,7 +3709,7 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
                                             bool future
                                             ){
     auto &imp = token.first;
-    if(imp == "proxy"){
+    if(imp == "ref"){
         if(constructModCheck(token, cursor, false)){
             return program->create(CV::ByteCodeType::NOOP);
         }
@@ -3704,8 +3812,7 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
         auto param1 = params[1];
         auto name = params[0];
 
-
-        auto v = ParseInputToByteToken(param1, program, ctx, cursor, false); // future tells it to not summon function calls basically
+        auto v = ParseInputToByteToken(param1, program, ctx, cursor, !param1.complex); // future tells it to not summon function calls basically
         if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
         v->inheritModifiers(param1);
 
@@ -3971,7 +4078,7 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
 
         for(int i = 0; i < params.size(); ++i){
             auto param = params[i];
-            auto v = ParseInputToByteToken(param, program, ctx, cursor);
+            auto v = ParseInputToByteToken(param, program, ctx, cursor, !param.complex);
             if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
             ins->parameter.push_back(v->id);
         }        
@@ -4032,10 +4139,11 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
         // Solve display Items (they don't exist yet)
         if(tproxy.get() && token.getModifierNumber() == 0 && params.size() == 0){
 
+
             auto ins = program->instructions[tproxy->insId];
+
             // If it's a proxy we send it its way
             if(ins->type == CV::ByteCodeType::PROXY){
-                // std::cout << imp << " " << tproxy->name << " " << ins->literal() << " " << token.literal() << std::endl;
                 ins->inheritModifiers(token);   
                 auto fins = postTokenCreationFinalization(program, ins, headMods, ctx, cursor);        
                 if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
@@ -4063,7 +4171,13 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
         if(var.get()){
             ctx->setStaticValue(var);       
         }
-        if(var.get() && var->type == CV::ItemTypes::FUNCTION && !future){
+        if(var.get() && var->type == CV::ItemTypes::FUNCTION && !future || tproxy.get() && tproxy->itemType == CV::ItemTypes::FUNCTION && !future){
+            
+            if(tproxy.get() && tproxy->itemType == CV::ItemTypes::FUNCTION){
+                auto p = program->instructions[tproxy->insId];
+                var = dereferProxyIns(program, p, ctx, cursor);
+                if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
+            }
 
             auto fn = std::static_pointer_cast<CV::Function>(var);
 
@@ -4089,8 +4203,7 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
             if(fn->binary){
                 for(int i = 0; i < params.size(); ++i){
                     auto param = params[i];
-                    auto v = ParseInputToByteToken(param, program, ctx, cursor);
-                    // v->inheritModifiers(param);
+                    auto v = ParseInputToByteToken(param, program, ctx, cursor, !param.complex);
                     if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
                     ins->parameter.push_back(v->id);
                 }
@@ -4108,20 +4221,28 @@ static std::shared_ptr<CV::TokenByteCode> ProcessToken(
                     ins->parameter.push_back(insArgs->id);
                     for(int i = 0; i < params.size(); ++i){
                         auto param = params[i];
-                        auto v = ParseInputToByteToken(param, program, ctx, cursor);
+                        auto v = ParseInputToByteToken(param, program, ctx, cursor, !param.complex);
+                        if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
                         ins->parameter.push_back(v->id);
                     } 
                 }else{
                     for(int i = 0; i < params.size(); ++i){
                         auto param = params[i];
-                        auto v = ParseInputToByteToken(param, program, ctx, cursor);
+                        auto v = ParseInputToByteToken(param, program, ctx, cursor, !param.complex);
+                        if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
                         ins->parameter.push_back(v->id);
-                        ctx->addDisplayItem(fn->params[i], v->id);
+                        auto type = getTypeFromProxyIns(program, v, ctx, cursor);
+                        if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
+                        if(type == CV::ItemTypes::FUNCTION){
+                            ctx->addDisplayItemTyped(fn->params[i], v->id, type);
+                        }else{
+                            ctx->addDisplayItem(fn->params[i], v->id);
+                        }
                         clearTemps.push_back(v->id);
                     } 
                 }
 
-                auto bodyToken = ParseInputToByteToken(fn->body, program, ctx, cursor);
+                auto bodyToken = ParseInputToByteToken(fn->body, program, ctx, cursor, false);
                 if(cursor->error){ return program->create(CV::ByteCodeType::NOOP); }
 
                 ins->parameter[1] = bodyToken->id;

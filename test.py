@@ -73,14 +73,24 @@ cases = [
     TestCase("gte 8 8 5", "1", True),
     TestCase("eq 5.2 1.2", "0", True),
 
-    # Copy trait
-    TestCase("proxy l-sort", "[fn [c l] [BINARY]]", True),
+    # test ref
+    TestCase("ref l-sort", "[fn [c l] [BINARY]]", True),
 
     # with / untether
     TestCase("[with [untether [+ [l-gen 1 1000]^]] [+ 1 inherited]]|await", "500501", True), 
     
     # with / async
-    TestCase("[with [with [async [+ 0 1]] [+ inherited 1]] [+ inherited 1]]|await", "3", True)    
+    TestCase("[with [with [async [+ 0 1]] [+ inherited 1]] [+ inherited 1]]|await", "3", True),
+
+    # Function passing
+    TestCase("[set test [fn [t][t 1 1 1]]][test +]", "3", True),
+
+    # Function from context passing
+    TestCase("[set test [fn [t][t 1 1 1]]][test math:sin]", "[0.84147098 0.84147098 0.84147098]", True),      
+
+
+    # Function passing to binary functions
+    TestCase("l-filter [fn [n][math:mod n 2]] [l-gen 1 10]", "[2 4 6 8 10]", True)      
 ]
 
 print("ABOUT TO START TEST CASES FOR CANVAS")
