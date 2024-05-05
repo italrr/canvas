@@ -12,7 +12,7 @@
 
     #define __CV_NUMBER_NATIVE_TYPE double
 
-    static const __CV_NUMBER_NATIVE_TYPE CANVAS_LANG_VERSION[3] = { 0, 2, 0 }; // BETA
+    static const __CV_NUMBER_NATIVE_TYPE CANVAS_LANG_VERSION[3] = { 0, 2, 1 }; // BETA
 
     namespace CV {
 
@@ -935,6 +935,7 @@
         std::string getPrompt();
 
         std::shared_ptr<CV::Item> interpret(const std::string &input, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor, bool flushTemps = true);
+        void runFile(const std::string &path, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor, bool relaxed);
         void flushContextTemps(std::shared_ptr<CV::Context> &ctx);
 
 
