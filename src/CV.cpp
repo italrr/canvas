@@ -12,7 +12,6 @@ static std::mutex genIdMutex;
 static std::mutex gJobsMutex;
 static unsigned lastGenId = 0;
 static bool useColorOnText = false;
-static const bool ShowHEADRef = false;
 
 static const std::string GENERIC_UNDEFINED_SYMBOL_ERROR = "Undefined constructor, operator/name within this context or above, or type.";
 
@@ -801,6 +800,9 @@ std::shared_ptr<CV::Item> CV::Context::getLocal(const std::string &name){
 
 
 std::shared_ptr<CV::Item> CV::Context::get(const std::string &name){
+    if(name == "top"){
+        return this->getTop();
+    }
     this->accessMutex.lock();
     auto it = vars.find(name);
     if(it == vars.end()){
@@ -824,11 +826,6 @@ std::shared_ptr<CV::Item> CV::Context::copy(bool deep){
     return item;
 }
 
-void CV::Context::setTop(std::shared_ptr<CV::Context> &nctx){
-    this->top = nctx;
-    this->set("top", nctx);
-}
-
 std::shared_ptr<CV::Job> CV::Context::getJobById(__CV_NUMBER_NATIVE_TYPE id){
     this->accessMutex.lock();
     for(int i = 0; i < this->jobs.size(); ++i){
@@ -840,6 +837,13 @@ std::shared_ptr<CV::Job> CV::Context::getJobById(__CV_NUMBER_NATIVE_TYPE id){
     }
     this->accessMutex.unlock();
     return std::shared_ptr<Job>(NULL);
+}
+
+std::shared_ptr<CV::Context> CV::Context::getTop(){
+    if(!this->upper){
+        return std::shared_ptr<CV::Context>(NULL);
+    }
+    return this->upper->upper.get() ? this->upper->getTop() : std::static_pointer_cast<CV::Context>(this->upper);
 }
 
 static void ThreadedFunction(std::shared_ptr<CV::Job> job, std::shared_ptr<CV::Context> ctx){
@@ -947,15 +951,22 @@ bool CV::Context::removeDisplayItem(unsigned id){
 }
 
 void CV::Context::flushDisplayItems(){
+    auto top = get("top");
     this->accessMutex.lock();
     // downstream
     for(auto &it : this->staticValues){
+        if(it.second.get() == this || it.second.get() == upper.get() || it.second.get() == top.get()){
+            continue;
+        }
         if(it.second->type == CV::ItemTypes::CONTEXT){
             std::static_pointer_cast<CV::Context>(it.second)->flushDisplayItems();
         }
     }
     for(auto &it : this->vars){
-        if(it.second->type == CV::ItemTypes::CONTEXT && it.first != "top"){
+        if(it.second.get() == this || it.second.get() == upper.get() || it.second.get() == top.get()){
+            continue;
+        }        
+        if(it.second->type == CV::ItemTypes::CONTEXT){
             std::static_pointer_cast<CV::Context>(it.second)->flushDisplayItems();
         }
     }    
@@ -1017,8 +1028,11 @@ std::shared_ptr<CV::Item> CV::Context::getProxiedValue(unsigned id){
 
 std::shared_ptr<CV::Item> CV::Context::setStaticValue(const std::shared_ptr<CV::Item> &item){
     // static values should only be stored in the top context
-    if(this->temporary || this->upper.get()){
+    if(this->upper.get() != item.get() && (this->temporary || this->upper.get())){
         this->upper->setStaticValue(item);
+    }
+    if(this == item.get()){
+        return item;
     }
     this->accessMutex.lock();
     this->staticValues[item->id] = item;
@@ -1071,7 +1085,7 @@ void CV::Context::startJobs(){
     // downstream
     for(auto &it : this->vars){
         if(it.second.get() == this) continue;
-        if(it.second->type == CV::ItemTypes::CONTEXT && it.first != "top"){
+        if(it.second->type == CV::ItemTypes::CONTEXT){
             std::static_pointer_cast<CV::Context>(it.second)->startJobs();
         }
     }
@@ -1177,11 +1191,16 @@ bool CV::ContextStep(std::shared_ptr<CV::Context> &ctx){
     busy = ctx->jobs.size() > 0;
     ctx->accessMutex.unlock();
 
+    auto top = ctx->get("top");
+
     // Run children
     ctx->accessMutex.lock();
     for(auto &it : ctx->vars){
         auto &var = it.second;
-        if(var->type == CV::ItemTypes::CONTEXT && it.first != "top"){
+        if(it.second.get() == ctx.get() || it.second.get() == ctx.get() || it.second.get() == top.get()){
+            continue;
+        }        
+        if(var->type == CV::ItemTypes::CONTEXT){
             auto cctx = std::static_pointer_cast<Context>(var);
             ctx->accessMutex.unlock();
             busy = CV::ContextStep(cctx) || busy;
@@ -1191,6 +1210,9 @@ bool CV::ContextStep(std::shared_ptr<CV::Context> &ctx){
     }  
     for(auto &it : ctx->staticValues){
         auto &var = it.second;
+        if(it.second.get() == ctx.get() || it.second.get() == ctx.get() || it.second.get() == top.get()){
+            continue;
+        }
         if(var->type == CV::ItemTypes::CONTEXT){
             auto cctx = std::static_pointer_cast<Context>(var);
             ctx->accessMutex.unlock();
@@ -1323,10 +1345,6 @@ CV::Context::Context(std::shared_ptr<CV::Context> &ctx){
     this->type = CV::ItemTypes::CONTEXT;        
     this->upper = ctx;
     this->temporary = false;
-    auto ftop = this->get("top");
-    if(ftop.get()){
-        this->top = std::static_pointer_cast<CV::Context>(ftop);
-    }
 }    
 
 void CV::Context::solidify(bool downstream){
@@ -1334,7 +1352,7 @@ void CV::Context::solidify(bool downstream){
     for(auto &it : this->vars){
         auto &item = it.second;
         item->solid = true;
-        if(item.get() == this || (this->upper.get() && this->upper.get() == item.get()) || (this->top.get() && this->top.get() == item.get())) continue;
+        if(item.get() == this || (this->upper.get() && this->upper.get() == item.get())) continue;
         if(downstream && item->type == CV::ItemTypes::CONTEXT){
             std::static_pointer_cast<CV::Context>(item)->solidify(downstream);
         }
@@ -1351,10 +1369,7 @@ void CV::Context::reset(bool downstream){
         auto &item = it.second;
         if(item->solid){ //  || (item->type == CV::ItemTypes::CONTEXT && std::static_pointer_cast<CV::Context>(item)->readOnly)
             continue;
-        }     
-        if(it.first == "top"){
-            continue;
-        }        
+        }      
         names.push_back(it.first);
     }    
     // delete them
@@ -1371,9 +1386,6 @@ void CV::Context::reset(bool downstream){
         for(auto &it : this->vars){
             auto &item = it.second;
             if(item->type != CV::ItemTypes::CONTEXT){
-                continue;
-            }
-            if(it.first == "top"){
                 continue;
             }
             std::static_pointer_cast<CV::Context>(item)->reset(downstream);
@@ -1396,7 +1408,6 @@ void CV::Context::debug(){
     }
 
     for(auto &it : this->vars){
-        if(it.first == "top") continue;
         std::cout << it.first << getSpace(it.first.length()) << " -> " << getSpace(0) << CV::ItemToText(it.second.get()) << std::endl;
     }
 }
@@ -1457,19 +1468,13 @@ std::string CV::ItemToText(CV::Item *item){
             int n = proto->vars.size();
             int c = 0;
             proto->accessMutex.lock();
-            if(!ShowHEADRef && proto->vars.find("top") != proto->vars.end()){
-                --n;
-            }
             for(auto &it : proto->vars){
                 auto name = it.first;
                 auto item = it.second;
                 if(c == 0){
                     output += " ";
                 }
-                if(!ShowHEADRef && name == "top") {
-                    continue;
-                }
-                auto body = name == "top" ? Tools::setTextColor(Tools::Color::YELLOW, true)+"[ct]"+Tools::setTextColor(Tools::Color::RESET) : CV::ItemToText(item.get());
+                auto body = CV::ItemToText(item.get());
                 output += body+CV::ModifierTypes::str(CV::ModifierTypes::NAMER)+Tools::setTextColor(Tools::Color::GREEN)+name+Tools::setTextColor(Tools::Color::RESET);
                 if(c < n-1){
                     output += " ";
@@ -2187,7 +2192,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
 
     */
     ctx->set("none", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
-        return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(256));
+        return std::static_pointer_cast<CV::Item>(std::make_shared<CV::Number>(0));
     }, true));
 
     ctx->set("+", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
@@ -4999,8 +5004,10 @@ static void readAndExecuteFile(const std::string &input, std::shared_ptr<CV::Con
 
 
 
-void CV::runFile(const std::string &path, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor, bool relaxed){
-    ctx->reset(true);
+void CV::runFile(const std::string &path, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor, bool relaxed, bool resetCtx){
+    if(resetCtx){
+        ctx->reset(true);
+    }
     cursor->clear();	
     readAndExecuteFile(path, ctx, cursor, relaxed);
 }

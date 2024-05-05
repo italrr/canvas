@@ -12,7 +12,7 @@
 
     #define __CV_NUMBER_NATIVE_TYPE double
 
-    static const __CV_NUMBER_NATIVE_TYPE CANVAS_LANG_VERSION[3] = { 0, 2, 1 }; // BETA
+    static const __CV_NUMBER_NATIVE_TYPE CANVAS_LANG_VERSION[3] = { 0, 2, 2 }; // BETA
 
     namespace CV {
 
@@ -699,7 +699,8 @@
 
             std::unordered_map<std::string, std::shared_ptr<CV::Item>> vars;
             std::shared_ptr<Context> upper;
-            std::shared_ptr<Context> top;
+
+            std::shared_ptr<Context> getTop();
             bool temporary;
             bool readOnly;
             uint64_t createdAt;
@@ -730,7 +731,6 @@
 
             std::shared_ptr<CV::Item> copy(bool deep = true);
 
-            void setTop(std::shared_ptr<Context> &nctx);
             ItemContextPair getWithContext(const std::string &name);
             ItemContextPair getWithContext(std::shared_ptr<CV::Item> &item);
             std::shared_ptr<CV::Item> set(const std::string &name, const std::shared_ptr<CV::Item> &item);
@@ -935,7 +935,7 @@
         std::string getPrompt();
 
         std::shared_ptr<CV::Item> interpret(const std::string &input, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor, bool flushTemps = true);
-        void runFile(const std::string &path, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor, bool relaxed);
+        void runFile(const std::string &path, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor, bool relaxed, bool resetCtx = true);
         void flushContextTemps(std::shared_ptr<CV::Context> &ctx);
 
 
