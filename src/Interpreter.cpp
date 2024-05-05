@@ -170,7 +170,7 @@ int main(int argc, char* argv[]){
 			if(reexecute){
 				ctx->reset(true);
 				cursor->clear();				
-				readAndExecuteFile(dashFile->val, dashRelax->valid);
+				CV::runFile(dashFile->val, ctx, cursor, dashRelax->valid);
 				reexecute = false;
 			}else
 			if(dynamic){

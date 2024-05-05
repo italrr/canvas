@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <iostream>
+#include <fstream>
 #include <unordered_map>
 #include <cmath>
 #include <mutex> 
@@ -4965,6 +4966,44 @@ std::shared_ptr<CV::Item> CV::interpret(const std::string &input, std::shared_pt
 }
 
 
+static void readAndExecuteFile(const std::string &input, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor, bool relaxed){
+	std::ifstream file(input);
+	std::string line;
+	int n = 1;
+	std::string buffer = "";
+	for(std::string line; std::getline(file, line);){
+		cursor->line = n;
+		if(line.size() > 0){
+			buffer += line;
+			if(CV::Tools::isLineComplete(buffer)){
+				CV::interpret(buffer, ctx, cursor, false);
+				ctx->flushDisplayItems();
+				if(cursor->error){
+					std::cout << "Line #" << cursor->line << ": " << cursor->message << std::endl;
+					if(!relaxed){
+						std::exit(1);
+					}
+				}
+				buffer = "";
+			}
+		}
+		++n;
+	}
+
+	if(buffer.size() > 0 && !CV::Tools::isLineComplete(buffer)){
+		std::cout << "Line #" << cursor->line << ": Block wasn't properly closed"  << std::endl;
+		std::exit(1);			
+	}
+	CV::flushContextTemps(ctx);    
+}
+
+
+
+void CV::runFile(const std::string &path, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor, bool relaxed){
+    ctx->reset(true);
+    cursor->clear();	
+    readAndExecuteFile(path, ctx, cursor, relaxed);
+}
 
 void CV::flushContextTemps(std::shared_ptr<CV::Context> &ctx){
     ctx->flushDisplayItems();
