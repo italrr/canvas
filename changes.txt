@@ -1,3 +1,4 @@
 - Add Mimic Types
 - Add ability to change color schemes
+- Add `flip`: It's a mutable logic-oriented function that flips values (ie. "flip 500 -> 0" or "flip 0 -> 1")
 - Minor bug fixes

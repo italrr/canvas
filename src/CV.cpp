@@ -3053,6 +3053,32 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
     /*
         LOGIC
     */
+    ctx->set("flip", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
+        CV::FunctionConstraints consts;
+        consts.setMinParams(1);
+        consts.allowMisMatchingTypes = false;        
+        consts.allowNil = false;
+        consts.setExpectType(CV::ItemTypes::NUMBER);
+
+        std::string errormsg;
+        if(!consts.test(params, errormsg)){
+            cursor->setError("flip", errormsg);
+            return std::make_shared<CV::Item>();
+        }
+
+        if(params.size() == 1){
+            auto n = std::static_pointer_cast<CV::Number>(params[0]);
+            n->set(!static_cast<bool>(n->get()));
+            return params[0];
+        }else{   
+            for(int i = 0; i < params.size(); ++i){
+                auto n = std::static_pointer_cast<CV::Number>(params[i]);
+                n->set(!static_cast<bool>(n->get()));
+            }
+            return std::static_pointer_cast<CV::Item>(std::make_shared<CV::List>(params, false));            
+        }
+    }, true));  
+
     ctx->set("or", std::make_shared<CV::Function>(std::vector<std::string>({}), [](const std::vector<std::shared_ptr<CV::Item>> &params, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx){
         CV::FunctionConstraints consts;
         consts.setMinParams(1);
