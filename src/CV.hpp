@@ -17,6 +17,21 @@
     namespace CV {
 
         namespace Tools {
+
+            namespace Color {
+                enum Color : int {
+                    BLACK,
+                    RED,
+                    GREEN,
+                    YELLOW,
+                    BLUE,
+                    MAGENTA,
+                    CYAN,
+                    WHITE,
+                    RESET
+                };
+            }
+
             bool isValidVarName(const std::string &varname);
             bool isLineComplete(const std::string &input);
             void sleep(uint64_t t);

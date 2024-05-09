@@ -201,20 +201,6 @@ namespace CV {
             return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
         }
 
-        namespace Color {
-            enum Color : int {
-                BLACK,
-                RED,
-                GREEN,
-                YELLOW,
-                BLUE,
-                MAGENTA,
-                CYAN,
-                WHITE,
-                RESET
-            };
-        }
-
         namespace UnixColor {
 
             static std::unordered_map<int, std::string> TextColorCodes = {
