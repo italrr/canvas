@@ -29,9 +29,9 @@
             out << "P6\n" << w << "\n" << h << "\n255\n";
             data->accessMutex.lock();
             for (int i = 0; i < w*h*3; i += 3) {
-                uint8_t r = std::static_pointer_cast<CV::Number>(data->data[i+0])->n * 255.0;
-                uint8_t g = std::static_pointer_cast<CV::Number>(data->data[i+1])->n * 255.0;
-                uint8_t b = std::static_pointer_cast<CV::Number>(data->data[i+2])->n * 255.0;
+                uint8_t r = std::static_pointer_cast<CV::Number>(data->data[i+0])->get() * 255.0;
+                uint8_t g = std::static_pointer_cast<CV::Number>(data->data[i+1])->get() * 255.0;
+                uint8_t b = std::static_pointer_cast<CV::Number>(data->data[i+2])->get() * 255.0;
                 out.write((char*)&r, sizeof(uint8_t));
                 out.write((char*)&g, sizeof(uint8_t));
                 out.write((char*)&b, sizeof(uint8_t));

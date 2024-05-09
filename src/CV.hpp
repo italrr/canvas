@@ -17,6 +17,7 @@
     namespace CV {
 
         namespace Tools {
+            bool isValidVarName(const std::string &varname);
             bool isLineComplete(const std::string &input);
             void sleep(uint64_t t);
             uint64_t ticks();
@@ -182,6 +183,68 @@
                     default: {
                         return "UNDEFINED";
                     };         
+                }
+            }
+        }
+
+        namespace MimicTypes {
+            enum MimicTypes : int {
+                FLOAT = 1024,
+                DOUBLE,
+                INT64,
+                UINT64,
+                INT32,
+                UINT32,
+                INT16,
+                UINT16,
+                INT8,
+                UINT8,
+                STRING,
+                BOOL,
+                UNDEFINED
+            };
+            static std::string str(int type){
+                switch(type){
+                    case FLOAT: {
+                        return "FLOAT";
+                    } break;
+                    case DOUBLE: {
+                        return "DOUBLE";
+                    } break;
+                    case INT64: {
+                        return "INT64";
+                    } break;
+                    case UINT64: {
+                        return "UINT64";
+                    } break;
+                    case INT32: {
+                        return "INT32";
+                    } break;
+                    case UINT32: {
+                        return "UINT32";
+                    } break;
+                    case INT16: {
+                        return "INT16";
+                    } break;
+                    case UINT16: {
+                        return "UINT16";
+                    } break;
+                    case INT8: {
+                        return "INT8";
+                    } break;    
+                    case UINT8: {
+                        return "UINT8";
+                    } break;                                                                 
+                    case STRING: {
+                        return "STRING";
+                    } break;
+                    case BOOL: {
+                        return "BOOL";
+                    } break;                    
+                    default:
+                    case UNDEFINED: {
+                        return "UNDEFINED";
+                    } break;               
                 }
             }
         }
@@ -435,11 +498,18 @@
 
 
         struct Item {
+            void *mimicSrc;
+            int mimicType;
+
             unsigned id;
             uint8_t type;
             bool copyable;
             bool solid;
-            std::mutex accessMutex; 
+            mutable std::mutex accessMutex; 
+
+            bool isMimic() const{
+                return this->mimicSrc != NULL && this->mimicType != MimicTypes::UNDEFINED;
+            }
 
             Item(const Item &other){
 
@@ -480,7 +550,7 @@
 
 
         struct Number : Item {
-            __CV_NUMBER_NATIVE_TYPE n;
+            __CV_NUMBER_NATIVE_TYPE data;
 
             Number(const Number &other){
                 // this->type = other.type;
@@ -492,6 +562,7 @@
                 return *this;
             };
 
+            Number(void *src, int type); // mimic
             Number();
             Number(__CV_NUMBER_NATIVE_TYPE v);
 
@@ -540,7 +611,6 @@
 
         struct String : Item {
             std::string data;
-            
 
             String(const String &other){
             };
@@ -553,6 +623,7 @@
 
             String();
             String(const std::string &str);  
+            String(void *src);
 
 
             bool isEq(std::shared_ptr<CV::Item> &item);
@@ -931,8 +1002,21 @@
         void AddStandardOperators(std::shared_ptr<CV::Context> &ctx);
         bool ContextStep(std::shared_ptr<CV::Context> &cv);
         void setUseColor(bool v);
+        void setColorTableText(const std::unordered_map<int, std::string> &ct);
+        void setColorTableBackground(const std::unordered_map<int, std::string> &ct);
         std::string ItemToText(CV::Item *item);
         std::string getPrompt();
+
+        std::shared_ptr<CV::Item> createMimicItem(std::string &str);
+        std::shared_ptr<CV::Item> createMimicItem(float &v);
+        std::shared_ptr<CV::Item> createMimicItem(double &v);
+        std::shared_ptr<CV::Item> createMimicItem(int8_t &v);
+        std::shared_ptr<CV::Item> createMimicItem(uint8_t &v);
+        std::shared_ptr<CV::Item> createMimicItem(int32_t &v);
+        std::shared_ptr<CV::Item> createMimicItem(uint32_t &v);
+        std::shared_ptr<CV::Item> createMimicItem(int64_t &v);
+        std::shared_ptr<CV::Item> createMimicItem(uint64_t &v);        
+        std::shared_ptr<CV::Item> createMimicItem(bool &v);  
 
         std::shared_ptr<CV::Item> interpret(const std::string &input, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor, bool flushTemps = true);
         void runFile(const std::string &path, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor, bool relaxed, bool resetCtx = true);

@@ -156,9 +156,7 @@ int main(int argc, char* argv[]){
 		io::registerLibrary(ctx);
 		math::registerLibrary(ctx);			
 		img::registerLibrary(ctx);	
-
 		ctx->solidify(true);
-
 		std::thread loop(&RunContextIsDone);
 		auto lastMod = getFileLastMod(dashFile->val);
 		bool reexecute = true;	
@@ -196,6 +194,7 @@ int main(int argc, char* argv[]){
 		io::registerLibrary(ctx);
 		math::registerLibrary(ctx);			
 		img::registerLibrary(ctx);	
+		
 		std::thread loop(&RunContextIsDone);
 		while(true){
 			std::cout << std::endl;
@@ -231,6 +230,8 @@ int main(int argc, char* argv[]){
 		}
 		if(cmd.size() == 0){
 			printCVEntry();
+			finished = true;
+			loop.join();
 			return 0;
 		}
 		auto result = CV::interpret(cmd, ctx, cursor);
@@ -243,6 +244,7 @@ int main(int argc, char* argv[]){
 		finished = true;
 		loop.join();
 	}		
+
 
 	return 0;
 

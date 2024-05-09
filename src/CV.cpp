@@ -17,7 +17,6 @@ static const std::string GENERIC_UNDEFINED_SYMBOL_ERROR = "Undefined constructor
 
 
 static std::string FunctionToText(CV::Function *fn);
-// static std::shared_ptr<CV::Item> processPreInterpretModifiers(std::shared_ptr<CV::Item> &item, std::vector<CV::ModifierPair> &modifiers, std::shared_ptr<CV::Cursor> &cursor, std::shared_ptr<CV::Context> &ctx, CV::ModifierEffect &effects);
 static void processPostInterpretExpandListOrContext(std::shared_ptr<CV::Item> &solved, CV::ModifierEffect &effects, std::vector<std::shared_ptr<CV::Item>> &items, std::shared_ptr<CV::Cursor> &cursor, const std::shared_ptr<CV::Context> &ctx);
 static std::shared_ptr<CV::Item> RunInstruction(std::shared_ptr<CV::TokenByteCode> &entry, std::shared_ptr<CV::Stack> &program, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);
 static std::shared_ptr<CV::Item> Execute(std::shared_ptr<CV::TokenByteCode> &entry, std::shared_ptr<CV::Stack> &program, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);
@@ -187,9 +186,18 @@ void CV::setUseColor(bool v){
     useColorOnText = v;
 }
 
+void CV::setColorTableText(const std::unordered_map<int, std::string> &ct){
+    Tools::UnixColor::TextColorCodes = ct;
+    Tools::UnixColor::BoldTextColorCodes = ct;
+}
+
+void CV::setColorTableBackground(const std::unordered_map<int, std::string> &ct){
+    Tools::UnixColor::BackgroundColorCodes = ct;
+}
+
 static const std::vector<std::string> RESERVED_WORDS = {
     "top", "nil", "ct", "fn", "iter", "do", "if", "skip",
-    "stop", "continue", "set", "with", "mut", "proxy", "async", "untether"
+    "stop", "continue", "set", "with", "mut", "ref", "async", "untether"
 };
 
 static const std::vector<std::string> RESERVED_SYMBOLS = {
@@ -223,7 +231,7 @@ namespace CV {
 
         namespace UnixColor {
 
-            static const std::unordered_map<int, std::string> TextColorCodes = {
+            static std::unordered_map<int, std::string> TextColorCodes = {
                 {0, "\e[0;30m"},
                 {1, "\e[0;31m"},
                 {2, "\e[0;32m"},
@@ -235,7 +243,7 @@ namespace CV {
                 {8, "\e[0m"},
             };
 
-            static const std::unordered_map<int, std::string> BoldTextColorCodes = {
+            static std::unordered_map<int, std::string> BoldTextColorCodes = {
                 {0, "\e[1;30m"},
                 {1, "\e[1;31m"},
                 {2, "\e[1;32m"},
@@ -247,7 +255,7 @@ namespace CV {
                 {8, "\e[0m"},
             };        
 
-            static const std::unordered_map<int, std::string> BackgroundColorCodes = {
+            static std::unordered_map<int, std::string> BackgroundColorCodes = {
                 {0, "\e[40m"},
                 {1, "\e[41m"},
                 {2, "\e[42m"},
@@ -449,6 +457,8 @@ CV::Trait::Trait(){
 
 */
 CV::Item::Item(){
+    this->mimicSrc = NULL;
+    this->mimicType = CV::MimicTypes::UNDEFINED;
     this->id = genId();
     this->copyable = true;
     this->solid = false;
@@ -508,6 +518,7 @@ std::shared_ptr<CV::Item> CV::Interrupt::getPayload(){
     NUMBER
 
 */
+
 CV::Number::Number(){
 }
 
@@ -516,29 +527,120 @@ CV::Number::Number(__CV_NUMBER_NATIVE_TYPE v){
 }
 
 bool CV::Number::isEq(std::shared_ptr<CV::Item> &item){
-    this->accessMutex.lock();
-    bool v = item->type == this->type && this->n == std::static_pointer_cast<CV::Number>(item)->get();
-    this->accessMutex.unlock();
-    return v;
+    return item->type == this->type && this->get() == std::static_pointer_cast<CV::Number>(item)->get();
 }    
 
 std::shared_ptr<CV::Item> CV::Number::copy(bool deep){
-    accessMutex.lock();
-    auto copy = std::make_shared<CV::Number>(this->n);
-    accessMutex.unlock();
-    return copy;
+    return std::make_shared<CV::Number>(this->get());
 }    
+
+CV::Number::Number(void *src, int type){
+    this->type = CV::ItemTypes::NUMBER;
+    this->mimicSrc = src;
+    this->mimicType = type;
+}
 
 void CV::Number::set(const __CV_NUMBER_NATIVE_TYPE v){
     this->accessMutex.lock();
     this->type = CV::ItemTypes::NUMBER;
-    this->n = v;
+    if(isMimic()){
+        switch(mimicType){
+            case MimicTypes::FLOAT: {
+                *static_cast<float*>(mimicSrc) = static_cast<float>(v);
+            } break;
+            case MimicTypes::DOUBLE: {
+                *static_cast<double*>(mimicSrc) = static_cast<double>(v);
+            } break;
+            case MimicTypes::INT8: {
+                *static_cast<int8_t*>(mimicSrc) = static_cast<int8_t>(v);
+            } break;
+            case MimicTypes::UINT8: {
+                *static_cast<uint8_t*>(mimicSrc) = static_cast<uint8_t>(v);
+            } break;
+            case MimicTypes::INT16: {
+                *static_cast<int16_t*>(mimicSrc) = static_cast<int16_t>(v);
+            } break;
+            case MimicTypes::UINT16: {
+                *static_cast<uint16_t*>(mimicSrc) = static_cast<uint16_t>(v);
+            } break;
+            case MimicTypes::INT32: {
+                *static_cast<int32_t*>(mimicSrc) = static_cast<int32_t>(v);
+            } break;      
+            case MimicTypes::UINT32: {
+                *static_cast<uint32_t*>(mimicSrc) = static_cast<uint32_t>(v);
+            } break;               
+            case MimicTypes::INT64: {
+                *static_cast<int64_t*>(mimicSrc) = static_cast<int64_t>(v);
+            } break;           
+            case MimicTypes::UINT64: {
+                *static_cast<uint64_t*>(mimicSrc) = static_cast<uint64_t>(v);
+            } break;      
+            case MimicTypes::BOOL: {
+                *static_cast<bool*>(mimicSrc) = static_cast<bool>(v);
+            } break;               
+            default: {
+                // It should not be possible to reach this error, but adding a message and a total
+                // shutdown in case it happens
+                std::cout << "FATAL ERROR: MIMIC ITEM IS USING UNDEFINED TYPE AS SOURCE" << std::endl;
+                std::cout << "Please contact your admin, your computer might be haunted." << std::endl;
+                std::exit(1);
+            } break;                                                                    
+        }
+    }else{
+        this->data = v;
+    }
     this->accessMutex.unlock();
 }
 
 __CV_NUMBER_NATIVE_TYPE CV::Number::get(){
+    __CV_NUMBER_NATIVE_TYPE v;
     this->accessMutex.lock();
-    auto v = this->n;
+    if(isMimic()){
+        switch(mimicType){
+            case MimicTypes::FLOAT: {
+                v = static_cast<__CV_NUMBER_NATIVE_TYPE>(*static_cast<float*>(mimicSrc));
+            } break;
+            case MimicTypes::DOUBLE: {
+                v = static_cast<__CV_NUMBER_NATIVE_TYPE>(*static_cast<double*>(mimicSrc));
+            } break;
+            case MimicTypes::INT8: {
+                v = static_cast<__CV_NUMBER_NATIVE_TYPE>(*static_cast<int8_t*>(mimicSrc));
+            } break;
+            case MimicTypes::UINT8: {
+                v = static_cast<__CV_NUMBER_NATIVE_TYPE>(*static_cast<uint8_t*>(mimicSrc));
+            } break;
+            case MimicTypes::INT16: {
+                v = static_cast<__CV_NUMBER_NATIVE_TYPE>(*static_cast<int16_t*>(mimicSrc));
+            } break;
+            case MimicTypes::UINT16: {
+                v = static_cast<__CV_NUMBER_NATIVE_TYPE>(*static_cast<uint16_t*>(mimicSrc));
+            } break;
+            case MimicTypes::INT32: {
+                v = static_cast<__CV_NUMBER_NATIVE_TYPE>(*static_cast<int32_t*>(mimicSrc));
+            } break;       
+            case MimicTypes::UINT32: {
+                v = static_cast<__CV_NUMBER_NATIVE_TYPE>(*static_cast<uint32_t*>(mimicSrc));
+            } break;            
+            case MimicTypes::INT64: {
+                v = static_cast<__CV_NUMBER_NATIVE_TYPE>(*static_cast<int64_t*>(mimicSrc));
+            } break;           
+            case MimicTypes::UINT64: {
+                v = static_cast<__CV_NUMBER_NATIVE_TYPE>(*static_cast<uint64_t*>(mimicSrc));
+            } break; 
+            case MimicTypes::BOOL: {
+                v = static_cast<__CV_NUMBER_NATIVE_TYPE>(*static_cast<bool*>(mimicSrc));
+            } break;                    
+            default: {
+                // It should not be possible to reach this error, but adding a message and a total
+                // shutdown in case it happens
+                std::cout << "FATAL ERROR: MIMIC ITEM IS USING UNDEFINED TYPE AS SOURCE" << std::endl;
+                std::cout << "Please contact your admin, your computer might be haunted." << std::endl;
+                std::exit(1);
+            } break;                                                                    
+        }
+    }else{
+        v = this->data;
+    }
     this->accessMutex.unlock();
     return v;
 }
@@ -611,9 +713,15 @@ CV::String::String(){
 
 size_t CV::String::size(){
     this->accessMutex.lock();
-    auto n = this->data.size();
-    this->accessMutex.unlock();
+    size_t n = isMimic() ? static_cast<std::string*>(mimicSrc)->size() : this->data.size();
+    this->accessMutex.unlock();        
     return n;
+}
+
+CV::String::String(void *src){
+    this->type = CV::ItemTypes::NUMBER;
+    this->mimicSrc = src;
+    this->mimicType = CV::MimicTypes::STRING;
 }
 
 CV::String::String(const std::string &str){
@@ -624,28 +732,29 @@ bool CV::String::isEq(std::shared_ptr<CV::Item> &item){
     if(this->type != item->type || this->size() != std::static_pointer_cast<CV::String>(item)->size()){
         return false;
     }
-    auto v = this->data == std::static_pointer_cast<CV::String>(item)->get();
+    auto v = this->get() == std::static_pointer_cast<CV::String>(item)->get();
     return v;
 } 
 
 std::shared_ptr<CV::Item> CV::String::copy(bool deep){
-    this->accessMutex.lock();
-    auto copied = std::make_shared<CV::String>();
-    copied->set(this->data);
-    this->accessMutex.unlock();
-    return copied;
+    return std::make_shared<CV::String>(this->get());
 }
 
 void CV::String::set(const std::string &str){
     this->accessMutex.lock();
     this->type = CV::ItemTypes::STRING;
-    this->data = str;
+    if(isMimic()){
+        auto &target = *static_cast<std::string*>(mimicSrc);
+        target = str;
+    }else{
+        this->data = str;
+    }
     this->accessMutex.unlock();
 } 
 
 std::string CV::String::get(){     
     this->accessMutex.lock();
-    auto v = this->data;   
+    auto v = isMimic() ? *static_cast<std::string*>(mimicSrc) : this->data;   
     this->accessMutex.unlock();
     return v;
 }
@@ -2434,7 +2543,7 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
 
         auto criteria = std::static_pointer_cast<CV::String>(params[0]);
 
-        auto &order = criteria->data;
+        auto order = criteria->get();
         if(order != "DESC" && order != "ASC"){
             cursor->setError("l-sort", "criteria can only be 'DESC' or 'ASC'.");
             return std::make_shared<CV::Item>();
@@ -2825,11 +2934,10 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
 
         auto reverse = [&](std::shared_ptr<CV::String> &str){
             std::string result;
-            str->accessMutex.lock();
-            for(int i = 0; i < str->data.size(); ++i){
-                result += str->data[str->data.size()-1 - i];
+            auto data = str->get();
+            for(int i = 0; i < data.size(); ++i){
+                result += data[data.size()-1 - i];
             }
-            str->accessMutex.unlock();
             return result;
         };
 
@@ -2895,21 +3003,21 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         auto str = std::static_pointer_cast<CV::String>(params[0]);
         int n = params.size() > 2 ? std::static_pointer_cast<CV::Number>(params[2])->get() : 1;
 
-        str->accessMutex.lock();
-        if(index+n < 0 || index+n > str->data.size()){
-            cursor->setError(name, "position("+std::to_string(index+n)+") is out of range("+std::to_string(str->data.size()-1)+")");
+        auto data = str->get();
+
+        if(index+n < 0 || index+n > data.size()){
+            cursor->setError(name, "position("+std::to_string(index+n)+") is out of range("+std::to_string(data.size()-1)+")");
             str->accessMutex.unlock();            
             return std::make_shared<CV::Item>();
         }      
 
         std::string result;
-        for(int i = 0; i < str->data.size(); ++i){
+        for(int i = 0; i < data.size(); ++i){
             if(i >= index && i < index+n){
                 continue;
             }
-            result += str->data[i];
+            result += data[i];
         }
-        str->accessMutex.unlock();
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::String>(result));
 
     }, false));       
@@ -2937,19 +3045,19 @@ void CV::AddStandardOperators(std::shared_ptr<CV::Context> &ctx){
         auto str = std::static_pointer_cast<CV::String>(params[0]);
         int n = params.size() > 2 ? std::static_pointer_cast<CV::Number>(params[2])->get() : 1;
 
-        str->accessMutex.lock();
-        if(index+n < 0 || index+n > str->data.size()){
-            cursor->setError(name, "position("+std::to_string(index+n)+") is out of range("+std::to_string(str->data.size()-1)+")");
+        auto data = str->get();
+
+        if(index+n < 0 || index+n > data.size()){
+            cursor->setError(name, "position("+std::to_string(index+n)+") is out of range("+std::to_string(data.size()-1)+")");
             return std::make_shared<CV::Item>();
         }      
 
         std::string result;
-        for(int i = 0; i < str->data.size(); ++i){
+        for(int i = 0; i < data.size(); ++i){
             if(i >= index && i < index+n){
-                result += str->data[i];
+                result += data[i];
             }
         }
-        str->accessMutex.unlock();
         return std::static_pointer_cast<CV::Item>(std::make_shared<CV::String>(result));
 
     }, false));     
@@ -5017,3 +5125,42 @@ void CV::flushContextTemps(std::shared_ptr<CV::Context> &ctx){
     // ctx->flushStaticValue();   
 }
 
+std::shared_ptr<CV::Item> CV::createMimicItem(std::string &str){
+    return std::make_shared<CV::String>(&str);
+}
+
+std::shared_ptr<CV::Item> CV::createMimicItem(float &v){
+    return std::make_shared<CV::Number>(&v, CV::MimicTypes::FLOAT);
+}
+
+std::shared_ptr<CV::Item> CV::createMimicItem(double &v){
+    return std::make_shared<CV::Number>(&v, CV::MimicTypes::DOUBLE);
+}
+
+std::shared_ptr<CV::Item> CV::createMimicItem(int8_t &v){
+    return std::make_shared<CV::Number>(&v, CV::MimicTypes::INT8);
+}
+
+std::shared_ptr<CV::Item> CV::createMimicItem(uint8_t &v){
+    return std::make_shared<CV::Number>(&v, CV::MimicTypes::UINT8);
+}
+
+std::shared_ptr<CV::Item> CV::createMimicItem(int32_t &v){
+    return std::make_shared<CV::Number>(&v, CV::MimicTypes::INT32);
+}
+
+std::shared_ptr<CV::Item> CV::createMimicItem(uint32_t &v){
+    return std::make_shared<CV::Number>(&v, CV::MimicTypes::UINT32);
+}
+
+std::shared_ptr<CV::Item> CV::createMimicItem(int64_t &v){
+    return std::make_shared<CV::Number>(&v, CV::MimicTypes::INT64);
+}
+
+std::shared_ptr<CV::Item> CV::createMimicItem(uint64_t &v){
+    return std::make_shared<CV::Number>(&v, CV::MimicTypes::UINT64);
+}
+
+std::shared_ptr<CV::Item> CV::createMimicItem(bool &v){
+    return std::make_shared<CV::Number>(&v, CV::MimicTypes::BOOL);
+}
