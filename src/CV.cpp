@@ -181,20 +181,6 @@ static unsigned genId(){
     return id;
 }
 
-
-void CV::setUseColor(bool v){
-    useColorOnText = v;
-}
-
-void CV::setColorTableText(const std::unordered_map<int, std::string> &ct){
-    Tools::UnixColor::TextColorCodes = ct;
-    Tools::UnixColor::BoldTextColorCodes = ct;
-}
-
-void CV::setColorTableBackground(const std::unordered_map<int, std::string> &ct){
-    Tools::UnixColor::BackgroundColorCodes = ct;
-}
-
 static const std::vector<std::string> RESERVED_WORDS = {
     "top", "nil", "ct", "fn", "iter", "do", "if", "skip",
     "stop", "continue", "set", "with", "mut", "ref", "async", "untether"
@@ -232,39 +218,39 @@ namespace CV {
         namespace UnixColor {
 
             static std::unordered_map<int, std::string> TextColorCodes = {
-                {0, "\e[0;30m"},
-                {1, "\e[0;31m"},
-                {2, "\e[0;32m"},
-                {3, "\e[0;33m"},
-                {4, "\e[0;34m"},
-                {5, "\e[0;35m"},
-                {6, "\e[0;36m"},
-                {7, "\e[0;37m"},
-                {8, "\e[0m"},
+                {CV::Tools::Color::BLACK,   "\e[0;30m"},
+                {CV::Tools::Color::RED,     "\e[0;31m"},
+                {CV::Tools::Color::GREEN,   "\e[0;32m"},
+                {CV::Tools::Color::YELLOW,  "\e[0;33m"},
+                {CV::Tools::Color::BLUE,    "\e[0;34m"},
+                {CV::Tools::Color::MAGENTA, "\e[0;35m"},
+                {CV::Tools::Color::CYAN,    "\e[0;36m"},
+                {CV::Tools::Color::WHITE,   "\e[0;37m"},
+                {CV::Tools::Color::RESET,   "\e[0m"}
             };
 
             static std::unordered_map<int, std::string> BoldTextColorCodes = {
-                {0, "\e[1;30m"},
-                {1, "\e[1;31m"},
-                {2, "\e[1;32m"},
-                {3, "\e[1;33m"},
-                {4, "\e[1;34m"},
-                {5, "\e[1;35m"},
-                {6, "\e[1;36m"},
-                {7, "\e[1;37m"},
-                {8, "\e[0m"},
+                {CV::Tools::Color::BLACK,   "\e[1;30m"},
+                {CV::Tools::Color::RED,     "\e[1;31m"},
+                {CV::Tools::Color::GREEN,   "\e[1;32m"},
+                {CV::Tools::Color::YELLOW,  "\e[1;33m"},
+                {CV::Tools::Color::BLUE,    "\e[1;34m"},
+                {CV::Tools::Color::MAGENTA, "\e[1;35m"},
+                {CV::Tools::Color::CYAN,    "\e[1;36m"},
+                {CV::Tools::Color::WHITE,   "\e[1;37m"},
+                {CV::Tools::Color::RESET,   "\e[0m"}
             };        
 
             static std::unordered_map<int, std::string> BackgroundColorCodes = {
-                {0, "\e[40m"},
-                {1, "\e[41m"},
-                {2, "\e[42m"},
-                {3, "\e[43m"},
-                {4, "\e[44m"},
-                {5, "\e[45m"},
-                {6, "\e[46m"},
-                {7, "\e[47m"},
-                {8, "\e[0m"},
+                {CV::Tools::Color::BLACK,   "\e[40m"},
+                {CV::Tools::Color::RED,     "\e[41m"},
+                {CV::Tools::Color::GREEN,   "\e[42m"},
+                {CV::Tools::Color::YELLOW,  "\e[43m"},
+                {CV::Tools::Color::BLUE,    "\e[44m"},
+                {CV::Tools::Color::MAGENTA, "\e[45m"},
+                {CV::Tools::Color::CYAN,    "\e[46m"},
+                {CV::Tools::Color::WHITE,   "\e[47m"},
+                {CV::Tools::Color::RESET,   "\e[0m"}
             };     
         }   
 
@@ -401,6 +387,21 @@ namespace CV {
     }
 }
 
+
+
+
+void CV::setUseColor(bool v){
+    useColorOnText = v;
+}
+
+void CV::setColorTableText(const std::unordered_map<int, std::string> &ct){
+    CV::Tools::UnixColor::TextColorCodes = ct;
+    CV::Tools::UnixColor::BoldTextColorCodes = ct;
+}
+
+void CV::setColorTableBackground(const std::unordered_map<int, std::string> &ct){
+    CV::Tools::UnixColor::BackgroundColorCodes = ct;
+}
 
 std::string CV::getPrompt(){
     std::string start = Tools::setTextColor(Tools::Color::MAGENTA) + "[" + Tools::setTextColor(Tools::Color::RESET);
