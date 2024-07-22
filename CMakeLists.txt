@@ -8,8 +8,7 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/builds/cmake)
 
 # src
 set (cv_src 
-            src/libs/image.cpp
-            src/CV.cpp)
+            src/Interpreter.cpp)
 
 if(UNIX AND NOT APPLE)
     set(LINUX TRUE)
@@ -26,5 +25,5 @@ IF(MINGW)
 ENDIF(MINGW)
 
 
-add_executable(cv src/Interpreter.cpp)
+add_executable(cv src/CV.cpp)
 target_link_libraries(cv cv_bin)
