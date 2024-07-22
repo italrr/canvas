@@ -101,6 +101,19 @@
         /* -------------------------------------------------------------------------------------------------------------------------------- */
         // JIT Stuff
 
+        struct ContextDataPair {
+            unsigned ctx;
+            unsigned id;
+            ContextDataPair(){
+                ctx = 0;
+                id = 0;
+            }
+            ContextDataPair(unsigned ctx, unsigned id){
+                this->ctx = ctx;
+                this->id = id;
+            }
+        };
+
         struct Context {
             Context *top;
             unsigned id;
@@ -108,8 +121,11 @@
             std::unordered_map<std::string, unsigned> dataIds;
             unsigned store(CV::Item *item);
             unsigned promise();
+            void setPromise(unsigned id, CV::Item *item);
             void setName(const std::string &name, unsigned id);
-            Item *getByName(const std::string &name);
+            ContextDataPair getIdByName(const std::string &name);
+            CV::Item *getByName(const std::string &name);
+            bool check(const std::string &name);
             void clear();
             CV::Item *buildNil();
             Context();
