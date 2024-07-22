@@ -267,15 +267,21 @@ std::string CV::StringType::get(){
 
 // LIST
 void CV::ListType::build(unsigned n){
-
+    clear();
+    auto bsize = sizeof(void*) * n;
+    this->size = n;
+    this->data = malloc(bsize);
+    memset(this->data, 0, bsize);
 }
 
 void CV::ListType::set(unsigned index, CV::Item *item){
-
+    size_t target = ((size_t)this->data + index * sizeof(void*));
+    memcpy((void*)(target), &item, sizeof(void*));
 }
 
 CV::Item *CV::ListType::get(unsigned index){
-    return NULL;
+    size_t target = ((size_t)this->data + index * sizeof(void*));
+    return static_cast<Item*>((void*)(target));
 }
 
 // FUNCTION
