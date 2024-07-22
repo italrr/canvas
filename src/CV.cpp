@@ -1,5 +1,4 @@
 #include <string.h>
-#include <iostream>
 #include "CV.hpp"
 
 #define __CV_DEBUG 1
@@ -464,7 +463,20 @@ static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::
     if(CheckConstructor(stack, imp)){
         return stack->constructors[imp](imp, tokens, stack, ctx, cursor);
     }else{
-        cursor->setError("Unexpected Error on '"+imp+"'", GENERIC_UNDEFINED_SYMBOL_ERROR, token.line);
+        if(ctx->check(imp)){
+            auto pair = ctx->getIdByName(imp);
+            if(pair.ctx == 0 || pair.id == 0){
+                cursor->setError("Fatal Error referencing name '"+imp+"'", "Name was not found on this context or above", token.line);
+                return stack->createInstruction(CV::InstructionType::NOOP, token);     
+            }
+            auto ins = stack->createInstruction(CV::InstructionType::STATIC_PROXY, token);
+            auto string = new CV::StringType();
+            ins->data.push_back(pair.ctx);
+            ins->data.push_back(pair.id);
+            return ins;            
+        }else{
+            cursor->setError("Unexpected Error on '"+imp+"'", GENERIC_UNDEFINED_SYMBOL_ERROR, token.line);
+        }
     }
     
     return stack->createInstruction(CV::InstructionType::NOOP, token);
@@ -477,7 +489,6 @@ static CV::Instruction* compileTokens(const VECTOR<CV::Token> &tokens, SHARED<CV
     if(tokens.size() == 1 || tokens.size() > 1 && tokens[0].solved){
         auto nins = interpretToken(tokens[0], tokens, stack, ctx, cursor);
         if(cursor->raise()){
-
             return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
         }
         ins.push_back(nins);
@@ -538,15 +549,10 @@ static void AddStandardConstructors(std::shared_ptr<CV::Stack> &stack){
         ctx->setName(tokens[1].first, dataId);
 
 
-        // Create protagonist instruction
-        auto promiseIns = stack->createInstruction(CV::InstructionType::PROMISE_PROXY, tokens[1]);
-        promiseIns->data.push_back(dataId); // promise data
-        promiseIns->parameter.push_back(dataIns->id);  // data instruction
-
-
-
         auto ins = stack->createInstruction(CV::InstructionType::LET, tokens[1]);
-        ins->literal = tokens[1].first;
+
+        ins->data.push_back(ctx->id);
+        ins->data.push_back(dataId);
         ins->parameter.push_back(dataIns->id);
 
         return ins;
@@ -620,6 +626,22 @@ unsigned CV::Context::promise(){
     return id;
 }
 
+void  CV::Context::setPromise(unsigned id, CV::Item *item){
+    if(this->data.count(id) == 0){
+        fprintf(stderr, "Context %i: Closing Promise using non-existing ID %i\n", this->id, id);
+        std::exit(1);        
+    }
+    this->data[id] = item;
+}
+
+CV::ContextDataPair CV::Context::getIdByName(const std::string &name){
+    auto it = this->dataIds.find(name);
+    if(it == this->dataIds.end()){
+        return this->top ? this->top->getIdByName(name) : CV::ContextDataPair();
+    }
+    return CV::ContextDataPair(this->id, it->second);
+}
+
 void CV::Context::setName(const std::string &name, unsigned id){
     auto it = this->data.find(id);
     if(it == this->data.end()){
@@ -628,6 +650,14 @@ void CV::Context::setName(const std::string &name, unsigned id){
     }
     auto item = it->second;
     this->dataIds[name] = id;
+}
+
+bool CV::Context::check(const std::string &name){
+    auto v = this->dataIds.count(name);
+    if(v == 0){
+        return this->top && this->top->check(name);
+    }
+    return true;
 }
 
 CV::Item *CV::Context::getByName(const std::string &name){
@@ -692,12 +722,17 @@ static CV::Item *__execute(CV::Stack *stack, CV::Instruction *ins, std::shared_p
             CONSTRUCTRORS 
         */
         case CV::InstructionType::LET: {
+            auto &ctxId = ins->data[0];
+            auto &dataId = ins->data[1];
+
             auto v = stack->execute(stack->instructions[ins->parameter[0]], ctx, cursor);
             if(cursor->raise()){
                 return ctx->buildNil();
             }
 
+            stack->contexts[ctxId]->setPromise(dataId, v);
 
+            return v;
         };
         case CV::InstructionType::MUT: {
 
@@ -1010,7 +1045,7 @@ int main(){
     AddStandardConstructors(stack);
 
     // Get text tokens
-    auto tokens = parseTokens("+ 1 1 1",  ' ', cursor);
+    auto tokens = parseTokens("[let a [+ 1 1 1]][let b 5][+ a b]",  ' ', cursor);
     if(cursor->raise()){
         return 1;
     }
