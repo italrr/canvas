@@ -14,7 +14,8 @@
 
         namespace NaturalType {
             enum NaturalType : unsigned {
-                NUMBER,
+                UNDEFINED = 0,
+                NUMBER = 10,
                 STRING,
                 LIST,
                 LAMBDA,
@@ -29,6 +30,7 @@
                 // CONSTRUCTORS
                 LET = 100,
                 MUT,
+                CONSTRUCT_LIST,
                 // OPERATORS
                 OP_NUM_ADD = 150,
                 OP_NUM_SUB,
@@ -84,10 +86,11 @@
             std::string get();
         };        
 
+        struct Stack;
         struct ListType : Item {
             void build(unsigned n);
-            void set(unsigned index, Item *item);
-            Item *get(unsigned index);
+            void set(unsigned index, unsigned ctxId, unsigned dataId);
+            Item *get(std::shared_ptr<CV::Stack> &stack, unsigned index);
         };
 
         struct FunctionType : Item {
@@ -191,7 +194,7 @@
         };
 
 
-        std::string ItemToText(CV::Item *item);
+        std::string ItemToText(std::shared_ptr<CV::Stack> &stack, CV::Item *item);
 
     }
 
