@@ -268,20 +268,23 @@ std::string CV::StringType::get(){
 // LIST
 void CV::ListType::build(unsigned n){
     clear();
-    auto bsize = sizeof(void*) * n;
+    auto bsize = sizeof(unsigned) * 2 * n;
+    this->type = CV::NaturalType::LIST;
     this->size = n;
     this->data = malloc(bsize);
-    memset(this->data, 0, bsize);
+    memset(this->data, '0', bsize);
 }
 
-void CV::ListType::set(unsigned index, CV::Item *item){
-    size_t target = ((size_t)this->data + index * sizeof(void*));
-    memcpy((void*)(target), &item, sizeof(void*));
+void CV::ListType::set(unsigned index, unsigned ctxId, unsigned dataId){
+    memcpy((void*)((size_t)this->data + index * sizeof(unsigned) * 2 + sizeof(unsigned) * 0), &ctxId, sizeof(unsigned));
+    memcpy((void*)((size_t)this->data + index * sizeof(unsigned) * 2 + sizeof(unsigned) * 1), &dataId, sizeof(unsigned));
 }
 
-CV::Item *CV::ListType::get(unsigned index){
-    size_t target = ((size_t)this->data + index * sizeof(void*));
-    return static_cast<Item*>((void*)(target));
+CV::Item *CV::ListType::get(std::shared_ptr<CV::Stack> &stack, unsigned index){
+    unsigned ctxId, dataId;
+    memcpy(&ctxId, (void*)((size_t)this->data + index * sizeof(unsigned) * 2 + sizeof(unsigned) * 0), sizeof(unsigned));
+    memcpy(&dataId, (void*)((size_t)this->data + index * sizeof(unsigned) * 2 + sizeof(unsigned) * 1), sizeof(unsigned));    
+    return stack->contexts[ctxId]->data[dataId];
 }
 
 // FUNCTION
@@ -450,7 +453,7 @@ static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::
     auto &imp = token.first;
 
     // Infere for natural types
-    if(CV::Tools::isNumber(imp)){
+    if(CV::Tools::isNumber(imp) && tokens.size() == 1){
         auto ins = stack->createInstruction(CV::InstructionType::STATIC_PROXY, token);
         auto number = new CV::NumberType();
         number->set(std::stod(imp));
@@ -458,7 +461,7 @@ static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::
         ins->data.push_back(ctx->store(number));
         return ins;
     }else
-    if(CV::Tools::isString(imp)){
+    if(CV::Tools::isString(imp) && tokens.size() == 1){
         auto ins = stack->createInstruction(CV::InstructionType::STATIC_PROXY, token);
         auto string = new CV::StringType();
         string->set(imp.substr(1, imp.length() - 2));
@@ -469,6 +472,7 @@ static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::
     if(CheckConstructor(stack, imp)){
         return stack->constructors[imp](imp, tokens, stack, ctx, cursor);
     }else{
+        // Is it a name?
         if(ctx->check(imp)){
             auto pair = ctx->getIdByName(imp);
             if(pair.ctx == 0 || pair.id == 0){
@@ -480,6 +484,25 @@ static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::
             ins->data.push_back(pair.ctx);
             ins->data.push_back(pair.id);
             return ins;            
+        }else
+        // Can it be a list?
+        if(tokens.size() > 1){
+            auto nins = stack->createInstruction(CV::InstructionType::CONSTRUCT_LIST, tokens[0]);
+            auto list = new CV::ListType();        
+            list->build(tokens.size());
+            nins->data.push_back(ctx->id);
+            nins->data.push_back(ctx->store(list));
+            nins->data.push_back(tokens.size());
+            for(int i = 0; i < tokens.size(); ++i){
+                auto cins = interpretToken(tokens[i], {tokens[i]}, stack, ctx, cursor);
+                if(cursor->raise()){
+                    return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+                }
+                nins->parameter.push_back(cins->id);
+                nins->data.push_back(ctx->id);
+            }
+            return nins;           
+        // I just don't know then
         }else{
             cursor->setError("Unexpected Error on '"+imp+"'", GENERIC_UNDEFINED_SYMBOL_ERROR, token.line);
         }
@@ -513,9 +536,8 @@ static CV::Instruction* compileTokens(const VECTOR<CV::Token> &tokens, SHARED<CV
             ins.push_back(nins);
         }
     }else{
-    // Otherwise, this must be a list
-        
-        std::cout << "list" << std::endl;
+        cursor->setError("Failed to parse token", "Invalid syntax used or malformed token", tokens[0].line);
+        return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
     }
 
     return ins[0];
@@ -741,6 +763,27 @@ static CV::Item *__execute(CV::Stack *stack, CV::Instruction *ins, std::shared_p
             return v;
         };
         case CV::InstructionType::MUT: {
+
+        };
+        case CV::InstructionType::CONSTRUCT_LIST: {
+            auto &lsCtxId = ins->data[0];
+            auto &lsDataId = ins->data[1];            
+            auto list = static_cast<CV::ListType*>(stack->contexts[lsCtxId]->data[lsDataId]);
+
+            unsigned nelements = ins->data[2];
+
+            unsigned c = 0;
+            
+            for(int i = 0; i < nelements; ++i){
+                auto elementV = stack->execute(stack->instructions[ins->parameter[i]], ctx, cursor);
+                if(cursor->raise()){
+                    return ctx->buildNil();
+                } 
+                unsigned elCtxId = ins->data[3 +  i];
+                list->set(i, ctx->id, elementV->id);
+            }
+
+            return static_cast<CV::Item*>(list);
 
         };
 
@@ -1019,8 +1062,14 @@ void CV::Stack::clear(){
 
 /* -------------------------------------------------------------------------------------------------------------------------------- */
 
-std::string CV::ItemToText(CV::Item *item){
+std::string CV::ItemToText(std::shared_ptr<CV::Stack> &stack, CV::Item *item){
     switch(item->type){
+        
+        default:
+        case CV::NaturalType::NIL: {
+            return Tools::setTextColor(Tools::Color::BLUE)+"nil"+Tools::setTextColor(Tools::Color::RESET);
+        };
+
         case CV::NaturalType::NUMBER: {
             return  CV::Tools::setTextColor(Tools::Color::CYAN) +
                     CV::Tools::removeTrailingZeros(static_cast<CV::NumberType*>(item)->get())+
@@ -1033,10 +1082,26 @@ std::string CV::ItemToText(CV::Item *item){
                     Tools::setTextColor(Tools::Color::RESET);
         };        
 
-        default:
-        case CV::NaturalType::NIL: {
-            return "NIL";
+        case CV::NaturalType::LIST: {
+            std::string output = Tools::setTextColor(Tools::Color::MAGENTA)+"["+Tools::setTextColor(Tools::Color::RESET);
+            auto list = static_cast<CV::ListType*>(item);
+
+            int total = list->size;
+            int limit = total > 30 ? 10 : total;
+            for(int i = 0; i < limit; ++i){
+                auto item = list->get(stack, i);
+                output += CV::ItemToText(stack, item);
+                if(i < list->size-1){
+                    output += " ";
+                }
+            }
+            if(limit != total){
+                output += Tools::setTextColor(Tools::Color::YELLOW)+"...("+std::to_string(total-limit)+" hidden)"+Tools::setTextColor(Tools::Color::RESET);
+            }
+                        
+            return output + Tools::setTextColor(Tools::Color::MAGENTA)+"]"+Tools::setTextColor(Tools::Color::RESET);
         };
+
     }
 }
 
@@ -1051,7 +1116,7 @@ int main(){
     AddStandardConstructors(stack);
 
     // Get text tokens
-    auto tokens = parseTokens("[let a [+ 1 1 1]][let b 5][+ a b]",  ' ', cursor);
+    auto tokens = parseTokens("1 2 3",  ' ', cursor);
     if(cursor->raise()){
         return 1;
     }
@@ -1069,7 +1134,7 @@ int main(){
     }
 
 
-    std::cout << CV::ItemToText(result) << std::endl;
+    std::cout << CV::ItemToText(stack, result) << std::endl;
 
     // stack->clear();
 
