@@ -74,8 +74,7 @@
                 // PROXIES
                 STATIC_PROXY = 200,
                 REFERRED_PROXY,
-                NTH_PROXY,
-                PROMISE_PROXY
+                NTH_PROXY
             };
         };     
 
@@ -93,6 +92,24 @@
             void setError(const std::string &title, const std::string &message, unsigned line);
             void setError(const std::string &title, const std::string &message, unsigned line, Item *subject);            
         };
+
+        struct Token {
+            std::string first;
+            unsigned line;
+            bool solved;
+            Token(){
+                solved = false;
+            }
+            Token(const std::string &first, unsigned line){
+                this->first = first;
+                this->line = line;
+                parse();
+            }    
+            void parse(){
+                solved = !(first.length() >= 3 && first[0] == '[' && first[first.size()-1] == ']');
+            }
+        };    
+
 
         /* -------------------------------------------------------------------------------------------------------------------------------- */
         // Types
@@ -128,10 +145,9 @@
         };
 
         struct FunctionType : Item {
-            std::vector<unsigned> args;
             bool variadic;
-            unsigned ctx;
-            unsigned entry;
+            std::vector<std::string> args;            
+            CV::Token body;
             CV::Item *copy();
             void restore(CV::Item *item);            
         };
@@ -177,23 +193,6 @@
             void revert();
         };
         
-        struct Token {
-            std::string first;
-            unsigned line;
-            bool solved;
-            Token(){
-                solved = false;
-            }
-            Token(const std::string &first, unsigned line){
-                this->first = first;
-                this->line = line;
-                parse();
-            }    
-            void parse(){
-                solved = !(first.length() >= 3 && first[0] == '[' && first[first.size()-1] == ']');
-            }
-        };    
-
         struct Instruction {
             unsigned type;
             unsigned id;
