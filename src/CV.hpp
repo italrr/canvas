@@ -69,6 +69,9 @@
                 OP_COND_LTE,
                 OP_COND_GT,
                 OP_COND_GTE,
+                OP_LOGIC_NOT,
+                OP_LOGIC_AND,
+                OP_LOGIC_OR,
                 // LIST
                 LS_NTH_ELEMENT,
                 // PROXIES
