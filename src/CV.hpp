@@ -18,9 +18,32 @@
                 NUMBER = 10,
                 STRING,
                 LIST,
-                LAMBDA,
+                FUNCTION,
                 NIL
             };
+            std::string name(unsigned type){
+                switch(type){
+                    case CV::NaturalType::NUMBER: {
+                        return "NUMBER";
+                    };
+                    case CV::NaturalType::STRING: {
+                        return "STRING";
+                    };
+                    case CV::NaturalType::LIST: {
+                        return "LIST";
+                    };
+                    case CV::NaturalType::FUNCTION: {
+                        return "FUNCTION";
+                    };  
+                    case CV::NaturalType::NIL: {
+                        return "NIL";
+                    };                                                                               
+                    default:
+                    case CV::NaturalType::UNDEFINED: {
+                        return "UNDEFINED";
+                    };
+                }
+            }
         }
 
         namespace InstructionType {
@@ -32,7 +55,8 @@
                 MUT,
                 CONSTRUCT_LIST,
                 CONSTRUCT_FUNCTION,
-                // CONSTROL
+                // CONTROL
+                CF_INVOKE_FUNCTION,
                 CF_COND_BINARY_BRANCH, // CF = Control Flow
                 // OPERATORS
                 OP_NUM_ADD = 150,
@@ -45,9 +69,12 @@
                 OP_COND_LTE,
                 OP_COND_GT,
                 OP_COND_GTE,
+                // LIST
+                LS_NTH_ELEMENT,
                 // PROXIES
                 STATIC_PROXY = 200,
                 REFERRED_PROXY,
+                NTH_PROXY,
                 PROMISE_PROXY
             };
         };     
@@ -96,14 +123,17 @@
         struct ListType : Item {
             void build(unsigned n);
             void set(unsigned index, unsigned ctxId, unsigned dataId);
-            Item *get(std::shared_ptr<CV::Stack> &stack, unsigned index);
+            CV::Item *get(std::shared_ptr<CV::Stack> &stack, unsigned index);
+            CV::Item *get(CV::Stack *stack, unsigned index);
         };
 
         struct FunctionType : Item {
-            std::vector<std::string> argNames;
+            std::vector<unsigned> args;
             bool variadic;
-            unsigned nargs;
+            unsigned ctx;
             unsigned entry;
+            CV::Item *copy();
+            void restore(CV::Item *item);            
         };
 
         /* -------------------------------------------------------------------------------------------------------------------------------- */
@@ -128,8 +158,11 @@
             bool solid; // Solid contexts won't accept new data
             std::unordered_map<unsigned, CV::Item*> data;
             std::unordered_map<std::string, unsigned> dataIds;
+            std::unordered_map<unsigned, unsigned> markedItems;
             unsigned store(CV::Item *item);
             unsigned promise();
+            void markPromise(unsigned id, unsigned type);
+            unsigned getMarked(unsigned id);
             void setPromise(unsigned id, CV::Item *item);
             void setName(const std::string &name, unsigned id);
             ContextDataPair getIdByName(const std::string &name);
@@ -166,7 +199,7 @@
             unsigned id;
             unsigned next;
             unsigned previous;
-            std::string literal;
+            std::vector<std::string> literal;
             std::vector<unsigned> data;
             std::vector<unsigned> parameter;
             CV::Token token;
