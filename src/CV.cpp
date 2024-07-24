@@ -515,6 +515,8 @@ static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::
                 return stack->createInstruction(CV::InstructionType::NOOP, token);     
             }
             auto markedType = ctx->getMarked(pair.id);
+
+            // Invoke a function
             if(markedType == CV::NaturalType::FUNCTION){
                 auto fn = static_cast<CV::FunctionType*>(stack->contexts[pair.ctx]->data[pair.id]);
                 // Basic Error Checking
@@ -523,25 +525,49 @@ static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::
                     cursor->setError("Function '"+imp+"'", errmsg, token.line);
                     return stack->createInstruction(CV::InstructionType::NOOP, token);     
                 }
+                // Create temporary context
+                auto nctx = stack->createContext(ctx.get());
                 // Create instruction
                 auto ins = stack->createInstruction(CV::InstructionType::CF_INVOKE_FUNCTION, token);
-                ins->data.push_back(fn->ctx);
+                ins->data.push_back(nctx->id);
                 ins->data.push_back(fn->args.size());
                 ins->data.push_back(fn->variadic);
-                ins->parameter.push_back(fn->entry);
-                // Pass parameter with its respective data
-                for(int i = 0; i < fn->args.size(); ++i){
-                    ins->data.push_back(fn->args[i]);
+
+                // Gather parameters
+                if(fn->variadic){
+                    auto argId = nctx->promise();
+                    std::string name = "@";
+                    ins->data.push_back(argId);       
+                    nctx->setName(name, argId);
+                }else{
+                    for(int i = 0; i < fn->args.size(); ++i){
+                        auto argId = nctx->promise();
+                        ins->data.push_back(argId);       
+                        auto &name = fn->args[i];
+                        nctx->setName(name, argId);
+                    }
                 }
+
+                // Process Body
+                auto body = interpretToken(fn->body, {fn->body}, stack, nctx, cursor);
+                if(cursor->raise()){
+                    return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
+                } 
+                ins->parameter.push_back(body->id);
+
+                // Process
                 for(int i = 1; i < tokens.size(); ++i){
                     auto cins = interpretToken(tokens[i], {tokens[i]}, stack, ctx, cursor);
                     if(cursor->raise()){
                         return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
                     }
                     ins->parameter.push_back(cins->id);
-                }
+                }                   
+
+                nctx->solidify();
                 return ins;
             }else{
+            // Otherwise return type
                 auto ins = stack->createInstruction(CV::InstructionType::STATIC_PROXY, token);
                 auto string = new CV::StringType();
                 ins->data.push_back(pair.ctx);
@@ -636,11 +662,20 @@ static void AddStandardConstructors(std::shared_ptr<CV::Stack> &stack){
         }
 
         // Allocate promise in current context
-        auto dataId = ctx->promise();
+        auto dataId = 0;
+        unsigned type; 
+        if(dataIns->type == CV::InstructionType::STATIC_PROXY){
+            dataId = dataIns->data[1];
+            type = 0; // direct, no need for promise
+        }else{
+            dataId = ctx->promise();
+            type = 1; // needs to be executed
+        }
         ctx->setName(tokens[1].first, dataId);
 
         // Create instruction
         auto ins = stack->createInstruction(CV::InstructionType::LET, tokens[1]);
+        ins->data.push_back(type);
         ins->data.push_back(ctx->id);
         ins->data.push_back(dataId);
         ins->parameter.push_back(dataIns->id);
@@ -688,42 +723,27 @@ static void AddStandardConstructors(std::shared_ptr<CV::Stack> &stack){
             cursor->setError(name, "Expects exactly 2 arguments ("+name+" [args] [code])", tokens[0].line);
             return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
         }
-        auto nctx = stack->createContext(ctx.get());
 
         bool variadic = false;
-        std::vector<unsigned> argIds;
+        std::vector<std::string> argNames;
         
         // Get find arguments
         auto argTokens = parseTokens(tokens[1].first, ' ', cursor);
         if(argTokens.size() == 1 && argTokens[0].first == ".."){
             variadic = true;
-            auto argId = nctx->promise();
-            std::string name = "@";
-            argIds.push_back(argId);            
-            nctx->setName(name, argId);
+            argNames.push_back("@");            
         }else{
             for(int i = 0; i < argTokens.size(); ++i){
-                auto argId = nctx->promise();
-                auto &name =argTokens[i].first;
-                argIds.push_back(argId);
-                nctx->setName(name, argId);
+                argNames.push_back(argTokens[i].first);
             }
         }
 
-        // Process function's body
-        auto body = interpretToken(tokens[2], {tokens[2]}, stack, nctx, cursor);
-        if(cursor->raise()){
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
-        } 
-
         // Create Item
         auto fn = new CV::FunctionType();
+        fn->type = CV::NaturalType::FUNCTION;
         fn->variadic = variadic;
-        fn->ctx = nctx->id;
-        fn->entry = body->id;
-        for(int i = 0; i < argIds.size(); ++i){
-            fn->args.push_back(argIds[i]);
-        }
+        fn->args = argNames;
+        fn->body = tokens[2];
         auto fnId = ctx->store(fn);
         
         // Create instruction
@@ -731,9 +751,6 @@ static void AddStandardConstructors(std::shared_ptr<CV::Stack> &stack){
         ins->data.push_back(ctx->id);
         ins->data.push_back(fnId);
         ctx->markPromise(fnId, CV::NaturalType::FUNCTION);
-
-        // Seal Context
-        nctx->solidify();
 
         return ins;   
         
@@ -940,6 +957,9 @@ CV::Item *CV::Context::getByName(const std::string &name){
 void CV::Context::clear(){
     std::set<CV::Item*> uniqueItems; // To avoid double free
     for(auto &it : this->data){
+        if(it.second == NULL){
+            continue;
+        }
         auto item = it.second;
         item->clear();
         uniqueItems.insert(item);
@@ -951,6 +971,9 @@ void CV::Context::clear(){
     this->dataIds.clear();
     // Clear originalData
     for(int i = 0; i < this->originalData.size(); ++i){
+        if(uniqueItems.count(this->originalData[i]) > 0){
+            continue;
+        }
         auto item = this->originalData[i];
         item->clear();
         delete item;
@@ -977,8 +1000,12 @@ void CV::Context::solidify(){
     if(this->solid){
         return;
     }
-    for(auto &it : this->data){
-        originalData.push_back(it.second->copy());
+    for(auto &it : this->data){ 
+        if(it.second == NULL){
+            continue;
+        }else{
+            originalData.push_back(it.second->copy());
+        }
     }
     solid = true;
 }
@@ -1040,15 +1067,18 @@ static CV::Item *__execute(CV::Stack *stack, CV::Instruction *ins, std::shared_p
             CONSTRUCTRORS 
         */
         case CV::InstructionType::LET: {
-            auto &ctxId = ins->data[0];
-            auto &dataId = ins->data[1];
-
+            auto &type = ins->data[0];
+            auto &ctxId = ins->data[1];
+            auto &dataId = ins->data[2];
+            
             auto v = stack->execute(stack->instructions[ins->parameter[0]], ctx, cursor);
             if(cursor->raise()){
                 return ctx->buildNil();
             }
-
-            stack->contexts[ctxId]->setPromise(dataId, v);
+            
+            if(type != 0){
+                stack->contexts[ctxId]->setPromise(dataId, v);
+            }
 
             return v;
         };
@@ -1145,6 +1175,31 @@ static CV::Item *__execute(CV::Stack *stack, CV::Instruction *ins, std::shared_p
 
             return ctx->buildNil();
         };        
+        case CV::InstructionType::CF_INVOKE_FUNCTION: { // CC
+            auto nctx = stack->contexts[ins->data[0]];
+            auto nargs = ins->data[1];
+            bool variadic = ins->data[2];
+            auto fnIns = stack->instructions[ins->parameter[0]];
+
+            for(int i = 1; i < ins->parameter.size(); ++i){
+                auto cins = stack->instructions[ins->parameter[i]];
+                auto argument = ins->data[i - 1 + 3];
+
+                auto v = stack->execute(cins, ctx, cursor);
+                if(cursor->raise()){
+                    return ctx->buildNil();
+                } 
+                nctx->setPromise(argument, v);
+            }
+
+            auto r = stack->execute(fnIns, ctx, cursor);
+            if(cursor->raise()){
+                return ctx->buildNil();
+            }
+
+            return r;
+
+        }
 
         /*
             EMBEDDED OPERATORS (LOGIC & ARITHMETIC)
@@ -1479,6 +1534,18 @@ std::string CV::ItemToText(std::shared_ptr<CV::Stack> &stack, CV::Item *item){
                     Tools::setTextColor(Tools::Color::RESET);
         };        
 
+        case CV::NaturalType::FUNCTION: {
+            auto fn = static_cast<CV::FunctionType*>(item);      
+
+            std::string start = Tools::setTextColor(Tools::Color::RED, true)+"["+Tools::setTextColor(Tools::Color::RESET);
+            std::string end = Tools::setTextColor(Tools::Color::RED, true)+"]"+Tools::setTextColor(Tools::Color::RESET);
+            std::string name = Tools::setTextColor(Tools::Color::RED, true)+"fn"+Tools::setTextColor(Tools::Color::RESET);
+            std::string binary = Tools::setTextColor(Tools::Color::BLUE, true)+"BINARY"+Tools::setTextColor(Tools::Color::RESET);
+            std::string body = Tools::setTextColor(Tools::Color::BLUE, true)+"[BODY]"+Tools::setTextColor(Tools::Color::RESET);
+
+            return start+"fn []"+end;
+        };
+
         case CV::NaturalType::LIST: {
             std::string output = Tools::setTextColor(Tools::Color::MAGENTA)+"["+Tools::setTextColor(Tools::Color::RESET);
             auto list = static_cast<CV::ListType*>(item);
@@ -1513,7 +1580,7 @@ int main(){
     AddStandardConstructors(stack);
 
     // Get text tokens
-    auto tokens = parseTokens("[let a [1 2 3]][mut [nth 0 a] 15][a]",  ' ', cursor);
+    auto tokens = parseTokens("[let a [fn [u a][+ u a]]][a 1 3]",  ' ', cursor);
     if(cursor->raise()){
         return 1;
     }
