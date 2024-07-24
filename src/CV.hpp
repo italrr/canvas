@@ -31,6 +31,9 @@
                 LET = 100,
                 MUT,
                 CONSTRUCT_LIST,
+                CONSTRUCT_FUNCTION,
+                // CONSTROL
+                CF_COND_BINARY_BRANCH, // CF = Control Flow
                 // OPERATORS
                 OP_NUM_ADD = 150,
                 OP_NUM_SUB,
@@ -71,9 +74,12 @@
             unsigned id;
             unsigned type;
             unsigned size;
+            unsigned bsize;
             void *data;
             Item();
             void clear();
+            virtual CV::Item *copy();
+            virtual void restore(CV::Item *item);
         };
 
         struct NumberType : Item {
@@ -94,11 +100,10 @@
         };
 
         struct FunctionType : Item {
-            bool binary;
+            std::vector<std::string> argNames;
             bool variadic;
             unsigned nargs;
             unsigned entry;
-            void set(bool variadic, unsigned nargs, unsigned entry);
         };
 
         /* -------------------------------------------------------------------------------------------------------------------------------- */
@@ -119,7 +124,8 @@
 
         struct Context {
             Context *top;
-            unsigned id;
+            unsigned id; 
+            bool solid; // Solid contexts won't accept new data
             std::unordered_map<unsigned, CV::Item*> data;
             std::unordered_map<std::string, unsigned> dataIds;
             unsigned store(CV::Item *item);
@@ -132,13 +138,12 @@
             void clear();
             CV::Item *buildNil();
             Context();
+            void transferFrom(std::shared_ptr<CV::Context> &other, unsigned id);
+            std::vector<CV::Item*> originalData;
+            void solidify();
+            void revert();
         };
         
-        struct Constructor {
-            unsigned id;
-            std::string name;
-
-        };
         struct Token {
             std::string first;
             unsigned line;
@@ -173,8 +178,6 @@
             }
         };
 
-    
-
         struct Stack {
             std::unordered_map<std::string, 
             std::function<CV::Instruction*(
@@ -190,6 +193,7 @@
             void clear();
             CV::Instruction *createInstruction(unsigned type, const CV::Token &token);
             std::shared_ptr<CV::Context> createContext(CV::Context *top = NULL);
+            void deleteContext(unsigned id);
             CV::Item *execute(CV::Instruction *ins, std::shared_ptr<Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);
         };
 

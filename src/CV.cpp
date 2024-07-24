@@ -1,3 +1,4 @@
+#include <set>
 #include <string.h>
 #include "CV.hpp"
 
@@ -219,11 +220,31 @@ void CV::Item::clear(){
     this->type = CV::NaturalType::NIL;
 }
 
+CV::Item *CV::Item::copy(){
+    auto item = new Item();
+    item->type = this->type;
+    item->size = this->size;
+    item->bsize = this->bsize;
+    item->id = this->id;
+    item->data = malloc(this->bsize);
+    memcpy(item->data, this->data, this->bsize);
+    return item;
+}
+
+void CV::Item::restore(CV::Item *item){
+    this->type = item->type;
+    this->size = item->size;
+    this->bsize = item->bsize;
+    this->id = item->id;
+    memcpy(this->data, item->data, item->bsize);
+}
+
 // NUMBER
 void CV::NumberType::set(__CV_DEFAULT_NUMBER_TYPE v){
     if(this->type == CV::NaturalType::NIL){
         clear();
         this->type = CV::NaturalType::NUMBER;
+        this->bsize = sizeof(__CV_DEFAULT_NUMBER_TYPE);
         this->data = malloc(sizeof(__CV_DEFAULT_NUMBER_TYPE));
         this->size = sizeof(__CV_DEFAULT_NUMBER_TYPE);
     }
@@ -246,6 +267,7 @@ void CV::StringType::set(const std::string &v){
     this->type = CV::NaturalType::STRING;
     this->data = malloc(v.length());
     this->size = v.length();
+    this->bsize = v.length();
     for(int i = 0; i < v.size(); ++i){
         auto *c = static_cast<char*>((void*)((size_t)(this->data) + i));
         *c = v[i]; 
@@ -269,6 +291,7 @@ std::string CV::StringType::get(){
 void CV::ListType::build(unsigned n){
     clear();
     auto bsize = sizeof(unsigned) * 2 * n;
+    this->bsize = bsize;
     this->type = CV::NaturalType::LIST;
     this->size = n;
     this->data = malloc(bsize);
@@ -469,6 +492,7 @@ static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::
         ins->data.push_back(ctx->store(string));
         return ins;
     }else
+    // Is this a constructor?
     if(CheckConstructor(stack, imp)){
         return stack->constructors[imp](imp, tokens, stack, ctx, cursor);
     }else{
@@ -513,7 +537,6 @@ static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::
 
 static CV::Instruction* compileTokens(const VECTOR<CV::Token> &tokens, SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
     VECTOR<CV::Instruction*> ins;
-
     // Single token or simple imperative token
     if(tokens.size() == 1 || tokens.size() > 1 && tokens[0].solved){
         auto nins = interpretToken(tokens[0], tokens, stack, ctx, cursor);
@@ -559,15 +582,15 @@ static void AddStandardConstructors(std::shared_ptr<CV::Stack> &stack){
         LET
     */
     DefConstructor(stack, "let", [](const std::string &name, const VECTOR<CV::Token> &tokens, SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
-        if(tokens.size() < 3 || tokens.size() > 3){
-            cursor->setError(name, "Expects exactly 2 arguments (set NAME VALUE)", tokens[0].line);
+        if(tokens.size() != 3){
+            cursor->setError(name, "Expects exactly 2 arguments ("+name+" NAME VALUE)", tokens[0].line);
             return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
         }
         
         // TODO: Check for valid variable names
 
         // Interpret data instruction
-        auto dataIns = interpretToken(tokens[2], tokens, stack, ctx, cursor);
+        auto dataIns = interpretToken(tokens[2], {tokens[2]}, stack, ctx, cursor);
         if(cursor->raise()){
             return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
         }
@@ -576,9 +599,8 @@ static void AddStandardConstructors(std::shared_ptr<CV::Stack> &stack){
         auto dataId = ctx->promise();
         ctx->setName(tokens[1].first, dataId);
 
-
+        // Create instruction
         auto ins = stack->createInstruction(CV::InstructionType::LET, tokens[1]);
-
         ins->data.push_back(ctx->id);
         ins->data.push_back(dataId);
         ins->parameter.push_back(dataIns->id);
@@ -588,12 +610,129 @@ static void AddStandardConstructors(std::shared_ptr<CV::Stack> &stack){
 
 
     /*
+        MUT
+    */
+    DefConstructor(stack, "mut", [](const std::string &name, const VECTOR<CV::Token> &tokens, SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+        if(tokens.size() != 3){
+            cursor->setError(name, "Expects exactly 2 arguments ("+name+" NAME VALUE)", tokens[0].line);
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+        }
+        auto &imp = tokens[1].first;
+        // Check if this name doest exist
+        if(!ctx->check(imp)){
+            cursor->setError(name+" '"+imp+"'", "Name doesn't exist", tokens[0].line);
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+        }
+        // Interpret replacement data instruction
+        auto dataIns = interpretToken(tokens[2], {tokens[2]}, stack, ctx, cursor);
+        if(cursor->raise()){
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
+        }
+        // Find name origin    
+        auto pair = ctx->getIdByName(imp);        
+
+        // Create instruction
+        auto ins = stack->createInstruction(CV::InstructionType::MUT, tokens[1]);
+        ins->data.push_back(pair.ctx);
+        ins->data.push_back(pair.id);
+        ins->parameter.push_back(dataIns->id);
+
+        return ins;
+    }); 
+
+
+    /*
+        FN
+    */
+    DefConstructor(stack, "fn", [](const std::string &name, const VECTOR<CV::Token> &tokens, SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+        std::exit(1);
+        
+        bool variadic = false;
+
+        auto argTokens = parseTokens(tokens[1].first, ' ', cursor);
+        if(argTokens.size() == 1 && argTokens[0].first == ".."){
+            variadic = true;
+        }
+
+        if(tokens.size() != 3){
+            cursor->setError(name, "Expects exactly 2 arguments ("+name+" NAME VALUE)", tokens[0].line);
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+        }
+        auto &imp = tokens[1].first;
+        // Check if this name doest exist
+        if(!ctx->check(imp)){
+            cursor->setError(name+" '"+imp+"'", "Name doesn't exist", tokens[0].line);
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+        }
+        // Interpret replacement data instruction
+        auto dataIns = interpretToken(tokens[2], {tokens[2]}, stack, ctx, cursor);
+        if(cursor->raise()){
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
+        }
+        // Find name origin    
+        auto pair = ctx->getIdByName(imp);        
+
+        // Create instruction
+        auto ins = stack->createInstruction(CV::InstructionType::MUT, tokens[1]);
+        ins->data.push_back(pair.ctx);
+        ins->data.push_back(pair.id);
+        ins->parameter.push_back(dataIns->id);
+
+        return ins;
+    });           
+
+    /*
+        IF
+        [CC]  (Creates Context)
+    */
+    DefConstructor(stack, "if", [](const std::string &name, const VECTOR<CV::Token> &tokens, SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+        if(tokens.size() < 3){
+            cursor->setError(name, "Expects at least 2 arguments", tokens[0].line);
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+        }
+        // Create Context
+        auto nctx = stack->createContext(ctx.get());
+
+        // Process true branch
+        auto condition = interpretToken(tokens[1], {tokens[1]}, stack, nctx, cursor);
+        if(cursor->raise()){
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
+        } 
+
+        // Process false branch
+        auto trueBranch = interpretToken(tokens[2], {tokens[2]}, stack, nctx, cursor);
+        if(cursor->raise()){
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
+        }        
+
+        // Create instruction
+        auto ins = stack->createInstruction(CV::InstructionType::CF_COND_BINARY_BRANCH, tokens[1]);
+        ins->data.push_back(nctx->id);
+        ins->parameter.push_back(condition->id);
+        ins->parameter.push_back(trueBranch->id);
+
+        // Is there false branch?
+        if(tokens.size() >= 4){
+            auto falseBranch = interpretToken(tokens[3], {tokens[3]}, stack, nctx, cursor);
+            if(cursor->raise()){
+                return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
+            }
+            ins->parameter.push_back(falseBranch->id);
+        }
+
+        // Seals it as to avoid to able to revert it's previous state
+        nctx->solidify();
+
+        return ins;
+    });     
+
+    /*
         EMBEDDED OPERATORS (LOGIC & ARITHMETIC)
     */
     auto buildOp = [&](const std::string &name, unsigned TYPE){
         DefConstructor(stack, name, [TYPE](const std::string &name, const VECTOR<CV::Token> &tokens, SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
             if(tokens.size() < 3){
-                cursor->setError(name, "Expects exactly 2 arguments", tokens[0].line);
+                cursor->setError(name, "Expects at least 2 arguments", tokens[0].line);
                 return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
             }
 
@@ -609,7 +748,7 @@ static void AddStandardConstructors(std::shared_ptr<CV::Stack> &stack){
             actuator->data.push_back(ctx->id);
             actuator->data.push_back(dataId);
             for(int i = 1; i < tokens.size(); ++i){
-                auto ins = interpretToken(tokens[i], tokens, stack, ctx, cursor);
+                auto ins = interpretToken(tokens[i], {tokens[i]}, stack, ctx, cursor);
                 if(cursor->raise()){
                     return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
                 }            
@@ -631,7 +770,6 @@ static void AddStandardConstructors(std::shared_ptr<CV::Stack> &stack){
     buildOp("lte", CV::InstructionType::OP_COND_LTE);
     buildOp("gt", CV::InstructionType::OP_COND_GT);
     buildOp("gte", CV::InstructionType::OP_COND_GTE);
-    
 }
 
 
@@ -640,9 +778,14 @@ static void AddStandardConstructors(std::shared_ptr<CV::Stack> &stack){
 
 CV::Context::Context(){
     top = NULL;
+    solid = false;
 }
 
 unsigned CV::Context::store(CV::Item *item){
+    if(solid){
+        fprintf(stderr, "Context %i: Tried storing new Item %i in a solid context\n", this->id, id);
+        std::exit(1);           
+    }
     item->id = generateId();
     this->data[item->id] = item;
     return item->id;
@@ -697,19 +840,57 @@ CV::Item *CV::Context::getByName(const std::string &name){
 }
 
 void CV::Context::clear(){
+    std::set<CV::Item*> uniqueItems; // To avoid double free
     for(auto &it : this->data){
         auto item = it.second;
         item->clear();
-        free(item);
+        uniqueItems.insert(item);
+    }
+    for(auto &it : uniqueItems){
+        free(it);
     }
     this->data.clear();
     this->dataIds.clear();
+    // Clear originalData
+    for(int i = 0; i < this->originalData.size(); ++i){
+        auto item = this->originalData[i];
+        item->clear();
+        delete item;
+    }
+    this->originalData.clear();
 }
 
 CV::Item *CV::Context::buildNil(){
     auto nil = new CV::Item();
     this->store(nil);
     return nil;
+}
+
+void CV::Context::transferFrom(std::shared_ptr<CV::Context> &other, unsigned id){
+    // Find and store it here
+    auto data = other->data[id];
+    this->store(data);
+    // Remove from other
+    auto it = other->data.find(id);
+    other->data.erase(it);
+}
+
+void CV::Context::solidify(){
+    if(this->solid){
+        return;
+    }
+    for(auto &it : this->data){
+        originalData.push_back(it.second->copy());
+    }
+    solid = true;
+}
+
+void CV::Context::revert(){
+    for(int i = 0; i < this->originalData.size(); ++i){
+        auto backup = this->originalData[i];
+        auto local = this->data[backup->id];
+        local->restore(backup);
+    }
 }
 
 /* -------------------------------------------------------------------------------------------------------------------------------- */
@@ -734,6 +915,17 @@ std::shared_ptr<CV::Context> CV::Stack::createContext(CV::Context *top){
     ctx->top = top;
     this->contexts[ctx->id] = ctx;
     return ctx;
+}
+
+void CV::Stack::deleteContext(unsigned id){
+    auto it = this->contexts.find(id);
+    if(it == this->contexts.end()){
+        fprintf(stderr, "Context %i: Failed to find such context\n", id);
+        std::exit(1);
+    }
+    auto ctx = it->second;
+    ctx->clear();
+    this->contexts.erase(it);
 }
 
 static CV::Item *__execute(CV::Stack *stack, CV::Instruction *ins, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
@@ -763,7 +955,39 @@ static CV::Item *__execute(CV::Stack *stack, CV::Instruction *ins, std::shared_p
             return v;
         };
         case CV::InstructionType::MUT: {
+            auto &ctxId = ins->data[0];
+            auto &dataId = ins->data[1];
 
+            auto v = stack->execute(stack->instructions[ins->parameter[0]], ctx, cursor);
+            if(cursor->raise()){
+                return ctx->buildNil();
+            }
+
+            auto target = stack->contexts[ctxId]->data[dataId];
+
+            if(target->type != v->type){
+                cursor->setError("Illegal Mutation '"+ins->token.first+"'", "Can only mutate variables of the same type", ins->token.line);
+                return ctx->buildNil();
+            }else
+            if(target->type != CV::NaturalType::NUMBER && target->type != CV::NaturalType::STRING){
+                cursor->setError("Illegal Mutation '"+ins->token.first+"'", "Only natural types 'STRING' and 'NUMBER' may be mutated", ins->token.line);
+                return ctx->buildNil();                
+            }
+
+            switch(target->type){
+                case CV::NaturalType::NUMBER: {
+                    auto original = static_cast<CV::NumberType*>(target);
+                    auto newValue = static_cast<CV::NumberType*>(v);
+                    original->set(newValue->get());
+                } break;
+                case CV::NaturalType::STRING: {
+                    auto original = static_cast<CV::StringType*>(target);
+                    auto newValue = static_cast<CV::StringType*>(v);                    
+                    original->set(newValue->get());
+                } break;                
+            }
+
+            return target;
         };
         case CV::InstructionType::CONSTRUCT_LIST: {
             auto &lsCtxId = ins->data[0];
@@ -786,6 +1010,42 @@ static CV::Item *__execute(CV::Stack *stack, CV::Instruction *ins, std::shared_p
             return static_cast<CV::Item*>(list);
 
         };
+
+        /*
+            CONTROL FLOW
+        */
+        case CV::InstructionType::CF_COND_BINARY_BRANCH: { // CC
+
+            auto nctx = stack->contexts[ins->data[0]];
+
+            auto cond = stack->execute(stack->instructions[ins->parameter[0]], nctx, cursor);
+            if(cursor->raise()){
+                return ctx->buildNil();
+            }       
+
+            bool isTrue = cond->type != CV::NaturalType::NIL && (cond->type == CV::NaturalType::NUMBER ? static_cast<CV::NumberType*>(cond)->get() != 0 : true);
+
+            if(isTrue){
+                auto trueBranch = stack->execute(stack->instructions[ins->parameter[1]], nctx, cursor);
+                if(cursor->raise()){
+                    return ctx->buildNil();
+                }          
+                ctx->transferFrom(nctx, trueBranch->id);
+                return trueBranch;
+            }else
+            if(ins->parameter.size() > 2){
+                auto falseBranch = stack->execute(stack->instructions[ins->parameter[2]], nctx, cursor);
+                if(cursor->raise()){
+                    return ctx->buildNil();
+                }                    
+                ctx->transferFrom(nctx, falseBranch->id);   
+                return falseBranch;                
+            }
+
+            nctx->revert();
+
+            return ctx->buildNil();
+        };        
 
         /*
             EMBEDDED OPERATORS (LOGIC & ARITHMETIC)
@@ -1116,7 +1376,7 @@ int main(){
     AddStandardConstructors(stack);
 
     // Get text tokens
-    auto tokens = parseTokens("1 2 3",  ' ', cursor);
+    auto tokens = parseTokens("[if [gt 1 5] 1]",  ' ', cursor);
     if(cursor->raise()){
         return 1;
     }
@@ -1136,7 +1396,7 @@ int main(){
 
     std::cout << CV::ItemToText(stack, result) << std::endl;
 
-    // stack->clear();
+    stack->clear();
 
     return 0;
 }
