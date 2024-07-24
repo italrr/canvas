@@ -375,7 +375,7 @@ static VECTOR<CV::Token> parseTokens(std::string input, char sep, SHARED<CV::Cur
     open = 0;
     // Throw mismatching brackets
     if(leftBrackets != rightBrackets){
-        cursor->setError("Syntax Error", "Mismatching brackets", cline);
+        cursor->setError("Syntax Error", "Mismatching brackets", cline+1);
         return {};
     }
     // Throw mismatching quotes
@@ -1639,6 +1639,10 @@ void CV::Stack::clear(){
 
 /* -------------------------------------------------------------------------------------------------------------------------------- */
 
+void CV::SetUseColor(bool v){
+    useColorOnText = v;
+}
+
 std::string CV::ItemToText(std::shared_ptr<CV::Stack> &stack, CV::Item *item){
     switch(item->type){
         
@@ -1668,7 +1672,7 @@ std::string CV::ItemToText(std::shared_ptr<CV::Stack> &stack, CV::Item *item){
             std::string binary = Tools::setTextColor(Tools::Color::BLUE, true)+"BINARY"+Tools::setTextColor(Tools::Color::RESET);
             std::string body = Tools::setTextColor(Tools::Color::BLUE, true)+fn->body.first+Tools::setTextColor(Tools::Color::RESET);
 
-            return name+" "+start+(fn->variadic ? "args" : Tools::compileList(fn->args))+end+" "+start+( body )+end;
+            return name+" "+start+(fn->variadic ? "args" : Tools::compileList(fn->args))+end+" "+( body );
         };
 
         case CV::NaturalType::LIST: {
@@ -1694,38 +1698,67 @@ std::string CV::ItemToText(std::shared_ptr<CV::Stack> &stack, CV::Item *item){
     }
 }
 
-/* -------------------------------------------------------------------------------------------------------------------------------- */
-
-
-int main(){
-
-    auto cursor = std::make_shared<CV::Cursor>();
-    auto stack = std::make_shared<CV::Stack>();
-    auto context = stack->createContext();
+std::string CV::QuickInterpret(const std::string &input, std::shared_ptr<CV::Stack> &stack, std::shared_ptr<Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
+    // Add embedded contructors
     AddStandardConstructors(stack);
 
     // Get text tokens
-    auto tokens = parseTokens("[let a [fn [a b c][+ a b c]]][a 1 2 3]",  ' ', cursor);
+    auto tokens = parseTokens(input,  ' ', cursor);
     if(cursor->raise()){
-        return 1;
+        return "";
     }
 
     // Compile tokens into its bytecode
-    auto entry = compileTokens(tokens, stack, context, cursor);
+    auto entry = compileTokens(tokens, stack, ctx, cursor);
     if(cursor->raise()){
-        return 1;
+        return "";
     }
 
     // Execute
-    auto result = stack->execute(entry, context, cursor);
+    auto result = stack->execute(entry, ctx, cursor);
     if(cursor->raise()){
-        return 1;
+        return "";
     }
 
-
-    std::cout << CV::ItemToText(stack, result) << std::endl;
+    auto text = CV::ItemToText(stack, result);
 
     stack->clear();
 
-    return 0;
+    return text;
 }
+
+/* -------------------------------------------------------------------------------------------------------------------------------- */
+
+
+// int main(){
+
+//     auto cursor = std::make_shared<CV::Cursor>();
+//     auto stack = std::make_shared<CV::Stack>();
+//     auto context = stack->createContext();
+//     AddStandardConstructors(stack);
+
+//     // Get text tokens
+//     auto tokens = parseTokens("[let a [fn [a b c][+ a b c]]][a 1 2 3]",  ' ', cursor);
+//     if(cursor->raise()){
+//         return 1;
+//     }
+
+//     // Compile tokens into its bytecode
+//     auto entry = compileTokens(tokens, stack, context, cursor);
+//     if(cursor->raise()){
+//         return 1;
+//     }
+
+//     // Execute
+//     auto result = stack->execute(entry, context, cursor);
+//     if(cursor->raise()){
+//         return 1;
+//     }
+
+
+//     std::cout << CV::ItemToText(stack, result) << std::endl;
+
+//     stack->clear();
+
+//     return 0;
+// }

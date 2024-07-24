@@ -8,7 +8,7 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/builds/cmake)
 
 # src
 set (cv_src 
-            src/Interpreter.cpp)
+            src/canvas.cpp)
 
 if(UNIX AND NOT APPLE)
     set(LINUX TRUE)

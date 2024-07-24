@@ -9,8 +9,72 @@
     #include <mutex>
 
     #define __CV_DEFAULT_NUMBER_TYPE float  
+    static const __CV_DEFAULT_NUMBER_TYPE CANVAS_LANG_VERSION[3] = { 0, 3, 0 };
 
     namespace CV {
+
+        namespace SupportedPlatform {
+            enum SupportedPlatform : int {
+                WINDOWS,
+                LINUX,
+                OSX
+            };
+            static std::string name(int plat){
+                switch(plat){
+                    case SupportedPlatform::WINDOWS: 
+                        return "WINDOWS";
+                    case SupportedPlatform::LINUX:
+                        return "LINUX";
+                    default:
+                        return "UNKNOWN";
+                }
+            }
+        }
+
+        namespace SupportedArchitecture {
+            enum SupportedArchitecture : int {
+                X86,
+                X86_64,
+                ARM,
+                ARM64,
+                UNKNOWN
+            };
+            static std::string name(int plat){
+                switch(plat){
+                    case SupportedArchitecture::X86: 
+                        return "X86";
+                    case SupportedArchitecture::X86_64: 
+                        return "X86_64";
+                    case SupportedArchitecture::ARM: 
+                        return "ARM";
+                    case SupportedArchitecture::ARM64: 
+                        return "ARM64";                                                                                    
+                    default:
+                        return "UNKNOWN";
+                }
+            }
+        }
+
+        #if defined(__i386__) || defined(__i686__)
+            const static int ARCH = SupportedArchitecture::X86;
+        #elif defined(__x86_64__) || defined(__amd64__)
+            const static int ARCH = SupportedArchitecture::X86_64;
+        #elif defined(__arm__)
+            const static int ARCH = SupportedArchitecture::ARM;
+        #elif defined(__aarch64__)
+            const static int ARCH = SupportedArchitecture::ARM64;
+        #else
+            const static int ARCH = SupportedArchitecture::UNKNOWN;
+        #endif
+
+        #ifdef _WIN32
+            const static int PLATFORM = SupportedPlatform::WINDOWS;
+        #elif __linux__
+            const static int PLATFORM = SupportedPlatform::LINUX;
+        #else
+            const static int PLATFORM = SupportedPlatform::UNSUPPORTED;
+        #endif    
+
 
         namespace NaturalType {
             enum NaturalType : unsigned {
@@ -21,7 +85,7 @@
                 FUNCTION,
                 NIL
             };
-            std::string name(unsigned type){
+            static std::string name(unsigned type){
                 switch(type){
                     case CV::NaturalType::NUMBER: {
                         return "NUMBER";
@@ -234,6 +298,8 @@
 
 
         std::string ItemToText(std::shared_ptr<CV::Stack> &stack, CV::Item *item);
+        void SetUseColor(bool v);
+        std::string QuickInterpret(const std::string &input, std::shared_ptr<CV::Stack> &stack, std::shared_ptr<Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);
 
     }
 
