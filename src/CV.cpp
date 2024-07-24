@@ -487,6 +487,13 @@ static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::
     auto &imp = token.first;
 
     // Infere for natural types
+    if(imp == "nil" && tokens.size() == 1){
+        auto ins = stack->createInstruction(CV::InstructionType::STATIC_PROXY, token);
+        auto number = new CV::Item();
+        ins->data.push_back(ctx->id);
+        ins->data.push_back(ctx->store(number));
+        return ins;
+    }else    
     if(CV::Tools::isNumber(imp) && tokens.size() == 1){
         auto ins = stack->createInstruction(CV::InstructionType::STATIC_PROXY, token);
         auto number = new CV::NumberType();
@@ -832,10 +839,11 @@ static void AddStandardConstructors(std::shared_ptr<CV::Stack> &stack){
     /*
         EMBEDDED OPERATORS (LOGIC & ARITHMETIC)
     */
-    auto buildOp = [&](const std::string &name, unsigned TYPE){
-        DefConstructor(stack, name, [TYPE](const std::string &name, const VECTOR<CV::Token> &tokens, SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
-            if(tokens.size() < 3){
-                cursor->setError(name, "Expects at least 2 arguments", tokens[0].line);
+   
+    auto buildOp = [&](const std::string &name, unsigned TYPE, unsigned minArgs = 2){
+        DefConstructor(stack, name, [TYPE, minArgs](const std::string &name, const VECTOR<CV::Token> &tokens, SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+            if(tokens.size() < minArgs+1){
+                cursor->setError(name, "Expects at least "+std::to_string(minArgs)+" arguments", tokens[0].line);
                 return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
             }
 
@@ -873,6 +881,38 @@ static void AddStandardConstructors(std::shared_ptr<CV::Stack> &stack){
     buildOp("lte", CV::InstructionType::OP_COND_LTE);
     buildOp("gt", CV::InstructionType::OP_COND_GT);
     buildOp("gte", CV::InstructionType::OP_COND_GTE);
+    buildOp("and", CV::InstructionType::OP_LOGIC_AND, 1);
+    buildOp("or", CV::InstructionType::OP_LOGIC_OR, 1);
+
+    DefConstructor(stack, "not", [](const std::string &name, const VECTOR<CV::Token> &tokens, SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+        if(tokens.size() != 2){
+            cursor->setError(name, "Expects exactly 1 argument", tokens[0].line);
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+        }
+
+        auto result = stack->createInstruction(CV::InstructionType::REFERRED_PROXY, tokens[0]);
+
+        auto data = new CV::NumberType();
+        data->set(0);
+        auto dataId = ctx->store(data);
+        result->data.push_back(ctx->id);
+        result->data.push_back(dataId);
+
+        // Instruction
+        auto actuator = stack->createInstruction(CV::InstructionType::OP_LOGIC_NOT, tokens[0]);
+        actuator->data.push_back(ctx->id);
+        actuator->data.push_back(dataId);
+        auto ins = interpretToken(tokens[1], {tokens[1]}, stack, ctx, cursor);
+        if(cursor->raise()){
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+        }            
+        actuator->parameter.push_back(ins->id);
+
+
+        result->parameter.push_back(actuator->id);
+
+        return result;
+    });    
 }
 
 
@@ -1418,7 +1458,79 @@ static CV::Item *__execute(CV::Stack *stack, CV::Instruction *ins, std::shared_p
                 last = *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(operands[i]->data);
             }
             return NULL;
-        };                          
+        };    
+
+        case CV::InstructionType::OP_LOGIC_AND: {
+            auto &ctxId = ins->data[0];
+            auto &dataId = ins->data[1];
+
+            auto item = stack->contexts[ctxId]->data[dataId];
+
+            *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 1;
+
+            
+            for(int i = 0; i < ins->parameter.size(); ++i){
+                auto v = stack->execute(stack->instructions[ins->parameter[i]], ctx, cursor);
+                if(cursor->raise()){
+                    return ctx->buildNil();
+                }                
+                if(     v->type == CV::NaturalType::NIL ||
+                        (v->type == CV::NaturalType::NUMBER && static_cast<CV::NumberType*>(v)->get() == 0)){
+                    *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 0;
+                    break;
+                }
+            }
+
+            return NULL;
+        };  
+
+        case CV::InstructionType::OP_LOGIC_OR: {
+            auto &ctxId = ins->data[0];
+            auto &dataId = ins->data[1];
+
+            auto item = stack->contexts[ctxId]->data[dataId];
+
+            *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 0;
+
+            
+            for(int i = 0; i < ins->parameter.size(); ++i){
+                auto v = stack->execute(stack->instructions[ins->parameter[i]], ctx, cursor);
+                if(cursor->raise()){
+                    return ctx->buildNil();
+                }                
+                if(     (v->type == CV::NaturalType::NUMBER && static_cast<CV::NumberType*>(v)->get() != 0) ||
+                        (v->type != CV::NaturalType::NUMBER && v->type != CV::NaturalType::NIL)
+                        ){
+                    *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 1;
+                    break;
+                }
+            }
+
+            return NULL;
+        };        
+
+        case CV::InstructionType::OP_LOGIC_NOT: {
+            auto &ctxId = ins->data[0];
+            auto &dataId = ins->data[1];
+
+            auto item = stack->contexts[ctxId]->data[dataId];
+
+            *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 0;
+
+            auto v = stack->execute(stack->instructions[ins->parameter[0]], ctx, cursor);
+            if(cursor->raise()){
+                return ctx->buildNil();
+            }
+            if(v->type == CV::NaturalType::NUMBER){
+                *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(v->data) == 0;
+            }else
+            if(v->type == CV::NaturalType::NIL){
+                *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 1;
+            }
+
+
+            return NULL;
+        };                                           
                  
 
         /*
@@ -1580,7 +1692,7 @@ int main(){
     AddStandardConstructors(stack);
 
     // Get text tokens
-    auto tokens = parseTokens("[let a [fn [u a][+ u a]]][a 1 3]",  ' ', cursor);
+    auto tokens = parseTokens("not [not nil]",  ' ', cursor);
     if(cursor->raise()){
         return 1;
     }
