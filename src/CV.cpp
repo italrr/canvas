@@ -65,6 +65,18 @@ namespace CV {
             return s;
         }
 
+        static std::string compileList(const std::vector<std::string> &strings){
+            std::string out;
+
+            for(int i = 0; i < strings.size(); ++i){
+                out += strings[i];
+                if(i < strings.size()-1){
+                    out += " ";
+                }
+            }
+
+            return out;
+        }
 
         namespace Color {
             enum Color : int {
@@ -1004,9 +1016,6 @@ void CV::Context::clear(){
         item->clear();
         uniqueItems.insert(item);
     }
-    for(auto &it : uniqueItems){
-        free(it);
-    }
     this->data.clear();
     this->dataIds.clear();
     // Clear originalData
@@ -1018,6 +1027,10 @@ void CV::Context::clear(){
         item->clear();
         delete item;
     }
+    // std::set's destructor is calling free/delete for some reason?????
+    // for(auto it : uniqueItems){
+    //     free(it);
+    // }    
     this->originalData.clear();
 }
 
@@ -1653,9 +1666,9 @@ std::string CV::ItemToText(std::shared_ptr<CV::Stack> &stack, CV::Item *item){
             std::string end = Tools::setTextColor(Tools::Color::RED, true)+"]"+Tools::setTextColor(Tools::Color::RESET);
             std::string name = Tools::setTextColor(Tools::Color::RED, true)+"fn"+Tools::setTextColor(Tools::Color::RESET);
             std::string binary = Tools::setTextColor(Tools::Color::BLUE, true)+"BINARY"+Tools::setTextColor(Tools::Color::RESET);
-            std::string body = Tools::setTextColor(Tools::Color::BLUE, true)+"[BODY]"+Tools::setTextColor(Tools::Color::RESET);
+            std::string body = Tools::setTextColor(Tools::Color::BLUE, true)+fn->body.first+Tools::setTextColor(Tools::Color::RESET);
 
-            return start+"fn []"+end;
+            return name+" "+start+(fn->variadic ? "args" : Tools::compileList(fn->args))+end+" "+start+( body )+end;
         };
 
         case CV::NaturalType::LIST: {
@@ -1692,7 +1705,7 @@ int main(){
     AddStandardConstructors(stack);
 
     // Get text tokens
-    auto tokens = parseTokens("not [not nil]",  ' ', cursor);
+    auto tokens = parseTokens("[let a [fn [a b c][+ a b c]]][a 1 2 3]",  ' ', cursor);
     if(cursor->raise()){
         return 1;
     }
