@@ -554,10 +554,11 @@ static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::
 
                 // Gather parameters
                 if(fn->variadic){
-                    auto argId = nctx->promise();
-                    std::string name = "@";
+                    auto list = new CV::ListType();
+                    list->build(tokens.size()-1);
+                    auto argId = nctx->store(list);
                     ins->data.push_back(argId);       
-                    nctx->setName(name, argId);
+                    nctx->setName("@", argId);
                 }else{
                     for(int i = 0; i < fn->args.size(); ++i){
                         auto argId = nctx->promise();
@@ -651,7 +652,7 @@ static CV::Instruction* compileTokens(const VECTOR<CV::Token> &tokens, SHARED<CV
     return ins[0];
 }
 
-static void AddStandardConstructors(std::shared_ptr<CV::Stack> &stack){
+static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
     /*
     
         STANDARD CONSTRUCTORS
@@ -893,8 +894,8 @@ static void AddStandardConstructors(std::shared_ptr<CV::Stack> &stack){
     buildOp("lte", CV::InstructionType::OP_COND_LTE);
     buildOp("gt", CV::InstructionType::OP_COND_GT);
     buildOp("gte", CV::InstructionType::OP_COND_GTE);
-    buildOp("and", CV::InstructionType::OP_LOGIC_AND, 1);
-    buildOp("or", CV::InstructionType::OP_LOGIC_OR, 1);
+    buildOp("and", CV::InstructionType::OP_LOGIC_AND);
+    buildOp("or", CV::InstructionType::OP_LOGIC_OR);
 
     DefConstructor(stack, "not", [](const std::string &name, const VECTOR<CV::Token> &tokens, SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
         if(tokens.size() != 2){
@@ -1236,13 +1237,18 @@ static CV::Item *__execute(CV::Stack *stack, CV::Instruction *ins, std::shared_p
 
             for(int i = 1; i < ins->parameter.size(); ++i){
                 auto cins = stack->instructions[ins->parameter[i]];
-                auto argument = ins->data[i - 1 + 3];
-
                 auto v = stack->execute(cins, ctx, cursor);
                 if(cursor->raise()){
                     return ctx->buildNil();
                 } 
-                nctx->setPromise(argument, v);
+                if(variadic){
+                    auto argument = ins->data[3];
+                    auto varList = static_cast<CV::ListType*>(nctx->data[argument]);
+                    varList->set(i-1, ctx->id, v->id);
+                }else{
+                    auto argument = ins->data[i - 1 + 3];
+                    nctx->setPromise(argument, v);
+                }
             }
 
             auto r = stack->execute(fnIns, ctx, cursor);
@@ -1700,7 +1706,7 @@ std::string CV::ItemToText(std::shared_ptr<CV::Stack> &stack, CV::Item *item){
 
 std::string CV::QuickInterpret(const std::string &input, std::shared_ptr<CV::Stack> &stack, std::shared_ptr<Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
     // Add embedded contructors
-    AddStandardConstructors(stack);
+    __addStandardConstructors(stack);
 
     // Get text tokens
     auto tokens = parseTokens(input,  ' ', cursor);
@@ -1730,35 +1736,35 @@ std::string CV::QuickInterpret(const std::string &input, std::shared_ptr<CV::Sta
 /* -------------------------------------------------------------------------------------------------------------------------------- */
 
 
-// int main(){
+int main(){
 
-//     auto cursor = std::make_shared<CV::Cursor>();
-//     auto stack = std::make_shared<CV::Stack>();
-//     auto context = stack->createContext();
-//     AddStandardConstructors(stack);
+    auto cursor = std::make_shared<CV::Cursor>();
+    auto stack = std::make_shared<CV::Stack>();
+    auto context = stack->createContext();
+    __addStandardConstructors(stack);
 
-//     // Get text tokens
-//     auto tokens = parseTokens("[let a [fn [a b c][+ a b c]]][a 1 2 3]",  ' ', cursor);
-//     if(cursor->raise()){
-//         return 1;
-//     }
+    // Get text tokens
+    auto tokens = parseTokens("[let ++ [fn [a][mut a [+ a 1]]]][let b 5][++ b][b]",  ' ', cursor);
+    if(cursor->raise()){
+        return 1;
+    }
 
-//     // Compile tokens into its bytecode
-//     auto entry = compileTokens(tokens, stack, context, cursor);
-//     if(cursor->raise()){
-//         return 1;
-//     }
+    // Compile tokens into its bytecode
+    auto entry = compileTokens(tokens, stack, context, cursor);
+    if(cursor->raise()){
+        return 1;
+    }
 
-//     // Execute
-//     auto result = stack->execute(entry, context, cursor);
-//     if(cursor->raise()){
-//         return 1;
-//     }
+    // Execute
+    auto result = stack->execute(entry, context, cursor);
+    if(cursor->raise()){
+        return 1;
+    }
 
 
-//     std::cout << CV::ItemToText(stack, result) << std::endl;
+    std::cout << CV::ItemToText(stack, result) << std::endl;
 
-//     stack->clear();
+    stack->clear();
 
-//     return 0;
-// }
+    return 0;
+}
