@@ -116,12 +116,13 @@
                 NOOP,
                 // CONSTRUCTORS
                 LET = 100,
-                MUT,
+                MUT,                    // Mutator
                 CONSTRUCT_LIST,
                 CONSTRUCT_FUNCTION,
-                // CONTROL
+                // CONTROL FLOW
                 CF_INVOKE_FUNCTION,
-                CF_COND_BINARY_BRANCH, // CF = Control Flow
+                CF_COND_BINARY_BRANCH, 
+                CF_DO_LOOP,
                 // OPERATORS
                 OP_NUM_ADD = 150,
                 OP_NUM_SUB,
@@ -296,7 +297,7 @@
             CV::Item *execute(CV::Instruction *ins, std::shared_ptr<Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);
         };
 
-
+        void AddStandardConstructors(std::shared_ptr<CV::Stack> &stack);
         std::string ItemToText(std::shared_ptr<CV::Stack> &stack, CV::Item *item);
         void SetUseColor(bool v);
         std::string QuickInterpret(const std::string &input, std::shared_ptr<CV::Stack> &stack, std::shared_ptr<Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);
