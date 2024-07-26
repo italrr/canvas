@@ -13,6 +13,10 @@
 
     namespace CV {
 
+        namespace Tools {
+            std::string readFile(const std::string &path);
+        }
+
         namespace SupportedPlatform {
             enum SupportedPlatform : int {
                 WINDOWS,
@@ -124,6 +128,7 @@
                 CF_INVOKE_BINARY_FUNCTION,
                 CF_COND_BINARY_BRANCH, 
                 CF_LOOP_DO,
+                CF_LOOP_FOR,
                 CF_INT_YIELD,
                 CF_INT_SKIP,
                 CF_INT_RETURN,
@@ -279,9 +284,13 @@
         };
         struct Context;
         struct BinaryFunction {
+            bool preprocessor;
             std::string name;
             unsigned id;  
             std::function<CV::Item*(std::vector<CV::Item*>&, std::shared_ptr<CV::Context>&, std::shared_ptr<CV::Cursor> &cursor)> fn;
+            BinaryFunction(){
+                preprocessor = false;
+            }
         };
 
         struct Context {
@@ -334,7 +343,7 @@
             std::function<CV::Instruction*(
                                             const std::string &name,
                                             const std::vector<CV::Token> &tokens,
-                                            std::shared_ptr<CV::Stack> &stack,
+                                            const std::shared_ptr<CV::Stack> &stack,
                                             std::shared_ptr<CV::Context> &ctx,
                                             std::shared_ptr<CV::Cursor> &cursor
                                            )>> constructors;
@@ -348,7 +357,7 @@
             std::shared_ptr<CV::Context> getContext(unsigned id) const;
             void deleteContext(unsigned id);
             CV::ControlFlow execute(CV::Instruction *ins, std::shared_ptr<Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);
-            void registerFunction(const std::string &name, const std::function<CV::Item*(std::vector<CV::Item*>&, std::shared_ptr<CV::Context>&, std::shared_ptr<CV::Cursor> &cursor)> &fn);
+            void registerFunction(const std::string &name, const std::function<CV::Item*(std::vector<CV::Item*>&, std::shared_ptr<CV::Context>&, std::shared_ptr<CV::Cursor> &cursor)> &fn, bool preprocessor = false);
             unsigned getRegisteredFunctionId(const std::string &name);
         };
 

@@ -1,0 +1,6 @@
+[import 'src/libs/core.cv']
+
+# test
+[io-out 'What\'s your name?\n> ']
+[let var [io-in]]
+[io-out var '\n']
