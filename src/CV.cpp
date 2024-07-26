@@ -1,5 +1,9 @@
+#include <fstream>
 #include <set>
+#include <sys/stat.h>
 #include <string.h>
+#include <sys/stat.h>
+
 #include "CV.hpp"
 
 #define __CV_DEBUG 1
@@ -139,8 +143,48 @@ namespace CV {
             return useColorOnText ? (UnixColor::BackgroundColorCodes.find(color)->second) : "";
 
         }
+
+        std::string solveEscapedCharacters(const std::string &v){
+            std::string result;
+            for(int i = 0; i < v.size(); ++i){
+                auto c = v[i];
+                // process escaped quotation
+                if(i < v.size()-1 && v[i] == '\\' && v[i+1] == '\''){
+                    result += '\'';
+                    ++i;
+                    continue;
+                }  
+                result += c;              
+            }
+            return result;
+        }
+        
+        static bool fileExists(const std::string &path){
+			struct stat tt;
+			stat(path.c_str(), &tt);
+			return S_ISREG(tt.st_mode);	            
+        }
+
+        std::string readFile(const std::string &path){
+            std::string buffer;
+            std::ifstream file(path);
+            for(std::string line; std::getline(file, line);){
+                if(line.size() > 0){
+                    buffer += line+"\n";
+                }
+            }    
+            return buffer;
+        }        
     }
 }
+
+#if __CV_DEBUG == 1
+    static void printTokenList(const VECTOR<CV::Token> &list){
+        for(unsigned i = 0; i < list.size(); ++i){
+            std::cout << "'" << list[i].first << "' " << (int)list[i].solved << std::endl;
+        }
+    }
+#endif
 
 /* -------------------------------------------------------------------------------------------------------------------------------- */
 // Cursor Stuff
@@ -274,8 +318,9 @@ __CV_DEFAULT_NUMBER_TYPE CV::NumberType::get(){
 }
 
 // STRING
-void CV::StringType::set(const std::string &v){
+void CV::StringType::set(const std::string &_v){
     clear();
+    auto v = CV::Tools::solveEscapedCharacters(_v);
     this->type = CV::NaturalType::STRING;
     this->data = malloc(v.length());
     this->size = v.length();
@@ -354,6 +399,9 @@ static VECTOR<CV::Token> parseTokens(std::string input, char sep, SHARED<CV::Cur
         if(c == '\n'){
             ++cline;
         }else
+        if(c == '\\' && i < input.size()-1 && input[i+1] == '\''){
+            i += 1;
+        }else
         if(c == '\''){
             onString = !onString;
             if(onString){
@@ -394,10 +442,11 @@ static VECTOR<CV::Token> parseTokens(std::string input, char sep, SHARED<CV::Cur
     for(int i = 0; i < input.size(); ++i){
         char c = input[i];
         if(i < input.size()-1 && c == '\\' && input[i+1] == '\'' && onString){
+            buffer += '\\';
             buffer += '\'';
-            ++i;
+            i += 1;
             continue;
-        }else            
+        }else      
         if(c == '\'' && !onComment){
             onString = !onString;
             buffer += c;
@@ -409,7 +458,7 @@ static VECTOR<CV::Token> parseTokens(std::string input, char sep, SHARED<CV::Cur
             buffer += '\n';
             ++i;
             continue;
-        }else                
+        }else               
         if(c == '\n' && !onString){
             ++cline;
             onComment = false;
@@ -455,26 +504,18 @@ static VECTOR<CV::Token> parseTokens(std::string input, char sep, SHARED<CV::Cur
     return tokens;
 };
 
-#if __CV_DEBUG == 1
-    static void printTokenList(const VECTOR<CV::Token> &list){
-        for(unsigned i = 0; i < list.size(); ++i){
-            std::cout << "'" << list[i].first << "' " << (int)list[i].solved << std::endl;
-        }
-    }
-#endif
-
 /* -------------------------------------------------------------------------------------------------------------------------------- */
 // JIT
 
-static CV::Instruction *compileTokens(const VECTOR<CV::Token> &tokens, SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor);
-static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::Token> &tokens, SHARED<CV::Stack> &stack, std::shared_ptr<CV::Context> &ctx, SHARED<CV::Cursor> &cursor);
+static CV::Instruction *compileTokens(const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor);
+static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, std::shared_ptr<CV::Context> &ctx, SHARED<CV::Cursor> &cursor);
 
 static void DefConstructor(     std::shared_ptr<CV::Stack> &stack,
                                 const std::string &name,
                                 const std::function<CV::Instruction*(   
                                                                         const std::string &name,
                                                                         const VECTOR<CV::Token> &tokens,
-                                                                        SHARED<CV::Stack> &stack,
+                                                                        const SHARED<CV::Stack> &stack,
                                                                         SHARED<CV::Context> &ctx,
                                                                         SHARED<CV::Cursor> &cursor
                                                                     )> &method
@@ -482,11 +523,11 @@ static void DefConstructor(     std::shared_ptr<CV::Stack> &stack,
     stack->constructors[name] = method;
 }
 
-static bool CheckConstructor(std::shared_ptr<CV::Stack> &stack, const std::string &name){
+static bool CheckConstructor(const std::shared_ptr<CV::Stack> &stack, const std::string &name){
     return stack->constructors.find(name) != stack->constructors.end();
 }
 
-static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::Token> &tokens, SHARED<CV::Stack> &stack, std::shared_ptr<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, std::shared_ptr<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
     if(!token.solved){
         auto tokens = parseTokens(token.first, ' ', cursor);
         // Update line number
@@ -524,21 +565,44 @@ static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::
     }else
     // Is it a constructor?
     if(CheckConstructor(stack, imp)){
-        return stack->constructors[imp](imp, tokens, stack, ctx, cursor);
+        auto cons = stack->constructors[imp];
+        return cons(imp, tokens, stack, ctx, cursor);
     }else
     if(stack->getRegisteredFunctionId(imp) != 0){
         auto bfId = stack->getRegisteredFunctionId(imp);
-        auto ins = stack->createInstruction(CV::InstructionType::CF_INVOKE_BINARY_FUNCTION, token);
-        ins->data.push_back(ctx->id);
-        ins->data.push_back(bfId);
-        for(int i = 1; i < tokens.size(); ++i){
-            auto cins = interpretToken(tokens[i], {tokens[i]}, stack, ctx, cursor);
-            if(cursor->raise()){
-                return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+        auto bf = stack->binaryFunctions[bfId];
+        // Processors are executed right away
+        if(bf.preprocessor){
+            std::vector<CV::Item*> args;
+            std::vector<CV::Token> ntokens;
+            for(int i = 1; i < tokens.size(); ++i){
+                auto cins = interpretToken(tokens[i], {tokens[i]}, stack, ctx, cursor);
+                if(cursor->raise()){
+                    return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+                }
+                auto result = stack->execute(cins, ctx, cursor).value;
+                if(cursor->raise()){
+                    return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+                }                
+                args.push_back(result);
             }
-            ins->parameter.push_back(cins->id);
-        }           
-        return ins;
+            bf.fn(args, ctx, cursor);
+            cursor->raise();
+            // Shouldn't yield any instructions
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+        }else{
+            auto ins = stack->createInstruction(CV::InstructionType::CF_INVOKE_BINARY_FUNCTION, token);
+            ins->data.push_back(ctx->id);
+            ins->data.push_back(bfId);
+            for(int i = 1; i < tokens.size(); ++i){
+                auto cins = interpretToken(tokens[i], {tokens[i]}, stack, ctx, cursor);
+                if(cursor->raise()){
+                    return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+                }
+                ins->parameter.push_back(cins->id);
+            }           
+            return ins;
+        }
     }else{
         // Is it a name?
         if(ctx->check(imp)){
@@ -635,7 +699,7 @@ static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::
     return stack->createInstruction(CV::InstructionType::NOOP, token);
 }
 
-static CV::Instruction* compileTokens(const VECTOR<CV::Token> &tokens, SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+static CV::Instruction* compileTokens(const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
     VECTOR<CV::Instruction*> ins;
     // Single token or simple imperative token
     if(tokens.size() == 1 || tokens.size() > 1 && tokens[0].solved){
@@ -681,7 +745,7 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
     /*
         LET
     */
-    DefConstructor(stack, "let", [](const std::string &name, const VECTOR<CV::Token> &tokens, SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+    DefConstructor(stack, "let", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
         if(tokens.size() != 3){
             cursor->setError(name, "Expects exactly 2 arguments ("+name+" NAME VALUE)", tokens[0].line);
             return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
@@ -721,7 +785,7 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
     /*
         MUT
     */
-    DefConstructor(stack, "mut", [](const std::string &name, const VECTOR<CV::Token> &tokens, SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+    DefConstructor(stack, "mut", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
         if(tokens.size() != 3){
             cursor->setError(name, "Expects exactly 2 arguments ("+name+" NAME VALUE)", tokens[0].line);
             return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
@@ -751,7 +815,7 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
         FN
         [CC]  (Creates Context)
     */
-    DefConstructor(stack, "fn", [](const std::string &name, const VECTOR<CV::Token> &tokens, SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+    DefConstructor(stack, "fn", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
 
         if(tokens.size() != 3){
             cursor->setError(name, "Expects exactly 2 arguments ("+name+" [args] [code])", tokens[0].line);
@@ -793,7 +857,7 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
     /*
         NTH
     */
-    DefConstructor(stack, "nth", [](const std::string &name, const VECTOR<CV::Token> &tokens, SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+    DefConstructor(stack, "nth", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
         if(tokens.size() < 3){
             cursor->setError(name, "Expects at least 2 arguments", tokens[0].line);
             return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
@@ -823,7 +887,7 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
         do
         [CC]  (Creates Context)
     */
-    DefConstructor(stack, "do", [](const std::string &name, const VECTOR<CV::Token> &tokens, SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+    DefConstructor(stack, "do", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
         if(tokens.size() < 3){
             cursor->setError(name, "Expects at least 2 arguments", tokens[0].line);
             return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
@@ -855,8 +919,51 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
         return ins;
     });     
 
+    /*
+        iter
+        [CC]  (Creates Context)
+    */
+    DefConstructor(stack, "iter", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+
+        return (CV::Instruction*)NULL;
+    });   
+
+    /*
+        for
+        [CC]  (Creates Context)
+    */
+    DefConstructor(stack, "for", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+        
+        if(tokens.size() < 5){
+            cursor->setError(name, "Expects at least 4 arguments", tokens[0].line);
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+        }        
+
+        unsigned loopType;
+        unsigned step = 1;
+        unsigned start = 0;
+        unsigned end = 0;
+
+        if(tokens[3].first == "in"){
+            loopType = 0;
+        }else
+        if(tokens[3].first == "from"){
+            loopType = 1;
+        }else{
+            cursor->setError(name, "Undefined type of for loop", tokens[0].line);
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);            
+        }
+
+        //(for a in LIST at 2)
+        //(for a from X to Y at 2)
+
+
+
+        return (CV::Instruction*)NULL;
+    });           
+
     auto buildInterrupt = [&](const std::string &name, unsigned TYPE){
-        DefConstructor(stack, name, [TYPE](const std::string &name, const VECTOR<CV::Token> &tokens, SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+        DefConstructor(stack, name, [TYPE](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
             if(tokens.size() > 2){
                 cursor->setError(name, "Expects no more than 1 argument", tokens[0].line);
                 return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
@@ -887,7 +994,7 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
         IF
         [CC]  (Creates Context)
     */
-    DefConstructor(stack, "if", [](const std::string &name, const VECTOR<CV::Token> &tokens, SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+    DefConstructor(stack, "if", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
         if(tokens.size() < 3){
             cursor->setError(name, "Expects at least 2 arguments", tokens[0].line);
             return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
@@ -933,7 +1040,7 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
     */
    
     auto buildOp = [&](const std::string &name, unsigned TYPE, unsigned minArgs = 2){
-        DefConstructor(stack, name, [TYPE, minArgs](const std::string &name, const VECTOR<CV::Token> &tokens, SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+        DefConstructor(stack, name, [TYPE, minArgs](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
             if(tokens.size() < minArgs+1){
                 cursor->setError(name, "Expects at least "+std::to_string(minArgs)+" arguments", tokens[0].line);
                 return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
@@ -976,7 +1083,7 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
     buildOp("and", CV::InstructionType::OP_LOGIC_AND);
     buildOp("or", CV::InstructionType::OP_LOGIC_OR);
 
-    DefConstructor(stack, "not", [](const std::string &name, const VECTOR<CV::Token> &tokens, SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+    DefConstructor(stack, "not", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
         if(tokens.size() != 2){
             cursor->setError(name, "Expects exactly 1 argument", tokens[0].line);
             return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
@@ -1414,7 +1521,7 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
                 if(cursor->raise()){
                     break;
                 }
-                // std::cout << static_cast<CV::NumberType*>(cfv.value)->get() << std::endl;
+
                 v = cfv.value;
                 if(cfv.type != CV::ControlFlowType::CONTINUE){
                     if(cfv.type == CV::ControlFlowType::SKIP){
@@ -1807,11 +1914,12 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
     return ctx->buildNil();
 }
 
-void CV::Stack::registerFunction(const std::string &name, const std::function<CV::Item*(std::vector<CV::Item*>&, std::shared_ptr<CV::Context>&, std::shared_ptr<CV::Cursor> &cursor)> &fn){
+void CV::Stack::registerFunction(const std::string &name, const std::function<CV::Item*(std::vector<CV::Item*>&, std::shared_ptr<CV::Context>&, std::shared_ptr<CV::Cursor> &cursor)> &fn, bool preprocessor){
     CV::BinaryFunction bf;
     bf.id = generateId();
     bf.fn = fn;
     bf.name = name;
+    bf.preprocessor = preprocessor;
     this->binaryFunctions[bf.id] = bf;
 }
 
@@ -1949,41 +2057,83 @@ void CV::AddStandardConstructors(std::shared_ptr<CV::Stack> &stack){
     __addStandardConstructors(stack);
     __CV_REGISTER_STANDARD_BINARY_FUNCTIONS(stack);
     __CV_REGISTER_STANDARD_BITMAP_FUNCTIONS(stack);
+
+    // TODO: Add ability to link .so/.dll from libraries
+    stack->registerFunction("import", [stack](std::vector<CV::Item*> &args, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+        if(args.size() < 1){
+            cursor->setError("import", "Expected at least 1 argument (import NAME)", 0);
+            return ctx->buildNil();
+        }   
+
+        if(args[0]->type != CV::NaturalType::STRING){
+            cursor->setError("import", "Argument 0 expected to be STRING", 0);
+            return ctx->buildNil();
+        }
+
+        auto name = static_cast<CV::StringType*>(args[0])->get();
+
+        if(!CV::Tools::fileExists(name)){
+            cursor->setError("import", "No import named '"+name+"' was found", 0);
+            return ctx->buildNil();            
+        }
+
+        auto file = CV::Tools::readFile(name);
+
+        // Gather tokens
+        auto tokens = parseTokens(file,  ' ', cursor);
+        if(cursor->raise()){
+            return ctx->buildNil();
+        }
+
+        // Compile tokens into its bytecode
+        auto entry = compileTokens(tokens, stack, ctx, cursor);
+        if(cursor->raise()){
+            return ctx->buildNil();
+        }
+
+        // Load it up (execute)
+        auto result = stack->execute(entry, ctx, cursor).value;
+        if(cursor->raise()){
+            return ctx->buildNil();
+        }
+
+        return ctx->buildNil();
+    }, true);
 }
 
 /* -------------------------------------------------------------------------------------------------------------------------------- */
 
 
-int main(){
+// int main(){
 
-    auto cursor = std::make_shared<CV::Cursor>();
-    auto stack = std::make_shared<CV::Stack>();
-    auto context = stack->createContext();
-    CV::AddStandardConstructors(stack);
+//     auto cursor = std::make_shared<CV::Cursor>();
+//     auto stack = std::make_shared<CV::Stack>();
+//     auto context = stack->createContext();
+//     CV::AddStandardConstructors(stack);
 
-    // Get text tokens
-    std::string pre = "bm-create 'RGB' 256 256";
-    auto tokens = parseTokens(pre,  ' ', cursor);
-    if(cursor->raise()){
-        return 1;
-    }
+//     // Get text tokens
+//     std::string pre = "bm-create 'RGB' 256 256";
+//     auto tokens = parseTokens(pre,  ' ', cursor);
+//     if(cursor->raise()){
+//         return 1;
+//     }
 
-    // Compile tokens into its bytecode
-    auto entry = compileTokens(tokens, stack, context, cursor);
-    if(cursor->raise()){
-        return 1;
-    }
+//     // Compile tokens into its bytecode
+//     auto entry = compileTokens(tokens, stack, context, cursor);
+//     if(cursor->raise()){
+//         return 1;
+//     }
 
-    // Execute
-    auto result = stack->execute(entry, context, cursor).value;
-    if(cursor->raise()){
-        return 1;
-    }
+//     // Execute
+//     auto result = stack->execute(entry, context, cursor).value;
+//     if(cursor->raise()){
+//         return 1;
+//     }
 
 
-    std::cout << CV::ItemToText(stack, result) << std::endl;
+//     std::cout << CV::ItemToText(stack, result) << std::endl;
 
-    stack->clear();
+//     stack->clear();
 
-    return 0;
-}
+//     return 0;
+// }
