@@ -79,11 +79,11 @@
         namespace NaturalType {
             enum NaturalType : unsigned {
                 UNDEFINED = 0,
-                NUMBER = 10,
+                NUMBER = 1000,
                 STRING,
                 LIST,
                 FUNCTION,
-                NIL
+                NIL,
             };
             static std::string name(unsigned type){
                 switch(type){
@@ -122,7 +122,10 @@
                 // CONTROL FLOW
                 CF_INVOKE_FUNCTION,
                 CF_COND_BINARY_BRANCH, 
-                CF_DO_LOOP,
+                CF_LOOP_DO,
+                CF_INT_YIELD,
+                CF_INT_SKIP,
+                CF_INT_RETURN,
                 // OPERATORS
                 OP_NUM_ADD = 150,
                 OP_NUM_SUB,
@@ -184,6 +187,7 @@
 
         struct Item {
             unsigned id;
+            unsigned ctx;
             unsigned type;
             unsigned size;
             unsigned bsize;
@@ -223,6 +227,43 @@
         /* -------------------------------------------------------------------------------------------------------------------------------- */
         // JIT Stuff
 
+        namespace ControlFlowType {
+            enum ControlFlowType : unsigned {
+                CONTINUE,
+                SKIP,
+                YIELD,
+                RETURN
+            };
+            static unsigned type(unsigned ins){
+                switch(ins){
+                    case CV::InstructionType::CF_INT_SKIP: {
+                        return CV::ControlFlowType::SKIP;
+                    };
+                    case CV::InstructionType::CF_INT_RETURN: {
+                        return CV::ControlFlowType::RETURN;
+                    };
+                    case CV::InstructionType::CF_INT_YIELD: {
+                        return CV::ControlFlowType::YIELD;
+                    };
+                    default: {
+                        return CV::ControlFlowType::CONTINUE;
+                    };                                                            
+                }
+            }
+        }
+
+        struct ControlFlow {
+            CV::Item *value;
+            unsigned type;
+            ControlFlow(){
+                this->value = NULL;
+            }
+            ControlFlow(CV::Item *v, unsigned type = CV::ControlFlowType::CONTINUE){
+                this->value = v;
+                this->type = type;
+            }
+        };
+
         struct ContextDataPair {
             unsigned ctx;
             unsigned id;
@@ -243,19 +284,22 @@
             std::unordered_map<unsigned, CV::Item*> data;
             std::unordered_map<std::string, unsigned> dataIds;
             std::unordered_map<unsigned, unsigned> markedItems;
+            void deleteData(unsigned id);
             unsigned store(CV::Item *item);
             unsigned promise();
             void markPromise(unsigned id, unsigned type);
             unsigned getMarked(unsigned id);
             void setPromise(unsigned id, CV::Item *item);
             void setName(const std::string &name, unsigned id);
+            void deleteName(unsigned id);
             ContextDataPair getIdByName(const std::string &name);
             CV::Item *getByName(const std::string &name);
             bool check(const std::string &name);
             void clear();
             CV::Item *buildNil();
             Context();
-            void transferFrom(std::shared_ptr<CV::Context> &other, unsigned id);
+            void transferFrom(CV::Stack *stack, CV::Item *item);
+            void transferFrom(std::shared_ptr<CV::Stack> &stack, CV::Item *item);
             std::vector<CV::Item*> originalData;
             void solidify();
             void revert();
@@ -294,7 +338,7 @@
             CV::Instruction *createInstruction(unsigned type, const CV::Token &token);
             std::shared_ptr<CV::Context> createContext(CV::Context *top = NULL);
             void deleteContext(unsigned id);
-            CV::Item *execute(CV::Instruction *ins, std::shared_ptr<Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);
+            CV::ControlFlow execute(CV::Instruction *ins, std::shared_ptr<Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);
         };
 
         void AddStandardConstructors(std::shared_ptr<CV::Stack> &stack);
