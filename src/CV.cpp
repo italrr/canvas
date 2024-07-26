@@ -924,8 +924,58 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
         [CC]  (Creates Context)
     */
     DefConstructor(stack, "iter", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+        static const std::string guide = name+" VAR in SOURCE (at X) [CODE]";
+        if(tokens.size() != 5 && tokens.size() != 7){
+            cursor->setError(name, "Expects at least 4 arguments ("+guide+")", tokens[0].line);
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+        }        
 
-        return (CV::Instruction*)NULL;
+        if(tokens[2].first != "in"){
+            cursor->setError(name, "Expected word 'in' as argument 2 ("+guide+")", tokens[0].line);
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);            
+        }
+
+        if(tokens.size() == 7 && tokens[4].first != "at"){
+            cursor->setError(name, "Expected word 'at' as argument 4 ("+guide+")", tokens[0].line);
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);             
+        }
+
+
+        auto nctx = stack->createContext(ctx.get());
+        
+        // TODO: verify var name
+        auto stepperId = nctx->promise();
+        nctx->setName(tokens[1].first, stepperId);
+
+        auto ins = stack->createInstruction(CV::InstructionType::CF_LOOP_ITER, tokens[0]);
+        ins->data.push_back(nctx->id);
+        ins->data.push_back(stepperId);
+
+        auto source = interpretToken(tokens[3], {tokens[3]}, stack, nctx, cursor);
+        if(cursor->raise()){
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+        }
+        ins->parameter.push_back(source->id);
+
+        auto code = interpretToken(tokens[tokens.size()-1], {tokens[tokens.size()-1]}, stack, nctx, cursor);
+        if(cursor->raise()){
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+        }
+        ins->parameter.push_back(code->id);
+        
+
+        if(tokens.size() == 7){
+            auto stepperCountId = interpretToken(tokens[5], {tokens[5]}, stack, nctx, cursor);
+            if(cursor->raise()){
+                return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+            }
+            ins->parameter.push_back(stepperCountId->id);
+        }else{
+            ins->parameter.push_back(0);
+        }
+
+
+        return ins;
     });   
 
     /*
@@ -933,33 +983,11 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
         [CC]  (Creates Context)
     */
     DefConstructor(stack, "for", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+        //(for a from X to Y at 2 [CODE])
         
-        if(tokens.size() < 5){
-            cursor->setError(name, "Expects at least 4 arguments", tokens[0].line);
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-        }        
+        auto ins = stack->createInstruction(CV::InstructionType::CF_LOOP_FOR, tokens[0]);
 
-        unsigned loopType;
-        unsigned step = 1;
-        unsigned start = 0;
-        unsigned end = 0;
-
-        if(tokens[3].first == "in"){
-            loopType = 0;
-        }else
-        if(tokens[3].first == "from"){
-            loopType = 1;
-        }else{
-            cursor->setError(name, "Undefined type of for loop", tokens[0].line);
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);            
-        }
-
-        //(for a in LIST at 2)
-        //(for a from X to Y at 2)
-
-
-
-        return (CV::Instruction*)NULL;
+        return ins;
     });           
 
     auto buildInterrupt = [&](const std::string &name, unsigned TYPE){
@@ -1545,6 +1573,98 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
 
             return CV::ControlFlow(v ? v : ctx->buildNil(), ncf);
         };      
+
+
+
+        case CV::InstructionType::CF_LOOP_ITER: { // CC
+
+            auto nctx = stack->contexts[ins->data[0]];
+            auto stepperCountId = ins->parameter[2];
+            auto counter = 1;
+            CV::Item *v = NULL;
+            unsigned ncf = CV::ControlFlowType::CONTINUE;
+
+            // Figure out counter
+            if(stepperCountId != 0){
+                auto v = stack->execute(stack->instructions[stepperCountId], ctx, cursor).value;
+                if(cursor->raise()){
+                    return ctx->buildNil();
+                }                
+                if(v->type != CV::NaturalType::NUMBER){
+                    cursor->setError("Logic Error At '"+ins->token.first+"'", "Step increment must be a NUMBER", ins->token.line);
+                    return ctx->buildNil();                     
+                }
+                counter = static_cast<CV::NumberType*>(v)->get();
+            }
+
+            // Figure out source
+            auto source = stack->execute(stack->instructions[ins->parameter[0]], ctx, cursor).value;
+            if(cursor->raise()){
+                return ctx->buildNil();
+            }          
+            if(source->type != CV::NaturalType::LIST){
+                cursor->setError("Logic Error At '"+ins->token.first+"'", "iterator must be a LIST", ins->token.line);
+                return ctx->buildNil();                 
+            }
+            auto list = static_cast<CV::ListType*>(source);
+            if(list->size == 0){
+                return source;
+            }
+            if(list->size % (int)counter != 0){
+                cursor->setError("Logic Error At '"+ins->token.first+"'", "Step increment must a number divisible by the amount of the LIST", ins->token.line);
+                return ctx->buildNil();                 
+            }
+
+            // Figure out stepper
+            CV::Item *stepper = NULL;
+            if(counter > 1){
+                stepper = new CV::ListType();
+                static_cast<CV::ListType*>(stepper)->build(counter);
+                nctx->setPromise(ins->data[1], stepper);
+            }
+            auto updateStepper = [&](int index){
+                if(counter == 1){
+                    auto citem = list->get(stack, index);
+                    nctx->setPromise(ins->data[1], citem);
+                }else{
+                    for(int i = 0; i < counter; ++i){
+                        auto citem = list->get(stack, i + index);
+                        static_cast<CV::ListType*>(stepper)->set(i, citem->ctx, citem->id);
+                    }
+                }
+            };
+
+            for(int i = 0; i < list->size; i += counter){
+                updateStepper(i);
+
+                auto cfv = stack->execute(stack->instructions[ins->parameter[1]], nctx, cursor);
+                if(cursor->raise()){
+                    break;
+                }
+
+                v = cfv.value;
+                if(cfv.type != CV::ControlFlowType::CONTINUE){
+                    if(cfv.type == CV::ControlFlowType::SKIP){
+                        continue;
+                    }else
+                    if(cfv.type == CV::ControlFlowType::YIELD){
+                        break;
+                    }else{
+                        ncf = cfv.type;
+                        break;
+                    }
+                }
+
+            }
+
+            if(stepper){
+                delete stepper;
+            }
+
+            return CV::ControlFlow(v ? v : ctx->buildNil(), ncf);
+        }; 
+
+
         case CV::InstructionType::CF_INT_RETURN:
         case CV::InstructionType::CF_INT_YIELD:
         case CV::InstructionType::CF_INT_SKIP: {

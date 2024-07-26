@@ -129,6 +129,7 @@
                 CF_COND_BINARY_BRANCH, 
                 CF_LOOP_DO,
                 CF_LOOP_FOR,
+                CF_LOOP_ITER,
                 CF_INT_YIELD,
                 CF_INT_SKIP,
                 CF_INT_RETURN,

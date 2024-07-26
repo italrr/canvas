@@ -2,7 +2,10 @@
 #include "../CV.hpp"
 
 /*
-    Here we should register all binary functions that are part of the standard
+    Here we should register all binary functions that are part of the standard:
+    - stdout, stdin, stderr
+    - fopen, fclose, fwrite, fread
+    - exit/quit
 */
 
 static void ___WRITE_STDOUT(const std::string &v){

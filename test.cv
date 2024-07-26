@@ -1,6 +1,5 @@
-[import 'src/libs/core.cv']
+[let img [bm-create 'RGB' 64 64]]
 
-# test
-[io-out 'What\'s your name?\n> ']
-[let var [io-in]]
-[io-out var '\n']
+[iter pixel in img at 3 [
+    [mut [nth 0 ]]
+]]

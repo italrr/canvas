@@ -1,6 +1,3 @@
-
-
-
 # Mutating Arithmetic Unary Operators
 [let ++ [fn [n]
     [
