@@ -11,7 +11,7 @@
 #endif
 
 
-static const std::string GENERIC_UNDEFINED_SYMBOL_ERROR = "Undefined symbol or operator/name within this context or above";
+static const std::string GENERIC_UNDEFINED_SYMBOL_ERROR = "Undefined constructor or name within this context or above";
 static bool useColorOnText = true;
 
 
@@ -332,7 +332,7 @@ CV::Item *CV::FunctionType::copy(){
 }
 
 void CV::FunctionType::restore(CV::Item *item){
-    // Does nothing
+    // Does nothing (cannot be copied)
 }
 
 /* -------------------------------------------------------------------------------------------------------------------------------- */
@@ -804,6 +804,71 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
         return ins;
     });  
 
+
+    /*
+        do
+        [CC]  (Creates Context)
+    */
+    DefConstructor(stack, "do", [](const std::string &name, const VECTOR<CV::Token> &tokens, SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+        if(tokens.size() < 3){
+            cursor->setError(name, "Expects at least 2 arguments", tokens[0].line);
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+        }
+        // Create Context
+        auto nctx = stack->createContext(ctx.get());
+
+        // Process conditional branch
+        auto condition = interpretToken(tokens[1], {tokens[1]}, stack, nctx, cursor);
+        if(cursor->raise()){
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
+        } 
+
+        // Process code
+        auto branch = interpretToken(tokens[2], {tokens[2]}, stack, nctx, cursor);
+        if(cursor->raise()){
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
+        }        
+
+        // Create instruction
+        auto ins = stack->createInstruction(CV::InstructionType::CF_LOOP_DO, tokens[0]);
+        ins->data.push_back(nctx->id);
+        ins->parameter.push_back(condition->id);
+        ins->parameter.push_back(branch->id);
+
+        // Seals it
+        nctx->solidify();
+
+        return ins;
+    });     
+
+    auto buildInterrupt = [&](const std::string &name, unsigned TYPE){
+        DefConstructor(stack, name, [TYPE](const std::string &name, const VECTOR<CV::Token> &tokens, SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+            if(tokens.size() > 2){
+                cursor->setError(name, "Expects no more than 1 argument", tokens[0].line);
+                return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+            }
+
+            CV::Instruction *payload = NULL;
+            if(tokens.size() > 1){
+                payload = interpretToken(tokens[1], {tokens[1]}, stack, ctx, cursor);
+                if(cursor->raise()){
+                    return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+                }                    
+            }
+
+            auto ins = stack->createInstruction(TYPE, tokens[0]);
+            ins->data.push_back(payload != NULL);
+            if(payload){
+                ins->parameter.push_back(payload->id);
+            }
+
+            return ins;
+        });
+    }; 
+    buildInterrupt("return", CV::InstructionType::CF_INT_RETURN);
+    buildInterrupt("yield", CV::InstructionType::CF_INT_YIELD);
+    buildInterrupt("skip", CV::InstructionType::CF_INT_SKIP);
+
     /*
         IF
         [CC]  (Creates Context)
@@ -937,12 +1002,17 @@ CV::Context::Context(){
     solid = false;
 }
 
+void CV::Context::deleteData(unsigned id){
+    // TODO
+}
+
 unsigned CV::Context::store(CV::Item *item){
     if(solid){
-        fprintf(stderr, "Context %i: Tried storing new Item %i in a solid context\n", this->id, id);
-        std::exit(1);           
+        // fprintf(stderr, "Context %i: Tried storing new Item %i in a solid context\n", this->id, item->id);
+        // std::exit(1);           
     }
     item->id = generateId();
+    item->ctx = this->id;
     this->data[item->id] = item;
     return item->id;
 }
@@ -989,6 +1059,15 @@ void CV::Context::setName(const std::string &name, unsigned id){
     }
     auto item = it->second;
     this->dataIds[name] = id;
+}
+
+void CV::Context::deleteName(unsigned id){
+    for(auto &it : this->dataIds){
+        if(it.second == id){
+            this->dataIds.erase(it.first);
+            return;
+        }
+    }
 }
 
 bool CV::Context::check(const std::string &name){
@@ -1041,13 +1120,22 @@ CV::Item *CV::Context::buildNil(){
     return nil;
 }
 
-void CV::Context::transferFrom(std::shared_ptr<CV::Context> &other, unsigned id){
+void CV::Context::transferFrom(CV::Stack *stack, CV::Item *item){
+    // if it's here already, then we skip this
+    if(this->data.count(item->id) == 1){ 
+        return;
+    }
     // Find and store it here
-    auto data = other->data[id];
-    this->store(data);
+    auto ctx = stack->contexts[item->ctx];
+    item->ctx = this->id;
+    this->data[item->id] = item;
     // Remove from other
-    auto it = other->data.find(id);
-    other->data.erase(it);
+    ctx->data.erase(id);
+    deleteName(item->id);
+}
+
+void CV::Context::transferFrom(std::shared_ptr<CV::Stack> &stack, CV::Item *item){
+    transferFrom(stack.get(), item);
 }
 
 void CV::Context::solidify(){
@@ -1107,14 +1195,14 @@ void CV::Stack::deleteContext(unsigned id){
     this->contexts.erase(it);
 }
 
-static CV::Item *__execute(CV::Stack *stack, CV::Instruction *ins, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
+static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
     switch(ins->type){
         case CV::InstructionType::INVALID: {
             fprintf(stderr, "Instruction ID %i of invalid type\n", ins->id);
             std::exit(1);
         } break;
         case CV::InstructionType::NOOP: {
-            return ctx->buildNil();
+            return CV::ControlFlow(ctx->buildNil());
         };
 
         /*
@@ -1131,19 +1219,19 @@ static CV::Item *__execute(CV::Stack *stack, CV::Instruction *ins, std::shared_p
             }
             
             if(type != 0){
-                stack->contexts[ctxId]->setPromise(dataId, v);
+                stack->contexts[ctxId]->setPromise(dataId, v.value);
             }
 
             return v;
         };
         case CV::InstructionType::MUT: {
 
-            auto target = stack->execute(stack->instructions[ins->parameter[0]], ctx, cursor);
+            auto target = stack->execute(stack->instructions[ins->parameter[0]], ctx, cursor).value;
             if(cursor->raise()){
                 return ctx->buildNil();
             }
 
-            auto v = stack->execute(stack->instructions[ins->parameter[1]], ctx, cursor);
+            auto v = stack->execute(stack->instructions[ins->parameter[1]], ctx, cursor).value;
             if(cursor->raise()){
                 return ctx->buildNil();
             }
@@ -1182,7 +1270,7 @@ static CV::Item *__execute(CV::Stack *stack, CV::Instruction *ins, std::shared_p
             unsigned c = 0;
             
             for(int i = 0; i < nelements; ++i){
-                auto elementV = stack->execute(stack->instructions[ins->parameter[i]], ctx, cursor);
+                auto elementV = stack->execute(stack->instructions[ins->parameter[i]], ctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 } 
@@ -1201,7 +1289,7 @@ static CV::Item *__execute(CV::Stack *stack, CV::Instruction *ins, std::shared_p
 
             auto nctx = stack->contexts[ins->data[0]];
 
-            auto cond = stack->execute(stack->instructions[ins->parameter[0]], nctx, cursor);
+            auto cond = stack->execute(stack->instructions[ins->parameter[0]], nctx, cursor).value;
             if(cursor->raise()){
                 return ctx->buildNil();
             }       
@@ -1213,7 +1301,7 @@ static CV::Item *__execute(CV::Stack *stack, CV::Instruction *ins, std::shared_p
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }          
-                ctx->transferFrom(nctx, trueBranch->id);
+                ctx->transferFrom(stack, trueBranch.value);
                 return trueBranch;
             }else
             if(ins->parameter.size() > 2){
@@ -1221,14 +1309,14 @@ static CV::Item *__execute(CV::Stack *stack, CV::Instruction *ins, std::shared_p
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }                    
-                ctx->transferFrom(nctx, falseBranch->id);   
+                ctx->transferFrom(stack, falseBranch.value);   
                 return falseBranch;                
             }
 
             nctx->revert();
 
             return ctx->buildNil();
-        };        
+        };
         case CV::InstructionType::CF_INVOKE_FUNCTION: { // CC
             auto nctx = stack->contexts[ins->data[0]];
             auto nargs = ins->data[1];
@@ -1237,7 +1325,7 @@ static CV::Item *__execute(CV::Stack *stack, CV::Instruction *ins, std::shared_p
 
             for(int i = 1; i < ins->parameter.size(); ++i){
                 auto cins = stack->instructions[ins->parameter[i]];
-                auto v = stack->execute(cins, ctx, cursor);
+                auto v = stack->execute(cins, nctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 } 
@@ -1251,14 +1339,84 @@ static CV::Item *__execute(CV::Stack *stack, CV::Instruction *ins, std::shared_p
                 }
             }
 
-            auto r = stack->execute(fnIns, ctx, cursor);
+            auto r = stack->execute(fnIns, nctx, cursor);
             if(cursor->raise()){
                 return ctx->buildNil();
             }
 
-            return r;
+            nctx->revert();
+
+            return CV::ControlFlow(r.value, CV::ControlFlowType::CONTINUE);
 
         }
+        case CV::InstructionType::CF_LOOP_DO: { // CC
+
+            auto nctx = stack->contexts[ins->data[0]];
+
+            CV::Item *cond = NULL;
+            CV::Item *v = NULL;
+
+            auto isTrue = [](CV::Item *cond){
+                return cond->type != CV::NaturalType::NIL && (cond->type == CV::NaturalType::NUMBER ? static_cast<CV::NumberType*>(cond)->get() != 0 : true);
+            };
+
+            unsigned ncf = CV::ControlFlowType::CONTINUE;
+
+            do {
+                // Check condition
+                nctx->revert();
+                cond = stack->execute(stack->instructions[ins->parameter[0]], nctx, cursor).value;
+                if(cursor->raise()){
+                    return ctx->buildNil();
+                }
+
+                if(!isTrue(cond)){
+                    break;
+                }
+
+                // Execute
+                auto cfv = stack->execute(stack->instructions[ins->parameter[1]], nctx, cursor);
+                if(cursor->raise()){
+                    break;
+                }
+                // std::cout << static_cast<CV::NumberType*>(cfv.value)->get() << std::endl;
+                v = cfv.value;
+                if(cfv.type != CV::ControlFlowType::CONTINUE){
+                    if(cfv.type == CV::ControlFlowType::SKIP){
+                        continue;
+                    }else
+                    if(cfv.type == CV::ControlFlowType::YIELD){
+                        break;
+                    }else{
+                        ncf = cfv.type;
+                        break;
+                    }
+                }
+
+
+            } while(isTrue(cond));
+
+            if(v){
+                ctx->transferFrom(stack, v);
+            }
+
+
+            return CV::ControlFlow(v ? v : ctx->buildNil(), ncf);
+        };      
+        case CV::InstructionType::CF_INT_RETURN:
+        case CV::InstructionType::CF_INT_YIELD:
+        case CV::InstructionType::CF_INT_SKIP: {
+            auto hasPayload = ins->data[0];
+            if(hasPayload){
+                auto v = stack->execute(stack->instructions[ins->parameter[0]], ctx, cursor).value;
+                if(cursor->raise()){
+                    return ctx->buildNil();
+                }
+                return CV::ControlFlow(v, ins->type);
+            }else{
+                return CV::ControlFlow(ctx->buildNil(), CV::ControlFlowType::type(ins->type));
+            }
+        };              
 
         /*
             EMBEDDED OPERATORS (LOGIC & ARITHMETIC)
@@ -1269,7 +1427,7 @@ static CV::Item *__execute(CV::Stack *stack, CV::Instruction *ins, std::shared_p
             auto &dataId = ins->data[1];
             auto item = stack->contexts[ctxId]->data[dataId];
             for(int i = 0; i < ins->parameter.size(); ++i){
-                auto v = stack->execute(stack->instructions[ins->parameter[i]], ctx, cursor);
+                auto v = stack->execute(stack->instructions[ins->parameter[i]], ctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }
@@ -1281,13 +1439,13 @@ static CV::Item *__execute(CV::Stack *stack, CV::Instruction *ins, std::shared_p
             auto &ctxId = ins->data[0];
             auto &dataId = ins->data[1];
             auto item = stack->contexts[ctxId]->data[dataId];
-            auto firstv = stack->execute(stack->instructions[ins->parameter[0]], ctx, cursor);
+            auto firstv = stack->execute(stack->instructions[ins->parameter[0]], ctx, cursor).value;
             if(cursor->raise()){
                 return ctx->buildNil();
             }                 
             *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = static_cast<CV::NumberType*>(firstv)->get();
             for(int i = 1; i < ins->parameter.size(); ++i){
-                auto v = stack->execute(stack->instructions[ins->parameter[i]], ctx, cursor);
+                auto v = stack->execute(stack->instructions[ins->parameter[i]], ctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }
@@ -1299,13 +1457,13 @@ static CV::Item *__execute(CV::Stack *stack, CV::Instruction *ins, std::shared_p
             auto &ctxId = ins->data[0];
             auto &dataId = ins->data[1];
             auto item = stack->contexts[ctxId]->data[dataId];
-            auto firstv = stack->execute(stack->instructions[ins->parameter[0]], ctx, cursor);
+            auto firstv = stack->execute(stack->instructions[ins->parameter[0]], ctx, cursor).value;
             if(cursor->raise()){
                 return ctx->buildNil();
             }                 
             *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = static_cast<CV::NumberType*>(firstv)->get();
             for(int i = 1; i < ins->parameter.size(); ++i){
-                auto v = stack->execute(stack->instructions[ins->parameter[i]], ctx, cursor);
+                auto v = stack->execute(stack->instructions[ins->parameter[i]], ctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }
@@ -1317,14 +1475,14 @@ static CV::Item *__execute(CV::Stack *stack, CV::Instruction *ins, std::shared_p
             auto &ctxId = ins->data[0];
             auto &dataId = ins->data[1];
             auto item = stack->contexts[ctxId]->data[dataId];
-            auto firstv = stack->execute(stack->instructions[ins->parameter[0]], ctx, cursor);
+            auto firstv = stack->execute(stack->instructions[ins->parameter[0]], ctx, cursor).value;
             if(cursor->raise()){
                 return ctx->buildNil();
             }                 
             *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = static_cast<CV::NumberType*>(firstv)->get();
             for(int i = 1; i < ins->parameter.size(); ++i){
                 auto cins = stack->instructions[ins->parameter[i]];
-                auto v = stack->execute(cins, ctx, cursor);
+                auto v = stack->execute(cins, ctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }
@@ -1341,13 +1499,13 @@ static CV::Item *__execute(CV::Stack *stack, CV::Instruction *ins, std::shared_p
             auto &ctxId = ins->data[0];
             auto &dataId = ins->data[1];
             auto item = stack->contexts[ctxId]->data[dataId];
-            auto firstv = stack->execute(stack->instructions[ins->parameter[0]], ctx, cursor);
+            auto firstv = stack->execute(stack->instructions[ins->parameter[0]], ctx, cursor).value;
             if(cursor->raise()){
                 return ctx->buildNil();
             }                 
             *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 1;
             for(int i = 1; i < ins->parameter.size(); ++i){
-                auto v = stack->execute(stack->instructions[ins->parameter[i]], ctx, cursor);
+                auto v = stack->execute(stack->instructions[ins->parameter[i]], ctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }
@@ -1365,7 +1523,7 @@ static CV::Item *__execute(CV::Stack *stack, CV::Instruction *ins, std::shared_p
             *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 1;
             std::vector<CV::Item*> operands;
             for(int i = 0; i < ins->parameter.size(); ++i){
-                auto v = stack->execute(stack->instructions[ins->parameter[i]], ctx, cursor);
+                auto v = stack->execute(stack->instructions[ins->parameter[i]], ctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }                
@@ -1393,7 +1551,7 @@ static CV::Item *__execute(CV::Stack *stack, CV::Instruction *ins, std::shared_p
             *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 1;
             std::vector<CV::Item*> operands;
             for(int i = 0; i < ins->parameter.size(); ++i){
-                auto v = stack->execute(stack->instructions[ins->parameter[i]], ctx, cursor);
+                auto v = stack->execute(stack->instructions[ins->parameter[i]], ctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }                
@@ -1416,7 +1574,7 @@ static CV::Item *__execute(CV::Stack *stack, CV::Instruction *ins, std::shared_p
             *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 1;
             std::vector<CV::Item*> operands;
             for(int i = 0; i < ins->parameter.size(); ++i){
-                auto v = stack->execute(stack->instructions[ins->parameter[i]], ctx, cursor);
+                auto v = stack->execute(stack->instructions[ins->parameter[i]], ctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }                
@@ -1439,7 +1597,7 @@ static CV::Item *__execute(CV::Stack *stack, CV::Instruction *ins, std::shared_p
             *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 1;
             std::vector<CV::Item*> operands;
             for(int i = 0; i < ins->parameter.size(); ++i){
-                auto v = stack->execute(stack->instructions[ins->parameter[i]], ctx, cursor);
+                auto v = stack->execute(stack->instructions[ins->parameter[i]], ctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }                
@@ -1462,7 +1620,7 @@ static CV::Item *__execute(CV::Stack *stack, CV::Instruction *ins, std::shared_p
             *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 1;
             std::vector<CV::Item*> operands;
             for(int i = 0; i < ins->parameter.size(); ++i){
-                auto v = stack->execute(stack->instructions[ins->parameter[i]], ctx, cursor);
+                auto v = stack->execute(stack->instructions[ins->parameter[i]], ctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }                
@@ -1489,7 +1647,7 @@ static CV::Item *__execute(CV::Stack *stack, CV::Instruction *ins, std::shared_p
 
             
             for(int i = 0; i < ins->parameter.size(); ++i){
-                auto v = stack->execute(stack->instructions[ins->parameter[i]], ctx, cursor);
+                auto v = stack->execute(stack->instructions[ins->parameter[i]], ctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }                
@@ -1513,7 +1671,7 @@ static CV::Item *__execute(CV::Stack *stack, CV::Instruction *ins, std::shared_p
 
             
             for(int i = 0; i < ins->parameter.size(); ++i){
-                auto v = stack->execute(stack->instructions[ins->parameter[i]], ctx, cursor);
+                auto v = stack->execute(stack->instructions[ins->parameter[i]], ctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }                
@@ -1536,7 +1694,7 @@ static CV::Item *__execute(CV::Stack *stack, CV::Instruction *ins, std::shared_p
 
             *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 0;
 
-            auto v = stack->execute(stack->instructions[ins->parameter[0]], ctx, cursor);
+            auto v = stack->execute(stack->instructions[ins->parameter[0]], ctx, cursor).value;
             if(cursor->raise()){
                 return ctx->buildNil();
             }
@@ -1561,11 +1719,11 @@ static CV::Item *__execute(CV::Stack *stack, CV::Instruction *ins, std::shared_p
             auto &listId = ins->parameter[1];
 
             // run
-            auto index = stack->execute(stack->instructions[indexId], ctx, cursor);
+            auto index = stack->execute(stack->instructions[indexId], ctx, cursor).value;
             if(cursor->raise()){
                 return ctx->buildNil();
             }
-            auto list = stack->execute(stack->instructions[listId], ctx, cursor);
+            auto list = stack->execute(stack->instructions[listId], ctx, cursor).value;
             if(cursor->raise()){
                 return ctx->buildNil();
             }
@@ -1614,14 +1772,17 @@ static CV::Item *__execute(CV::Stack *stack, CV::Instruction *ins, std::shared_p
     return ctx->buildNil();
 }
 
-CV::Item *CV::Stack::execute(CV::Instruction *ins, std::shared_ptr<Context> &ctx, SHARED<CV::Cursor> &cursor){
-    CV::Item *result = NULL;
+CV::ControlFlow CV::Stack::execute(CV::Instruction *ins, std::shared_ptr<Context> &ctx, SHARED<CV::Cursor> &cursor){
+    CV::ControlFlow result;
     bool valid = false;
     do {
         result = __execute(this, ins, ctx, cursor);
         if(cursor->raise()){
             return ctx->buildNil();
         }        
+        if(result.type != CV::ControlFlowType::CONTINUE){
+            return result;
+        }
         valid = ins->next != CV::InstructionType::INVALID;    
         ins = valid ? this->instructions[ins->next] : NULL;
     } while(valid);
@@ -1705,9 +1866,6 @@ std::string CV::ItemToText(std::shared_ptr<CV::Stack> &stack, CV::Item *item){
 }
 
 std::string CV::QuickInterpret(const std::string &input, std::shared_ptr<CV::Stack> &stack, std::shared_ptr<Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
-    // Add embedded contructors
-    __addStandardConstructors(stack);
-
     // Get text tokens
     auto tokens = parseTokens(input,  ' ', cursor);
     if(cursor->raise()){
@@ -1721,7 +1879,7 @@ std::string CV::QuickInterpret(const std::string &input, std::shared_ptr<CV::Sta
     }
 
     // Execute
-    auto result = stack->execute(entry, ctx, cursor);
+    auto result = stack->execute(entry, ctx, cursor).value;
     if(cursor->raise()){
         return "";
     }
@@ -1733,6 +1891,10 @@ std::string CV::QuickInterpret(const std::string &input, std::shared_ptr<CV::Sta
     return text;
 }
 
+void CV::AddStandardConstructors(std::shared_ptr<CV::Stack> &stack){
+    __addStandardConstructors(stack);
+}
+
 /* -------------------------------------------------------------------------------------------------------------------------------- */
 
 
@@ -1741,10 +1903,11 @@ int main(){
     auto cursor = std::make_shared<CV::Cursor>();
     auto stack = std::make_shared<CV::Stack>();
     auto context = stack->createContext();
-    __addStandardConstructors(stack);
+    CV::AddStandardConstructors(stack);
 
     // Get text tokens
-    auto tokens = parseTokens("[let ++ [fn [a][mut a [+ a 1]]]][let b 5][++ b][b]",  ' ', cursor);
+    std::string pre = "[let b 0][let a 0]";
+    auto tokens = parseTokens(pre+"[do [lt b 5][ [++ b][if [eq b 3][skip][++ a] ] ]]][a][b]",  ' ', cursor);
     if(cursor->raise()){
         return 1;
     }
@@ -1756,7 +1919,7 @@ int main(){
     }
 
     // Execute
-    auto result = stack->execute(entry, context, cursor);
+    auto result = stack->execute(entry, context, cursor).value;
     if(cursor->raise()){
         return 1;
     }
