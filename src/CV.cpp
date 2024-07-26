@@ -315,14 +315,14 @@ void CV::ListType::set(unsigned index, unsigned ctxId, unsigned dataId){
     memcpy((void*)((size_t)this->data + index * sizeof(unsigned) * 2 + sizeof(unsigned) * 1), &dataId, sizeof(unsigned));
 }
 
-CV::Item *CV::ListType::get(CV::Stack *stack, unsigned index){
+CV::Item *CV::ListType::get(const CV::Stack *stack, unsigned index){
     unsigned ctxId, dataId;
     memcpy(&ctxId, (void*)((size_t)this->data + index * sizeof(unsigned) * 2 + sizeof(unsigned) * 0), sizeof(unsigned));
     memcpy(&dataId, (void*)((size_t)this->data + index * sizeof(unsigned) * 2 + sizeof(unsigned) * 1), sizeof(unsigned));    
-    return stack->contexts[ctxId]->data[dataId];
+    return stack->getContext(ctxId)->data[dataId];
 }
 
-CV::Item *CV::ListType::get(std::shared_ptr<CV::Stack> &stack, unsigned index){
+CV::Item *CV::ListType::get(const std::shared_ptr<CV::Stack> &stack, unsigned index){
     return this->get(stack.get(), index);
 }
 
@@ -525,6 +525,20 @@ static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::
     // Is it a constructor?
     if(CheckConstructor(stack, imp)){
         return stack->constructors[imp](imp, tokens, stack, ctx, cursor);
+    }else
+    if(stack->getRegisteredFunctionId(imp) != 0){
+        auto bfId = stack->getRegisteredFunctionId(imp);
+        auto ins = stack->createInstruction(CV::InstructionType::CF_INVOKE_BINARY_FUNCTION, token);
+        ins->data.push_back(ctx->id);
+        ins->data.push_back(bfId);
+        for(int i = 1; i < tokens.size(); ++i){
+            auto cins = interpretToken(tokens[i], {tokens[i]}, stack, ctx, cursor);
+            if(cursor->raise()){
+                return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+            }
+            ins->parameter.push_back(cins->id);
+        }           
+        return ins;
     }else{
         // Is it a name?
         if(ctx->check(imp)){
@@ -1184,6 +1198,11 @@ std::shared_ptr<CV::Context> CV::Stack::createContext(CV::Context *top){
     return ctx;
 }
 
+std::shared_ptr<CV::Context> CV::Stack::getContext(unsigned id) const {
+    auto it = this->contexts.find(id);
+    return it->second;
+}
+
 void CV::Stack::deleteContext(unsigned id){
     auto it = this->contexts.find(id);
     if(it == this->contexts.end()){
@@ -1316,6 +1335,22 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
             nctx->revert();
 
             return ctx->buildNil();
+        };
+        case CV::InstructionType::CF_INVOKE_BINARY_FUNCTION: {
+            auto nctx = stack->contexts[ins->data[0]];
+            auto bf = stack->binaryFunctions[ins->data[1]];
+            std::vector<CV::Item*> arguments;
+            for(int i = 0; i < ins->parameter.size(); ++i){
+                auto cins = stack->instructions[ins->parameter[i]];
+                auto v = stack->execute(cins, ctx, cursor).value;
+                if(cursor->raise()){
+                    return ctx->buildNil();
+                } 
+                arguments.push_back(v);
+            }
+            auto result = bf.fn(arguments, nctx, cursor);
+            nctx->store(result);
+            return result;
         };
         case CV::InstructionType::CF_INVOKE_FUNCTION: { // CC
             auto nctx = stack->contexts[ins->data[0]];
@@ -1772,6 +1807,23 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
     return ctx->buildNil();
 }
 
+void CV::Stack::registerFunction(const std::string &name, const std::function<CV::Item*(std::vector<CV::Item*>&, std::shared_ptr<CV::Context>&, std::shared_ptr<CV::Cursor> &cursor)> &fn){
+    CV::BinaryFunction bf;
+    bf.id = generateId();
+    bf.fn = fn;
+    bf.name = name;
+    this->binaryFunctions[bf.id] = bf;
+}
+
+unsigned CV::Stack::getRegisteredFunctionId(const std::string &name){
+    for(auto &it : this->binaryFunctions){
+        if(it.second.name == name){
+            return it.second.id;
+        }
+    }
+    return 0;
+}
+
 CV::ControlFlow CV::Stack::execute(CV::Instruction *ins, std::shared_ptr<Context> &ctx, SHARED<CV::Cursor> &cursor){
     CV::ControlFlow result;
     bool valid = false;
@@ -1810,7 +1862,7 @@ void CV::SetUseColor(bool v){
     useColorOnText = v;
 }
 
-std::string CV::ItemToText(std::shared_ptr<CV::Stack> &stack, CV::Item *item){
+std::string CV::ItemToText(const std::shared_ptr<CV::Stack> &stack, CV::Item *item){
     switch(item->type){
         
         default:
@@ -1891,8 +1943,12 @@ std::string CV::QuickInterpret(const std::string &input, std::shared_ptr<CV::Sta
     return text;
 }
 
+void __CV_REGISTER_STANDARD_BITMAP_FUNCTIONS(std::shared_ptr<CV::Stack> &stack);
+void __CV_REGISTER_STANDARD_BINARY_FUNCTIONS(std::shared_ptr<CV::Stack> &stack);
 void CV::AddStandardConstructors(std::shared_ptr<CV::Stack> &stack){
     __addStandardConstructors(stack);
+    __CV_REGISTER_STANDARD_BINARY_FUNCTIONS(stack);
+    __CV_REGISTER_STANDARD_BITMAP_FUNCTIONS(stack);
 }
 
 /* -------------------------------------------------------------------------------------------------------------------------------- */
@@ -1906,8 +1962,8 @@ int main(){
     CV::AddStandardConstructors(stack);
 
     // Get text tokens
-    std::string pre = "[let b 0][let a 0]";
-    auto tokens = parseTokens(pre+"[do [lt b 5][ [++ b][if [eq b 3][skip][++ a] ] ]]][a][b]",  ' ', cursor);
+    std::string pre = "bm-create 'RGB' 256 256";
+    auto tokens = parseTokens(pre,  ' ', cursor);
     if(cursor->raise()){
         return 1;
     }
