@@ -1,1 +1,19 @@
 
+
+
+
+[let ++ [fn [n]
+    mut n [+ n 1]
+]]
+
+[let -- [fn [n]
+    mut n [- n 1]
+]]
+
+[let ** [fn [n]
+    mut n [* n n]
+]]
+
+[let // [fn [n]
+    mut n [/ n 2.0]
+]]
