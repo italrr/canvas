@@ -276,8 +276,8 @@ void CV::Item::clear(){
     this->type = CV::NaturalType::NIL;
 }
 
-CV::Item *CV::Item::copy(){
-    auto item = new Item();
+std::shared_ptr<CV::Item> CV::Item::copy(){
+    auto item = std::make_shared<CV::Item>();
     item->type = this->type;
     item->size = this->size;
     item->bsize = this->bsize;
@@ -287,7 +287,7 @@ CV::Item *CV::Item::copy(){
     return item;
 }
 
-void CV::Item::restore(CV::Item *item){
+void CV::Item::restore(std::shared_ptr<CV::Item> &item){
     this->type = item->type;
     this->size = item->size;
     this->bsize = item->bsize;
@@ -372,11 +372,11 @@ std::shared_ptr<CV::Item> CV::ListType::get(const std::shared_ptr<CV::Stack> &st
 }
 
 // FUNCTION
-CV::Item *CV::FunctionType::copy(){
-    return this;
+std::shared_ptr<CV::Item> CV::FunctionType::copy(){
+    return std::shared_ptr<CV::Item>(NULL);
 }
 
-void CV::FunctionType::restore(CV::Item *item){
+void CV::FunctionType::restore(std::shared_ptr<CV::Item> &item){
     // Does nothing (cannot be copied)
 }
 
@@ -586,7 +586,7 @@ static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::
                 }                
                 args.push_back(result);
             }
-            bf.fn(args, ctx, cursor);
+            bf.fn(bf.name, token, args, ctx, cursor);
             cursor->raise();
             // Shouldn't yield any instructions
             return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
@@ -1076,7 +1076,7 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
 
             auto result = stack->createInstruction(CV::InstructionType::REFERRED_PROXY, tokens[0]);
 
-            auto data = std::shared_ptr<CV::NumberType>();
+            auto data = std::make_shared<CV::NumberType>();
             data->set(0);
             auto dataId = ctx->store(data);
             result->data.push_back(ctx->id);
@@ -1246,28 +1246,27 @@ std::shared_ptr<CV::Item> CV::Context::get(unsigned id){
 }
 
 void CV::Context::clear(){
+    std::set<std::shared_ptr<CV::Item>> uniqueItems;
     for(auto &it : this->data){
         if(it.second == NULL){
             continue;
         }
+        uniqueItems.insert(it.second);
         auto item = it.second;
         item->clear();
     }
     this->data.clear();
     this->dataIds.clear();
     // Clear originalData
-    // for(int i = 0; i < this->originalData.size(); ++i){
-    //     if(uniqueItems.count(this->originalData[i]) > 0){
-    //         continue;
-    //     }
-    //     auto item = this->originalData[i];
-    //     item->clear();
-    //     delete item;
-    // }
+    for(int i = 0; i < this->originalData.size(); ++i){
+        if(uniqueItems.count(this->originalData[i]) > 0){
+            continue;
+        }
+        auto item = this->originalData[i];
+        item->clear();
+    }
     // std::set's destructor is calling free/delete for some reason?????
-    // for(auto it : uniqueItems){
-    //     free(it);
-    // }    
+
     this->originalData.clear();
 }
 
@@ -1275,6 +1274,13 @@ std::shared_ptr<CV::Item> CV::Context::buildNil(){
     auto nil = std::make_shared<CV::Item>();
     this->store(nil);
     return nil;
+}
+
+std::shared_ptr<CV::Item> CV::Context::buildNumber(__CV_DEFAULT_NUMBER_TYPE n){
+    auto number = std::make_shared<CV::NumberType>();
+    number->set(n);
+    this->store(number);
+    return number;
 }
 
 void CV::Context::transferFrom(CV::Stack *stack, std::shared_ptr<CV::Item> &item){
@@ -1296,25 +1302,25 @@ void CV::Context::transferFrom(std::shared_ptr<CV::Stack> &stack, std::shared_pt
 }
 
 void CV::Context::solidify(){
-    // if(this->solid){
-    //     return;
-    // }
-    // for(auto &it : this->data){ 
-    //     if(it.second == NULL){
-    //         continue;
-    //     }else{
-    //         originalData.push_back(it.second->copy());
-    //     }
-    // }
-    // solid = true;
+    if(this->solid){
+        return;
+    }
+    for(auto &it : this->data){ 
+        if(it.second == NULL){
+            continue;
+        }else{
+            originalData.push_back(it.second->copy());
+        }
+    }
+    solid = true;
 }
 
 void CV::Context::revert(){
-    // for(int i = 0; i < this->originalData.size(); ++i){
-    //     auto backup = this->originalData[i];
-    //     auto local = this->data[backup->id];
-    //     local->restore(backup);
-    // }
+    for(int i = 0; i < this->originalData.size(); ++i){
+        auto backup = this->originalData[i];
+        auto local = this->data[backup->id];
+        local->restore(backup);
+    }
 }
 
 /* -------------------------------------------------------------------------------------------------------------------------------- */
@@ -1491,8 +1497,9 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
                 } 
                 arguments.push_back(v);
             }
-            auto result = bf.fn(arguments, nctx, cursor);
+            auto result = bf.fn(bf.name, ins->token, arguments, nctx, cursor);
             nctx->store(result);
+            nctx->revert();
             return result;
         };
         case CV::InstructionType::CF_INVOKE_FUNCTION: { // CC
@@ -1577,7 +1584,7 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
             if(v){
                 ctx->transferFrom(stack, v);
             }
-
+            nctx->revert();
 
             return CV::ControlFlow(v ? v : ctx->buildNil(), ncf);
         };      
@@ -1643,8 +1650,8 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
             };
 
             for(int i = 0; i < list->size; i += counter){
+                nctx->revert();
                 updateStepper(i);
-
                 auto cfv = stack->execute(stack->instructions[ins->parameter[1]], nctx, cursor);
                 if(cursor->raise()){
                     break;
@@ -1664,6 +1671,8 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
                 }
 
             }
+            nctx->revert();
+
 
             return CV::ControlFlow(v ? v : ctx->buildNil(), ncf);
         }; 
@@ -2038,7 +2047,7 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
     return ctx->buildNil();
 }
 
-void CV::Stack::registerFunction(const std::string &name, const std::function<std::shared_ptr<CV::Item>(std::vector<std::shared_ptr<CV::Item>>&, std::shared_ptr<CV::Context>&, std::shared_ptr<CV::Cursor> &cursor)> &fn, bool preprocessor){
+void CV::Stack::registerFunction(const std::string &name, const std::function<std::shared_ptr<CV::Item>(const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>>&, std::shared_ptr<CV::Context>&, std::shared_ptr<CV::Cursor> &cursor)> &fn, bool preprocessor){
     CV::BinaryFunction bf;
     bf.id = generateId();
     bf.fn = fn;
@@ -2177,31 +2186,33 @@ std::string CV::QuickInterpret(const std::string &input, std::shared_ptr<CV::Sta
 
 void __CV_REGISTER_STANDARD_BITMAP_FUNCTIONS(std::shared_ptr<CV::Stack> &stack);
 void __CV_REGISTER_STANDARD_BINARY_FUNCTIONS(std::shared_ptr<CV::Stack> &stack);
+void __CV_REGISTER_MATH_BINARY_FUNCTIONS(std::shared_ptr<CV::Stack> &stack);
 void CV::AddStandardConstructors(std::shared_ptr<CV::Stack> &stack){
     __addStandardConstructors(stack);
     __CV_REGISTER_STANDARD_BINARY_FUNCTIONS(stack);
     __CV_REGISTER_STANDARD_BITMAP_FUNCTIONS(stack);
+    __CV_REGISTER_MATH_BINARY_FUNCTIONS(stack);
 
     // TODO: Add ability to link .so/.dll from libraries
-    stack->registerFunction("import", [stack](std::vector<std::shared_ptr<CV::Item>> &args, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+    stack->registerFunction("import", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
         if(args.size() < 1){
-            cursor->setError("import", "Expected at least 1 argument (import NAME)", 0);
+            cursor->setError(name, "Expected at least 1 argument (import NAME)", token.line);
             return ctx->buildNil();
         }   
 
         if(args[0]->type != CV::NaturalType::STRING){
-            cursor->setError("import", "Argument 0 expected to be STRING", 0);
+            cursor->setError(name, "Argument 0 expected to be STRING", token.line);
             return ctx->buildNil();
         }
 
-        auto name = std::static_pointer_cast<CV::StringType>(args[0])->get();
+        auto fname = std::static_pointer_cast<CV::StringType>(args[0])->get();
 
-        if(!CV::Tools::fileExists(name)){
-            cursor->setError("import", "No import named '"+name+"' was found", 0);
+        if(!CV::Tools::fileExists(fname)){
+            cursor->setError(name, "No import named '"+fname+"' was found", token.line);
             return ctx->buildNil();            
         }
 
-        auto file = CV::Tools::readFile(name);
+        auto file = CV::Tools::readFile(fname);
 
         // Gather tokens
         auto tokens = parseTokens(file,  ' ', cursor);

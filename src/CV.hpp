@@ -201,8 +201,8 @@
             void *data;
             Item();
             void clear();
-            virtual CV::Item *copy();
-            virtual void restore(CV::Item *item);
+            virtual std::shared_ptr<CV::Item> copy();
+            virtual void restore(std::shared_ptr<CV::Item> &item);
         };
 
         struct NumberType : Item {
@@ -227,8 +227,8 @@
             bool variadic;
             std::vector<std::string> args;            
             CV::Token body;
-            CV::Item *copy();
-            void restore(CV::Item *item);            
+            std::shared_ptr<CV::Item> copy();
+            void restore(std::shared_ptr<CV::Item> &tem);            
         };
 
         /* -------------------------------------------------------------------------------------------------------------------------------- */
@@ -288,7 +288,7 @@
             bool preprocessor;
             std::string name;
             unsigned id;  
-            std::function<std::shared_ptr<CV::Item>(std::vector<std::shared_ptr<CV::Item>>&, std::shared_ptr<CV::Context>&, std::shared_ptr<CV::Cursor> &cursor)> fn;
+            std::function<std::shared_ptr<CV::Item>(const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>>&, std::shared_ptr<CV::Context>&, std::shared_ptr<CV::Cursor> &cursor)> fn;
             BinaryFunction(){
                 preprocessor = false;
             }
@@ -315,10 +315,11 @@
             bool check(const std::string &name);
             void clear();
             std::shared_ptr<CV::Item> buildNil();
+            std::shared_ptr<CV::Item> buildNumber(__CV_DEFAULT_NUMBER_TYPE n);
             Context();
             void transferFrom(CV::Stack *stack, std::shared_ptr<CV::Item> &item);
             void transferFrom(std::shared_ptr<CV::Stack> &stack, std::shared_ptr<CV::Item> &item);
-            std::vector<CV::Item*> originalData;
+            std::vector<std::shared_ptr<CV::Item>> originalData;
             void solidify();
             void revert();
         };
@@ -359,7 +360,7 @@
             std::shared_ptr<CV::Context> getContext(unsigned id) const;
             void deleteContext(unsigned id);
             CV::ControlFlow execute(CV::Instruction *ins, std::shared_ptr<Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);
-            void registerFunction(const std::string &name, const std::function<std::shared_ptr<CV::Item>(std::vector<std::shared_ptr<CV::Item>>&, std::shared_ptr<CV::Context>&, std::shared_ptr<CV::Cursor> &cursor)> &fn, bool preprocessor = false);
+            void registerFunction(const std::string &name, const std::function<std::shared_ptr<CV::Item>(const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>>&, std::shared_ptr<CV::Context>&, std::shared_ptr<CV::Cursor> &cursor)> &fn, bool preprocessor = false);
             unsigned getRegisteredFunctionId(const std::string &name);
         };
 
