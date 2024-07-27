@@ -8,7 +8,7 @@
 
 void __CV_REGISTER_STANDARD_BITMAP_FUNCTIONS(std::shared_ptr<CV::Stack> &stack){
 
-    stack->registerFunction("bm-create", [stack](std::vector<CV::Item*> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
+    stack->registerFunction("bm-create", [stack](std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
         
         if(args.size() < 2){
             cursor->setError("bm-create", "Expects exactly 3 arguments", 0);
@@ -30,11 +30,11 @@ void __CV_REGISTER_STANDARD_BITMAP_FUNCTIONS(std::shared_ptr<CV::Stack> &stack){
             return ctx->buildNil();
         }          
 
-        auto format = static_cast<CV::StringType*>(args[0])->get();
-        auto width = static_cast<CV::NumberType*>(args[1])->get();
-        auto height = static_cast<CV::NumberType*>(args[2])->get();
+        auto format = std::static_pointer_cast<CV::StringType>(args[0])->get();
+        auto width = std::static_pointer_cast<CV::NumberType>(args[1])->get();
+        auto height = std::static_pointer_cast<CV::NumberType>(args[2])->get();
         unsigned channels;
-        
+
         if(format == "RGB"){
             channels = 3;
         }else
@@ -46,21 +46,22 @@ void __CV_REGISTER_STANDARD_BITMAP_FUNCTIONS(std::shared_ptr<CV::Stack> &stack){
         }
 
         auto total = width * height * channels;
-        std::vector<CV::Item*> numbers;
+        std::vector<std::shared_ptr<CV::Item>> numbers;
         numbers.reserve(total);
 
-        auto list = new CV::ListType();
+        auto list = std::make_shared<CV::ListType>();
         list->build(total);
+        ctx->store(list);
 
         for(int i = 0; i < total; ++i){
-            auto n = new CV::NumberType();
+            auto n = std::make_shared<CV::NumberType>();
             n->set(0);
             numbers.push_back(n);
             auto nId = ctx->store(n);
             list->set(i, ctx->id, nId);
         }
 
-        return static_cast<CV::Item*>(list);
+        return std::static_pointer_cast<CV::Item>(list);
     });
 
 }
