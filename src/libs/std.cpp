@@ -24,7 +24,7 @@ static void ___GET_STDIN(std::string &v){
 
 void __CV_REGISTER_STANDARD_BINARY_FUNCTIONS(std::shared_ptr<CV::Stack> &stack){
 
-    stack->registerFunction("io-out", [stack](std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
+    stack->registerFunction("io-out", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
         std::string out = "";
         for(int i = 0; i < args.size(); ++i){
             auto item = args[i];
@@ -39,7 +39,7 @@ void __CV_REGISTER_STANDARD_BINARY_FUNCTIONS(std::shared_ptr<CV::Stack> &stack){
     });
 
 
-    stack->registerFunction("io-err", [stack](std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
+    stack->registerFunction("io-err", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
         std::string out = "";
         for(int i = 0; i < args.size(); ++i){
             auto item = args[i];
@@ -53,7 +53,7 @@ void __CV_REGISTER_STANDARD_BINARY_FUNCTIONS(std::shared_ptr<CV::Stack> &stack){
         return ctx->buildNil();
     });  
 
-    stack->registerFunction("io-in", [stack](std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
+    stack->registerFunction("io-in", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
         std::string input;
         ___GET_STDIN(input);
         auto data = std::make_shared<CV::StringType>();

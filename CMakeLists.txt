@@ -10,6 +10,7 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/builds/cmake)
 set (cv_src 
             src/libs/std.cpp
             src/libs/bitmap.cpp
+            src/libs/math.cpp
             src/canvas.cpp)
 
 if(UNIX AND NOT APPLE)

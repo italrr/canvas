@@ -1,5 +1,24 @@
-[let list [1 2 3 4 5 6 7 8 9 10]]
+[import 'src/libs/core.cv'] # bring in mutators
 
-[iter b in list at 2 [
-    [io-out b '\n']
+[let width 25]
+[let height 25]
+[let channels 3]
+
+[let img [bm-create channels width height]]
+
+[let c 0]
+[iter pixel in img at 3 [
+    [let y [m-floor [m-mod c width]]]
+    [let x [m-floor [/ c width]]]
+    [let r [/ [+ x 1] width]]
+    #[let g [- 1 [/ [+ x 1] width]]]
+    #[let b [/ [+ y 1] height]]
+    [io-out [/ [+ 1 x] width] '\n']
+    #[mut [nth 0 pixel] r]
+    #[mut [nth 1 pixel] g]
+    #[mut [nth 2 pixel] b]
+    [++ c]
+    
 ]]
+
+[bm-write-png img channels width height 'Gradient.png']
