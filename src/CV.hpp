@@ -219,8 +219,8 @@
         struct ListType : Item {
             void build(unsigned n);
             void set(unsigned index, unsigned ctxId, unsigned dataId);
-            CV::Item *get(const std::shared_ptr<CV::Stack> &stack, unsigned index);
-            CV::Item *get(const CV::Stack *stack, unsigned index);
+            std::shared_ptr<CV::Item> get(const std::shared_ptr<CV::Stack> &stack, unsigned index);
+            std::shared_ptr<CV::Item> get(const CV::Stack *stack, unsigned index);
         };
 
         struct FunctionType : Item {
@@ -260,12 +260,12 @@
         }
 
         struct ControlFlow {
-            CV::Item *value;
+            std::shared_ptr<CV::Item> value;
             unsigned type;
             ControlFlow(){
                 this->value = NULL;
             }
-            ControlFlow(CV::Item *v, unsigned type = CV::ControlFlowType::CONTINUE){
+            ControlFlow(const std::shared_ptr<CV::Item> &v, unsigned type = CV::ControlFlowType::CONTINUE){
                 this->value = v;
                 this->type = type;
             }
@@ -288,7 +288,7 @@
             bool preprocessor;
             std::string name;
             unsigned id;  
-            std::function<CV::Item*(std::vector<CV::Item*>&, std::shared_ptr<CV::Context>&, std::shared_ptr<CV::Cursor> &cursor)> fn;
+            std::function<std::shared_ptr<CV::Item>(std::vector<std::shared_ptr<CV::Item>>&, std::shared_ptr<CV::Context>&, std::shared_ptr<CV::Cursor> &cursor)> fn;
             BinaryFunction(){
                 preprocessor = false;
             }
@@ -298,25 +298,26 @@
             Context *top;
             unsigned id; 
             bool solid; // Solid contexts won't accept new data
-            std::unordered_map<unsigned, CV::Item*> data;
+            std::unordered_map<unsigned, std::shared_ptr<CV::Item>> data;
             std::unordered_map<std::string, unsigned> dataIds;
             std::unordered_map<unsigned, unsigned> markedItems;
             void deleteData(unsigned id);
-            unsigned store(CV::Item *item);
+            unsigned store(const std::shared_ptr<CV::Item> &item);
             unsigned promise();
             void markPromise(unsigned id, unsigned type);
             unsigned getMarked(unsigned id);
-            void setPromise(unsigned id, CV::Item *item);
+            void setPromise(unsigned id, std::shared_ptr<CV::Item> &item);
             void setName(const std::string &name, unsigned id);
             void deleteName(unsigned id);
             ContextDataPair getIdByName(const std::string &name);
-            CV::Item *getByName(const std::string &name);
+            std::shared_ptr<CV::Item> get(unsigned id);
+            std::shared_ptr<CV::Item> getByName(const std::string &name);
             bool check(const std::string &name);
             void clear();
-            CV::Item *buildNil();
+            std::shared_ptr<CV::Item> buildNil();
             Context();
-            void transferFrom(CV::Stack *stack, CV::Item *item);
-            void transferFrom(std::shared_ptr<CV::Stack> &stack, CV::Item *item);
+            void transferFrom(CV::Stack *stack, std::shared_ptr<CV::Item> &item);
+            void transferFrom(std::shared_ptr<CV::Stack> &stack, std::shared_ptr<CV::Item> &item);
             std::vector<CV::Item*> originalData;
             void solidify();
             void revert();
@@ -358,7 +359,7 @@
             std::shared_ptr<CV::Context> getContext(unsigned id) const;
             void deleteContext(unsigned id);
             CV::ControlFlow execute(CV::Instruction *ins, std::shared_ptr<Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);
-            void registerFunction(const std::string &name, const std::function<CV::Item*(std::vector<CV::Item*>&, std::shared_ptr<CV::Context>&, std::shared_ptr<CV::Cursor> &cursor)> &fn, bool preprocessor = false);
+            void registerFunction(const std::string &name, const std::function<std::shared_ptr<CV::Item>(std::vector<std::shared_ptr<CV::Item>>&, std::shared_ptr<CV::Context>&, std::shared_ptr<CV::Cursor> &cursor)> &fn, bool preprocessor = false);
             unsigned getRegisteredFunctionId(const std::string &name);
         };
 
