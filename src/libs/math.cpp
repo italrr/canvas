@@ -11,9 +11,11 @@
 
 */
 
-void __CV_REGISTER_MATH_BINARY_FUNCTIONS(std::shared_ptr<CV::Stack> &stack){
+void __CV_REGISTER_MATH_BINARY_FUNCTIONS(std::shared_ptr<CV::Context> &topCtx, std::shared_ptr<CV::Stack> &stack){
 
-    stack->registerFunction("m-sin", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
+    auto ns = stack->createNamespace(topCtx, "Standard Math Library", "math");
+
+    stack->registerFunction(ns->id, "sin", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
         
         if(args.size() != 1){
             cursor->setError(name, "Expects exactly 1 argument", token.line);
@@ -28,7 +30,7 @@ void __CV_REGISTER_MATH_BINARY_FUNCTIONS(std::shared_ptr<CV::Stack> &stack){
         return ctx->buildNumber(std::sin( std::static_pointer_cast<CV::NumberType>(args[0])->get() ));
     });
 
-    stack->registerFunction("m-cos", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
+    stack->registerFunction(ns->id, "cos", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
         
         if(args.size() != 1){
             cursor->setError(name, "Expects exactly 1 argument", token.line);
@@ -43,7 +45,7 @@ void __CV_REGISTER_MATH_BINARY_FUNCTIONS(std::shared_ptr<CV::Stack> &stack){
         return ctx->buildNumber(std::cos( std::static_pointer_cast<CV::NumberType>(args[0])->get() ));
     });    
 
-    stack->registerFunction("m-tan", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
+    stack->registerFunction(ns->id, "tan", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
         
         if(args.size() != 1){
             cursor->setError(name, "Expects exactly 1 argument", token.line);
@@ -58,7 +60,7 @@ void __CV_REGISTER_MATH_BINARY_FUNCTIONS(std::shared_ptr<CV::Stack> &stack){
         return ctx->buildNumber(std::tan( std::static_pointer_cast<CV::NumberType>(args[0])->get() ));
     });      
 
-    stack->registerFunction("m-atan", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
+    stack->registerFunction(ns->id, "atan", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
         
         if(args.size() != 2){
             cursor->setError(name, "Expects exactly 2 argument", token.line);
@@ -79,7 +81,7 @@ void __CV_REGISTER_MATH_BINARY_FUNCTIONS(std::shared_ptr<CV::Stack> &stack){
     });     
 
 
-    stack->registerFunction("m-round", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
+    stack->registerFunction(ns->id, "round", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
         
         if(args.size() != 1){
             cursor->setError(name, "Expects exactly 1 argument", token.line);
@@ -95,7 +97,7 @@ void __CV_REGISTER_MATH_BINARY_FUNCTIONS(std::shared_ptr<CV::Stack> &stack){
     });         
 
 
-    stack->registerFunction("m-floor", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
+    stack->registerFunction(ns->id, "floor", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
         
         if(args.size() != 1){
             cursor->setError(name, "Expects exactly 1 argument", token.line);
@@ -111,7 +113,7 @@ void __CV_REGISTER_MATH_BINARY_FUNCTIONS(std::shared_ptr<CV::Stack> &stack){
     });    
 
 
-    stack->registerFunction("m-ceil", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
+    stack->registerFunction(ns->id, "ceil", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
         
         if(args.size() != 1){
             cursor->setError(name, "Expects exactly 1 argument", token.line);
@@ -127,7 +129,7 @@ void __CV_REGISTER_MATH_BINARY_FUNCTIONS(std::shared_ptr<CV::Stack> &stack){
     });       
 
 
-    stack->registerFunction("m-max", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
+    stack->registerFunction(ns->id, "max", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
         
         if(args.size() != 2){
             cursor->setError(name, "Expects exactly 2 argument", token.line);
@@ -148,7 +150,7 @@ void __CV_REGISTER_MATH_BINARY_FUNCTIONS(std::shared_ptr<CV::Stack> &stack){
     });       
 
 
-    stack->registerFunction("m-min", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
+    stack->registerFunction(ns->id, "min", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
         
         if(args.size() != 2){
             cursor->setError(name, "Expects exactly 2 argument", token.line);
@@ -168,7 +170,7 @@ void __CV_REGISTER_MATH_BINARY_FUNCTIONS(std::shared_ptr<CV::Stack> &stack){
         return ctx->buildNumber(std::min( std::static_pointer_cast<CV::NumberType>(args[0])->get(), std::static_pointer_cast<CV::NumberType>(args[1])->get() ));
     });     
 
-    stack->registerFunction("m-clamp", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
+    stack->registerFunction(ns->id, "clamp", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
         
         if(args.size() != 3){
             cursor->setError(name, "Expects exactly 3 argument", token.line);
@@ -201,7 +203,7 @@ void __CV_REGISTER_MATH_BINARY_FUNCTIONS(std::shared_ptr<CV::Stack> &stack){
 
 
 
-    stack->registerFunction("m-mod", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
+    stack->registerFunction(ns->id, "mod", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
         
         if(args.size() != 2){
             cursor->setError(name, "Expects exactly 2 argument", token.line);

@@ -1,5 +1,7 @@
-[import 'src/libs/core.cv'] # bring in mutators
+[import 'src/libs/core.cv']
 
-[for i from 1 to 15 [
-    [io-out i '\n']
-]]
+[namespace Library lb
+    [var:5]
+]
+
+[io:out [++ lb:var]]

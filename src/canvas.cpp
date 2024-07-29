@@ -85,7 +85,7 @@ int main(int argc, char* argv[]){
         auto cursor = std::make_shared<CV::Cursor>();
         auto stack = std::make_shared<CV::Stack>();
         auto context = stack->createContext();    
-        CV::AddStandardConstructors(stack);      
+        CV::AddStandardConstructors(context, stack);      
         auto result = CV::QuickInterpret(buffer, stack, context, cursor);
     }else
     if(dashRepl.get() && dashRepl->valid){
@@ -94,7 +94,7 @@ int main(int argc, char* argv[]){
         auto cursor = std::make_shared<CV::Cursor>();
         auto stack = std::make_shared<CV::Stack>();
         auto context = stack->createContext();    
-        CV::AddStandardConstructors(stack);
+        CV::AddStandardConstructors(context, stack);
 
         std::string cmd = "";
         for(int i = 1; i < params.size(); ++i){
