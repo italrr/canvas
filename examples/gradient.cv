@@ -1,0 +1,26 @@
+[import 'src/libs/core.cv'] # bring in mutators
+
+[let width 512]
+[let height 512]
+[let channels 3]
+[let filename 'Gradient.png']
+
+[io-out 'Creating ' width 'x' height ' RGB image' '\n']
+[let img [bm-create channels width height]]
+
+[let c 0]
+[iter pixel in img at 3 [
+    [let y [m-floor [m-mod c width]]]
+    [let x [m-floor [/ c width]]]
+    [let r [/ [+ x 1] width]]
+    [let g [- 1 [/ [+ x 1] width]]]
+    [let b [/ [+ y 1] height]]
+    [mut [nth 0 pixel] r]
+    [mut [nth 1 pixel] g]
+    [mut [nth 2 pixel] b]
+    [++ c]
+    
+]]
+
+[bm-write-png img channels width height filename]
+[io-out 'Wrote ' filename '\n']
