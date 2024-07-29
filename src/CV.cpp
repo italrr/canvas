@@ -940,30 +940,31 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
             return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);             
         }
 
-
         auto nctx = stack->createContext(ctx.get());
         
         // TODO: verify var name
         auto stepperId = nctx->promise();
         nctx->setName(tokens[1].first, stepperId);
-
+        
         auto ins = stack->createInstruction(CV::InstructionType::CF_LOOP_ITER, tokens[0]);
         ins->data.push_back(nctx->id);
         ins->data.push_back(stepperId);
 
+        // Process source for iter
         auto source = interpretToken(tokens[3], {tokens[3]}, stack, nctx, cursor);
         if(cursor->raise()){
             return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
         }
         ins->parameter.push_back(source->id);
 
+        // Process code
         auto code = interpretToken(tokens[tokens.size()-1], {tokens[tokens.size()-1]}, stack, nctx, cursor);
         if(cursor->raise()){
             return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
         }
         ins->parameter.push_back(code->id);
         
-
+        // Process counter
         if(tokens.size() == 7){
             auto stepperCountId = interpretToken(tokens[5], {tokens[5]}, stack, nctx, cursor);
             if(cursor->raise()){
@@ -974,6 +975,8 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
             ins->parameter.push_back(0);
         }
 
+        // Seal context
+        nctx->solidify();
 
         return ins;
     });   
@@ -983,9 +986,77 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
         [CC]  (Creates Context)
     */
     DefConstructor(stack, "for", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
-        //(for a from X to Y at 2 [CODE])
+        //(for i from X to Y at 2 [CODE])
+        //(for i from X to Y [CODE])
+
+        static const std::string guide = name+" VAR from NUMBER to NUMBER (at X) [CODE]";
+        if(tokens.size() != 7 && tokens.size() != 9){
+            cursor->setError(name, "Expects at least 4 arguments ("+guide+")", tokens[0].line);
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+        }        
+
+        if(tokens[2].first != "from"){
+            cursor->setError(name, "Expected word 'from' as argument 1 ("+guide+")", tokens[0].line);
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);            
+        }
+
+        if(tokens[4].first != "to"){
+            cursor->setError(name, "Expected word 'to' as argument 3 ("+guide+")", tokens[0].line);
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);            
+        }        
+
+        if(tokens.size() == 9 && tokens[6].first != "at"){
+            cursor->setError(name, "Expected word 'at' as argument 6 ("+guide+")", tokens[0].line);
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);             
+        }
+
+        auto nctx = stack->createContext(ctx.get());
         
         auto ins = stack->createInstruction(CV::InstructionType::CF_LOOP_FOR, tokens[0]);
+
+        // TODO: verify var name
+
+        // Stepper name
+        auto step = std::make_shared<CV::NumberType>();
+        auto stepperId = nctx->store(step);
+        nctx->setName(tokens[1].first, stepperId);        
+        ins->data.push_back(nctx->id);
+        ins->data.push_back(stepperId);
+
+        // from instruction
+        auto fromIns = interpretToken(tokens[3], {tokens[3]}, stack, nctx, cursor);
+        if(cursor->raise()){
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+        }
+        ins->parameter.push_back(fromIns->id);
+
+        // to instruction
+        auto toIns = interpretToken(tokens[5], {tokens[5]}, stack, nctx, cursor);
+        if(cursor->raise()){
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+        }
+        ins->parameter.push_back(toIns->id);
+
+        // Code
+        auto code = interpretToken(tokens[tokens.size()-1], {tokens[tokens.size()-1]}, stack, nctx, cursor);
+        if(cursor->raise()){
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+        }
+        ins->parameter.push_back(code->id);        
+
+        // Count amount
+        if(tokens.size() == 9){
+            auto stepperCountId = interpretToken(tokens[7], {tokens[7]}, stack, nctx, cursor);
+            if(cursor->raise()){
+                return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+            }
+            ins->parameter.push_back(stepperCountId->id);
+        }else{
+            ins->parameter.push_back(0);
+        }
+
+        // Seal context
+        nctx->solidify();
 
         return ins;
     });           
@@ -1119,7 +1190,7 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
 
         auto result = stack->createInstruction(CV::InstructionType::REFERRED_PROXY, tokens[0]);
 
-        auto data = std::shared_ptr<CV::NumberType>();
+        auto data = std::make_shared<CV::NumberType>();
         data->set(0);
         auto dataId = ctx->store(data);
         result->data.push_back(ctx->id);
@@ -1265,8 +1336,7 @@ void CV::Context::clear(){
         auto item = this->originalData[i];
         item->clear();
     }
-    // std::set's destructor is calling free/delete for some reason?????
-
+    uniqueItems.clear();
     this->originalData.clear();
 }
 
@@ -1677,6 +1747,74 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
             return CV::ControlFlow(v ? v : ctx->buildNil(), ncf);
         }; 
 
+        case CV::InstructionType::CF_LOOP_FOR: { // CC
+
+            auto nctx = stack->contexts[ins->data[0]];
+            auto stepper = nctx->data[ins->data[1]];
+            auto stepperCountId = ins->parameter[3];
+            std::shared_ptr<CV::Item> v(NULL);
+            unsigned ncf = CV::ControlFlowType::CONTINUE;
+            __CV_DEFAULT_NUMBER_TYPE counter = 1;
+
+            // Figure out counter
+            if(stepperCountId != 0){
+                auto v = stack->execute(stack->instructions[stepperCountId], nctx, cursor).value;
+                if(cursor->raise()){
+                    return ctx->buildNil();
+                }                
+                if(v->type != CV::NaturalType::NUMBER){
+                    cursor->setError("Logic Error At '"+ins->token.first+"'", "Step increment must be a NUMBER", ins->token.line);
+                    return ctx->buildNil();                     
+                }
+                counter = std::static_pointer_cast<CV::NumberType>(v)->get();
+            }
+            // Figure from
+            auto fromV = stack->execute(stack->instructions[ins->parameter[0]], nctx, cursor).value;
+            if(cursor->raise()){
+                return ctx->buildNil();
+            } 
+            if(fromV->type != CV::NaturalType::NUMBER){
+                cursor->setError("Logic Error At '"+ins->token.first+"'", "from value must be a NUMBER", ins->token.line);
+                return ctx->buildNil();                     
+            }
+            // Figure to
+            auto toV = stack->execute(stack->instructions[ins->parameter[1]], nctx, cursor).value;
+            if(cursor->raise()){
+                return ctx->buildNil();
+            }   
+            if(toV->type != CV::NaturalType::NUMBER){
+                cursor->setError("Logic Error At '"+ins->token.first+"'", "to value must be a NUMBER", ins->token.line);
+                return ctx->buildNil();                     
+            }                      
+
+            auto start = std::static_pointer_cast<CV::NumberType>(fromV);
+            auto end = std::static_pointer_cast<CV::NumberType>(toV);
+
+            for(__CV_DEFAULT_NUMBER_TYPE i = start->get(); i <= end->get(); i += counter){
+                nctx->revert();
+                std::static_pointer_cast<CV::NumberType>(stepper)->set(i);                
+                auto cfv = stack->execute(stack->instructions[ins->parameter[2]], nctx, cursor);
+                if(cursor->raise()){
+                    break;
+                }
+                v = cfv.value;
+                if(cfv.type != CV::ControlFlowType::CONTINUE){
+                    if(cfv.type == CV::ControlFlowType::SKIP){
+                        continue;
+                    }else
+                    if(cfv.type == CV::ControlFlowType::YIELD){
+                        break;
+                    }else{
+                        ncf = cfv.type;
+                        break;
+                    }
+                }
+            }
+
+            nctx->revert();
+
+            return CV::ControlFlow(v ? v : ctx->buildNil(), ncf);
+        }; 
 
         case CV::InstructionType::CF_INT_RETURN:
         case CV::InstructionType::CF_INT_YIELD:
@@ -1708,7 +1846,7 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
                 }
                 *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) += std::static_pointer_cast<CV::NumberType>(v)->get();
             }
-            return ctx->buildNil();
+            return item;
         };
         case CV::InstructionType::OP_NUM_SUB: {
             auto &ctxId = ins->data[0];
@@ -1726,7 +1864,7 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
                 }
                 *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) -= std::static_pointer_cast<CV::NumberType>(v)->get();
             }
-            return ctx->buildNil();
+            return item;
         };
         case CV::InstructionType::OP_NUM_MULT: {
             auto &ctxId = ins->data[0];
@@ -1744,7 +1882,7 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
                 }
                 *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) *= std::static_pointer_cast<CV::NumberType>(v)->get();
             }
-            return ctx->buildNil();
+            return item;
         };
         case CV::InstructionType::OP_NUM_DIV: {
             auto &ctxId = ins->data[0];
@@ -1768,7 +1906,7 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
                 }
                 *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) /= operand;
             }
-            return ctx->buildNil();
+            return item;
         };
         case CV::InstructionType::OP_COND_EQ: {
             auto &ctxId = ins->data[0];
@@ -1789,7 +1927,7 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
                     return ctx->buildNil();
                 }
             }
-            return ctx->buildNil();
+            return item;
         };      
         case CV::InstructionType::OP_COND_NEQ: {
             auto &ctxId = ins->data[0];
@@ -1817,7 +1955,7 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
                     }
                 }
             }
-            return ctx->buildNil();
+            return item;
         };   
         case CV::InstructionType::OP_COND_LT: {
             auto &ctxId = ins->data[0];
@@ -1840,7 +1978,7 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
                 }
                 last = *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(operands[i]->data);
             }
-            return ctx->buildNil();
+            return item;
         };       
         case CV::InstructionType::OP_COND_LTE: {
             auto &ctxId = ins->data[0];
@@ -1863,7 +2001,7 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
                 }
                 last = *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(operands[i]->data);
             }
-            return ctx->buildNil();
+            return item;
         };      
         case CV::InstructionType::OP_COND_GT: {
             auto &ctxId = ins->data[0];
@@ -1886,7 +2024,7 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
                 }
                 last = *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(operands[i]->data);
             }
-            return ctx->buildNil();
+            return item;
         };       
         case CV::InstructionType::OP_COND_GTE: {
             auto &ctxId = ins->data[0];
@@ -1909,7 +2047,7 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
                 }
                 last = *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(operands[i]->data);
             }
-            return ctx->buildNil();
+            return item;
         };    
 
         case CV::InstructionType::OP_LOGIC_AND: {
@@ -1933,7 +2071,7 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
                 }
             }
 
-            return ctx->buildNil();
+            return item;
         };  
 
         case CV::InstructionType::OP_LOGIC_OR: {
@@ -1958,7 +2096,7 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
                 }
             }
 
-            return ctx->buildNil();
+            return item;
         };        
 
         case CV::InstructionType::OP_LOGIC_NOT: {
@@ -1981,7 +2119,7 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
             }
 
 
-            return ctx->buildNil();
+            return item;
         };                                           
                  
 
