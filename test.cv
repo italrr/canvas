@@ -1,2 +1,5 @@
 [import 'src/libs/core.cv'] # bring in mutators
 
+[for i from 1 to 15 [
+    [io-out i '\n']
+]]
