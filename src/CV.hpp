@@ -123,6 +123,9 @@
                 MUT,                    // Mutator
                 CONSTRUCT_LIST,
                 CONSTRUCT_FUNCTION,
+                // DATA STORAGE
+                DS_DEFINE_NAMESPACE,
+                DS_NAMESPACE_ADD_MEMBER,
                 // CONTROL FLOW
                 CF_INVOKE_FUNCTION,
                 CF_INVOKE_BINARY_FUNCTION,
@@ -285,13 +288,18 @@
         };
         struct Context;
         struct BinaryFunction {
-            bool preprocessor;
             std::string name;
             unsigned id;  
             std::function<std::shared_ptr<CV::Item>(const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>>&, std::shared_ptr<CV::Context>&, std::shared_ptr<CV::Cursor> &cursor)> fn;
             BinaryFunction(){
-                preprocessor = false;
             }
+        };
+
+        struct Namespace {
+            unsigned id;
+            unsigned ctx;
+            std::string name;
+            std::string prefix;
         };
 
         struct Context {
@@ -301,6 +309,7 @@
             std::unordered_map<unsigned, std::shared_ptr<CV::Item>> data;
             std::unordered_map<std::string, unsigned> dataIds;
             std::unordered_map<unsigned, unsigned> markedItems;
+            std::unordered_map<unsigned, std::shared_ptr<CV::BinaryFunction>> binaryFunctions;
             void deleteData(unsigned id);
             unsigned store(const std::shared_ptr<CV::Item> &item);
             unsigned promise();
@@ -322,6 +331,9 @@
             std::vector<std::shared_ptr<CV::Item>> originalData;
             void solidify();
             void revert();
+            void registerFunction(const std::string &name, const std::function<std::shared_ptr<CV::Item>(const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>>&, std::shared_ptr<CV::Context>&, std::shared_ptr<CV::Cursor> &cursor)> &fn); 
+            CV::BinaryFunction *getRegisteredFunction(const std::string &name);
+            CV::BinaryFunction *getRegisteredFunction(unsigned id);
         };
         
         struct Instruction {
@@ -352,19 +364,22 @@
                                            )>> constructors;
             std::unordered_map<unsigned, CV::Instruction*> instructions;
             std::unordered_map<unsigned, std::shared_ptr<CV::Context>> contexts;
-            std::unordered_map<unsigned, CV::BinaryFunction> binaryFunctions;
+            std::unordered_map<unsigned, std::shared_ptr<CV::Namespace>> namespaces;
+            std::unordered_map<std::string, unsigned> namespaceIds;
             Stack();
             void clear();
+            std::shared_ptr<CV::Namespace> createNamespace(std::shared_ptr<CV::Context> &topCtx, const std::string &name, const std::string &prefix);
+            bool deleteNamespace(const std::string &name);
+            unsigned getNamespaceId(const std::string &name);
+
             CV::Instruction *createInstruction(unsigned type, const CV::Token &token);
             std::shared_ptr<CV::Context> createContext(CV::Context *top = NULL);
             std::shared_ptr<CV::Context> getContext(unsigned id) const;
             void deleteContext(unsigned id);
+            void registerFunction(unsigned nsId, const std::string &name, const std::function<std::shared_ptr<CV::Item>(const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>>&, std::shared_ptr<CV::Context>&, std::shared_ptr<CV::Cursor> &cursor)> &fn); 
             CV::ControlFlow execute(CV::Instruction *ins, std::shared_ptr<Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);
-            void registerFunction(const std::string &name, const std::function<std::shared_ptr<CV::Item>(const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>>&, std::shared_ptr<CV::Context>&, std::shared_ptr<CV::Cursor> &cursor)> &fn, bool preprocessor = false);
-            unsigned getRegisteredFunctionId(const std::string &name);
         };
-
-        void AddStandardConstructors(std::shared_ptr<CV::Stack> &stack);
+        void AddStandardConstructors(std::shared_ptr<CV::Context> &topCtx, std::shared_ptr<CV::Stack> &stack);
         std::string ItemToText(const std::shared_ptr<CV::Stack> &stack, CV::Item *item);
         void SetUseColor(bool v);
         std::string QuickInterpret(const std::string &input, std::shared_ptr<CV::Stack> &stack, std::shared_ptr<Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);

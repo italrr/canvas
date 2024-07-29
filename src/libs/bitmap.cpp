@@ -15,9 +15,12 @@
 */
 
 
-void __CV_REGISTER_STANDARD_BITMAP_FUNCTIONS(std::shared_ptr<CV::Stack> &stack){
+void __CV_REGISTER_STANDARD_BITMAP_FUNCTIONS(std::shared_ptr<CV::Context> &topCtx, std::shared_ptr<CV::Stack> &stack){
 
-    stack->registerFunction("bm-create", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
+    auto ns = stack->createNamespace(topCtx, "Standard Bitmap Library", "bm");
+
+
+    stack->registerFunction(ns->id, "create", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
         
         if(args.size() != 3){
             cursor->setError(name, "Expects exactly 3 arguments", token.line);
@@ -68,7 +71,7 @@ void __CV_REGISTER_STANDARD_BITMAP_FUNCTIONS(std::shared_ptr<CV::Stack> &stack){
     });
 
 
-    stack->registerFunction("bm-write-png", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
+    stack->registerFunction(ns->id, "write-png", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
         // bm-write array format fileformat filename
 
         if(args.size() != 5){

@@ -141,7 +141,42 @@ namespace CV {
 
         static std::string setBackgroundColor(int color){
             return useColorOnText ? (UnixColor::BackgroundColorCodes.find(color)->second) : "";
+        }
 
+        std::vector<std::string> splitTokenByScope(const CV::Token &token){
+            auto colonp = token.first.find(":");
+            if(colonp == std::string::npos){
+                return {};
+            }
+            return {
+                token.first.substr(0, colonp),
+                token.first.substr(colonp+1, token.first.size())
+            };
+        }
+
+        static bool isScoped(const CV::Token &token){
+            bool inString = false;
+            bool inComment = false;
+            auto &input = token.first;
+            for(int i = 0; i < input.length(); ++i){
+                char c = input[i];
+                if(c == '\''){
+                    return false;
+                }else
+                if(c == '#' && !inComment){
+                    return false;
+                }else
+                if(c == '\n'){
+                    return false;
+                }else
+                if(c == ' '){
+                    return false;
+                }else
+                if(c == ':'){
+                    return true;
+                }
+            }
+            return false;
         }
 
         std::string solveEscapedCharacters(const std::string &v){
@@ -563,47 +598,105 @@ static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::
         ins->data.push_back(ctx->store(std::static_pointer_cast<CV::Item>(string)));
         return ins;
     }else
+    // Import?
+    if(imp == "import"){
+        if(tokens.size() != 2){
+            cursor->setError(imp, "Expected exactly 1 argument (import NAME)", token.line);
+            return stack->createInstruction(CV::InstructionType::NOOP, token);   
+        }   
+
+        // Pre-process argument 0
+        auto p0entry = compileTokens({tokens[1]}, stack, ctx, cursor);
+        if(cursor->raise()){
+            return stack->createInstruction(CV::InstructionType::NOOP, token);   
+        }
+
+        // Execute
+        auto p0result = stack->execute(p0entry, ctx, cursor).value;
+        if(cursor->raise()){
+            return stack->createInstruction(CV::InstructionType::NOOP, token);   
+        }
+
+        if(p0result->type != CV::NaturalType::STRING){
+            cursor->setError(imp, "Argument 0 expected to be STRING", token.line);
+            return stack->createInstruction(CV::InstructionType::NOOP, token);   
+        }
+
+        auto fname = std::static_pointer_cast<CV::StringType>(p0result)->get();
+
+        if(!CV::Tools::fileExists(fname)){
+            cursor->setError(imp, "No import named '"+fname+"' was found", token.line);
+            return stack->createInstruction(CV::InstructionType::NOOP, token);   
+        }
+
+        auto file = CV::Tools::readFile(fname);
+
+        // Gather tokens
+        auto tokens = parseTokens(file,  ' ', cursor);
+        if(cursor->raise()){
+            return stack->createInstruction(CV::InstructionType::NOOP, token);   
+        }
+
+        // Compile tokens into its bytecode
+        auto entry = compileTokens(tokens, stack, ctx, cursor);
+        if(cursor->raise()){
+            return stack->createInstruction(CV::InstructionType::NOOP, token);   
+        }
+
+        // Load it up (execute)
+        auto result = stack->execute(entry, ctx, cursor).value;
+        if(cursor->raise()){
+            return stack->createInstruction(CV::InstructionType::NOOP, token);   
+        }
+
+        return stack->createInstruction(CV::InstructionType::NOOP, token);   
+    }else
     // Is it a constructor?
     if(CheckConstructor(stack, imp)){
         auto cons = stack->constructors[imp];
         return cons(imp, tokens, stack, ctx, cursor);
     }else
-    if(stack->getRegisteredFunctionId(imp) != 0){
-        auto bfId = stack->getRegisteredFunctionId(imp);
-        auto bf = stack->binaryFunctions[bfId];
+    if(auto bf = ctx->getRegisteredFunction(imp)){
         // Processors are executed right away
-        if(bf.preprocessor){
-            std::vector<std::shared_ptr<CV::Item>> args;
-            std::vector<CV::Token> ntokens;
-            for(int i = 1; i < tokens.size(); ++i){
-                auto cins = interpretToken(tokens[i], {tokens[i]}, stack, ctx, cursor);
-                if(cursor->raise()){
-                    return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-                }
-                auto result = stack->execute(cins, ctx, cursor).value;
-                if(cursor->raise()){
-                    return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-                }                
-                args.push_back(result);
+        auto ins = stack->createInstruction(CV::InstructionType::CF_INVOKE_BINARY_FUNCTION, token);
+
+        ins->data.push_back(ctx->id);
+        ins->data.push_back(bf->id);
+        for(int i = 1; i < tokens.size(); ++i){
+            auto cins = interpretToken(tokens[i], {tokens[i]}, stack, ctx, cursor);
+            if(cursor->raise()){
+                return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
             }
-            bf.fn(bf.name, token, args, ctx, cursor);
-            cursor->raise();
-            // Shouldn't yield any instructions
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-        }else{
-            auto ins = stack->createInstruction(CV::InstructionType::CF_INVOKE_BINARY_FUNCTION, token);
-            ins->data.push_back(ctx->id);
-            ins->data.push_back(bfId);
-            for(int i = 1; i < tokens.size(); ++i){
-                auto cins = interpretToken(tokens[i], {tokens[i]}, stack, ctx, cursor);
-                if(cursor->raise()){
-                    return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-                }
-                ins->parameter.push_back(cins->id);
-            }           
-            return ins;
-        }
+            ins->parameter.push_back(cins->id);
+        } 
+        return ins;
     }else{
+        // Is scoped?
+        if(CV::Tools::isScoped(token)){
+            auto v = CV::Tools::splitTokenByScope(token);
+            if(v.size() != 2){
+                cursor->setError(imp, "Invalid syntax or malformed token", token.line);
+                return stack->createInstruction(CV::InstructionType::NOOP, token);                 
+            }
+            auto &nsName = v[0];
+            auto &name = v[1];
+            auto nsId = stack->getNamespaceId(nsName);
+            if(nsId == 0){
+                cursor->setError(imp, "Undefined namespace '"+nsName+"'", token.line);
+                return stack->createInstruction(CV::InstructionType::NOOP, token);                   
+            }
+            auto ns = stack->namespaces[nsId];
+            auto cctx = stack->contexts[ns->ctx];
+            if(!cctx->check(name)){
+                cursor->setError(imp, "Failed to find name '"+name+"' within namespace '"+nsName+"'", token.line);
+                return stack->createInstruction(CV::InstructionType::NOOP, token);                  
+            }
+            CV::Token token;
+            token.first = name;
+            token.solved = true;
+            token.line = token.line;
+            return interpretToken(token, tokens, stack, cctx, cursor);
+        }else
         // Is it a name?
         if(ctx->check(imp)){
             auto pair = ctx->getIdByName(imp);
@@ -915,6 +1008,62 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
 
         // Seals it
         nctx->solidify();
+
+        return ins;
+    });     
+
+
+
+    /*
+        namespace
+        [CC]  (Creates Context)
+    */
+    DefConstructor(stack, "namespace", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+
+        if(tokens.size() < 3){
+            cursor->setError(name, "Expects at least 3 arguments (namespace Name prefix)", tokens[0].line);
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+        }
+
+        // TODO: check library name
+        std::string lname = tokens[1].first;
+        std::string lprefix = tokens[2].first;
+
+        auto ns = stack->createNamespace(ctx, lname, lprefix);
+
+        auto nctx = stack->contexts[ns->ctx];
+        auto ins = stack->createInstruction(CV::InstructionType::DS_DEFINE_NAMESPACE, tokens[0]);
+        ins->data.push_back(nctx->id);
+        ins->data.push_back(ns->id);
+
+        for(int i = 3; i < tokens.size(); ++i){
+            auto subtokens = parseTokens(tokens[i].first,  ' ', cursor);  
+            if(subtokens.size() > 1){ // Should ONLY ONE subtoken
+                cursor->setError(name, "Invalid syntax or malformed token", tokens[i].line);
+                return stack->createInstruction(CV::InstructionType::NOOP, tokens[i]);
+            }
+            auto sep = CV::Tools::splitTokenByScope(subtokens[0]);
+            if(sep.size() == 0){ // Should be two elements per member
+                cursor->setError(name, "Invalid syntax or malformed token", tokens[i].line);
+                return stack->createInstruction(CV::InstructionType::NOOP, tokens[i]);                
+            }
+            // TODO: check member name
+            auto &mname = sep[0];
+            auto &mvalue = sep[1];
+            CV::Token current;
+            current.line = tokens[i].line;
+            current.first = mvalue;
+            current.solved = false;
+            auto v = interpretToken(current, {current}, stack, nctx, cursor);
+            if(cursor->raise()){
+                return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+            }
+            auto memberId = nctx->promise();
+            nctx->setName(mname, memberId);
+            ins->parameter.push_back(v->id);
+            ins->data.push_back(memberId);
+        }
+
 
         return ins;
     });     
@@ -1291,8 +1440,9 @@ void CV::Context::deleteName(unsigned id){
 }
 
 bool CV::Context::check(const std::string &name){
-    auto v = this->dataIds.count(name);
-    if(v == 0){
+    auto bfv = this->getRegisteredFunction(name); 
+    auto dv = this->dataIds.count(name);
+    if(dv == 0 && bfv == NULL){
         return this->top && this->top->check(name);
     }
     return true;
@@ -1393,6 +1543,31 @@ void CV::Context::revert(){
     }
 }
 
+void CV::Context::registerFunction(const std::string &name, const std::function<std::shared_ptr<CV::Item>(const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>>&, std::shared_ptr<CV::Context>&, std::shared_ptr<CV::Cursor> &cursor)> &fn){
+    auto bf = std::make_shared<CV::BinaryFunction>();
+    bf->id = generateId();
+    bf->fn = fn;
+    bf->name = name;
+    this->binaryFunctions[bf->id] = bf;
+}
+
+CV::BinaryFunction *CV::Context::getRegisteredFunction(unsigned id){
+    auto it = this->binaryFunctions.find(id);
+    if(it == this->binaryFunctions.end()){
+        return this->top ? this->top->getRegisteredFunction(id) : NULL;
+    }
+    return it->second.get();
+}
+
+CV::BinaryFunction *CV::Context::getRegisteredFunction(const std::string &name){
+    for(auto &it : this->binaryFunctions){
+        if(it.second->name == name){
+            return it.second.get();
+        }
+    }
+    return this->top ? this->top->getRegisteredFunction(name) : NULL;
+}
+
 /* -------------------------------------------------------------------------------------------------------------------------------- */
 // Stack Management
 
@@ -1422,6 +1597,22 @@ std::shared_ptr<CV::Context> CV::Stack::getContext(unsigned id) const {
     return it->second;
 }
 
+void CV::Stack::registerFunction(unsigned nsId, const std::string &name, const std::function<std::shared_ptr<CV::Item>(const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>>&, std::shared_ptr<CV::Context>&, std::shared_ptr<CV::Cursor> &cursor)> &fn){
+
+    auto ns = this->namespaces.find(nsId);
+    if(ns == this->namespaces.end()){
+        fprintf(stderr, "Fatal Error: Failed to find namespace %i using '%s'\n", nsId, "CV::Stack::registerFunction");
+        std::exit(1);
+    }
+
+    auto ctx = this->contexts.find(ns->second->ctx);
+    if(ctx == this->contexts.end()){
+        fprintf(stderr, "Fatal Error: Failed to find context %i using '%s'\n", ns->second->ctx, "CV::Stack::registerFunction");
+        std::exit(1);
+    }
+    ctx->second->registerFunction(name, fn);
+}
+
 void CV::Stack::deleteContext(unsigned id){
     auto it = this->contexts.find(id);
     if(it == this->contexts.end()){
@@ -1431,6 +1622,40 @@ void CV::Stack::deleteContext(unsigned id){
     auto ctx = it->second;
     ctx->clear();
     this->contexts.erase(it);
+}
+
+std::shared_ptr<CV::Namespace> CV::Stack::createNamespace(std::shared_ptr<CV::Context> &topCtx, const std::string &name, const std::string &prefix){
+    auto ns = std::make_shared<CV::Namespace>();
+    auto ctx = this->createContext(topCtx.get());
+    ns->id = generateId();
+    ns->name = name;
+    ns->ctx = ctx->id;
+    ns->prefix = prefix;
+    this->namespaces[ns->id] = ns;
+    this->namespaceIds[name] = ns->id;
+    return ns;
+}
+
+unsigned CV::Stack::getNamespaceId(const std::string &name){
+    for(auto &it : this->namespaces){
+        auto &ns = it.second;
+        if(ns->name == name || ns->prefix == name){
+            return ns->id;
+        }
+    }
+    return 0;
+}
+
+bool CV::Stack::deleteNamespace(const std::string &name){
+    auto id = getNamespaceId(name);
+    if(id == 0){
+        return false;
+    }
+    auto itns = namespaces.find(id);
+    namespaces.erase(itns);
+    auto itid = namespaceIds.find(name);
+    namespaceIds.erase(itid);
+    return true;
 }
 
 static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
@@ -1520,7 +1745,22 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
             return std::static_pointer_cast<CV::Item>(list);
 
         };        
+        /*
+            DATA STORE
+        */
+        case CV::InstructionType::DS_DEFINE_NAMESPACE: {
+            auto nctx = stack->contexts[ins->data[0]];
+            for(int i = 0; i < ins->parameter.size(); ++i){
+                auto memId = ins->data[2 + i];
+                auto v = stack->execute(stack->instructions[ins->parameter[i]], nctx, cursor).value;
+                if(cursor->raise()){
+                    return ctx->buildNil();
+                }    
+                nctx->setPromise(memId, v);
+            }
 
+            return ctx->buildNil();
+        };
         /*
             CONTROL FLOW
         */
@@ -1558,7 +1798,7 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
         };
         case CV::InstructionType::CF_INVOKE_BINARY_FUNCTION: {
             auto nctx = stack->contexts[ins->data[0]];
-            auto bf = stack->binaryFunctions[ins->data[1]];
+            auto bf = nctx->getRegisteredFunction(ins->data[1]);
             std::vector<std::shared_ptr<CV::Item>> arguments;
             for(int i = 0; i < ins->parameter.size(); ++i){
                 auto cins = stack->instructions[ins->parameter[i]];
@@ -1568,7 +1808,7 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
                 } 
                 arguments.push_back(v);
             }
-            auto result = bf.fn(bf.name, ins->token, arguments, nctx, cursor);
+            auto result = bf->fn(bf->name, ins->token, arguments, nctx, cursor);
             nctx->store(result);
             nctx->revert();
             return result;
@@ -1655,7 +1895,8 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
             if(v){
                 ctx->transferFrom(stack, v);
             }
-            nctx->revert();
+
+            stack->deleteContext(nctx->id);
 
             return CV::ControlFlow(v ? v : ctx->buildNil(), ncf);
         };      
@@ -1740,8 +1981,12 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
                 }
 
             }
-            nctx->revert();
 
+            if(v){
+                ctx->transferFrom(stack, v);
+            }            
+
+            stack->deleteContext(nctx->id);
 
             return CV::ControlFlow(v ? v : ctx->buildNil(), ncf);
         }; 
@@ -1830,8 +2075,11 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
                 end = std::static_pointer_cast<CV::NumberType>(toV);                                 
             }
 
+            if(v){
+                ctx->transferFrom(stack, v);
+            }
 
-            nctx->revert();
+            stack->deleteContext(nctx->id);
 
             return CV::ControlFlow(v ? v : ctx->buildNil(), ncf);
         }; 
@@ -2205,24 +2453,6 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
     return ctx->buildNil();
 }
 
-void CV::Stack::registerFunction(const std::string &name, const std::function<std::shared_ptr<CV::Item>(const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>>&, std::shared_ptr<CV::Context>&, std::shared_ptr<CV::Cursor> &cursor)> &fn, bool preprocessor){
-    CV::BinaryFunction bf;
-    bf.id = generateId();
-    bf.fn = fn;
-    bf.name = name;
-    bf.preprocessor = preprocessor;
-    this->binaryFunctions[bf.id] = bf;
-}
-
-unsigned CV::Stack::getRegisteredFunctionId(const std::string &name){
-    for(auto &it : this->binaryFunctions){
-        if(it.second.name == name){
-            return it.second.id;
-        }
-    }
-    return 0;
-}
-
 CV::ControlFlow CV::Stack::execute(CV::Instruction *ins, std::shared_ptr<Context> &ctx, SHARED<CV::Cursor> &cursor){
     CV::ControlFlow result;
     bool valid = false;
@@ -2342,56 +2572,17 @@ std::string CV::QuickInterpret(const std::string &input, std::shared_ptr<CV::Sta
     return text;
 }
 
-void __CV_REGISTER_STANDARD_BITMAP_FUNCTIONS(std::shared_ptr<CV::Stack> &stack);
-void __CV_REGISTER_STANDARD_BINARY_FUNCTIONS(std::shared_ptr<CV::Stack> &stack);
-void __CV_REGISTER_MATH_BINARY_FUNCTIONS(std::shared_ptr<CV::Stack> &stack);
-void CV::AddStandardConstructors(std::shared_ptr<CV::Stack> &stack){
+void __CV_REGISTER_STANDARD_BITMAP_FUNCTIONS(std::shared_ptr<CV::Context> &topCtx, std::shared_ptr<CV::Stack> &stack);
+void __CV_REGISTER_STANDARD_BINARY_FUNCTIONS(std::shared_ptr<CV::Context> &topCtx, std::shared_ptr<CV::Stack> &stack);
+void __CV_REGISTER_MATH_BINARY_FUNCTIONS(std::shared_ptr<CV::Context> &topCtx, std::shared_ptr<CV::Stack> &stack);
+void CV::AddStandardConstructors(std::shared_ptr<CV::Context> &topCtx, std::shared_ptr<CV::Stack> &stack){
+
+    auto nsStd = stack->createNamespace(topCtx, "Standard Core Library", "std");
+
     __addStandardConstructors(stack);
-    __CV_REGISTER_STANDARD_BINARY_FUNCTIONS(stack);
-    __CV_REGISTER_STANDARD_BITMAP_FUNCTIONS(stack);
-    __CV_REGISTER_MATH_BINARY_FUNCTIONS(stack);
-
-    // TODO: Add ability to link .so/.dll from libraries
-    stack->registerFunction("import", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
-        if(args.size() < 1){
-            cursor->setError(name, "Expected at least 1 argument (import NAME)", token.line);
-            return ctx->buildNil();
-        }   
-
-        if(args[0]->type != CV::NaturalType::STRING){
-            cursor->setError(name, "Argument 0 expected to be STRING", token.line);
-            return ctx->buildNil();
-        }
-
-        auto fname = std::static_pointer_cast<CV::StringType>(args[0])->get();
-
-        if(!CV::Tools::fileExists(fname)){
-            cursor->setError(name, "No import named '"+fname+"' was found", token.line);
-            return ctx->buildNil();            
-        }
-
-        auto file = CV::Tools::readFile(fname);
-
-        // Gather tokens
-        auto tokens = parseTokens(file,  ' ', cursor);
-        if(cursor->raise()){
-            return ctx->buildNil();
-        }
-
-        // Compile tokens into its bytecode
-        auto entry = compileTokens(tokens, stack, ctx, cursor);
-        if(cursor->raise()){
-            return ctx->buildNil();
-        }
-
-        // Load it up (execute)
-        auto result = stack->execute(entry, ctx, cursor).value;
-        if(cursor->raise()){
-            return ctx->buildNil();
-        }
-
-        return ctx->buildNil();
-    }, true);
+    __CV_REGISTER_STANDARD_BINARY_FUNCTIONS(topCtx, stack);
+    __CV_REGISTER_STANDARD_BITMAP_FUNCTIONS(topCtx, stack);
+    __CV_REGISTER_MATH_BINARY_FUNCTIONS(topCtx, stack);
 }
 
 /* -------------------------------------------------------------------------------------------------------------------------------- */
