@@ -1435,8 +1435,9 @@ void CV::Stack::deleteContext(unsigned id){
 
 static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
     switch(ins->type){
+        default:
         case CV::InstructionType::INVALID: {
-            fprintf(stderr, "Instruction ID %i of invalid type\n", ins->id);
+            fprintf(stderr, "Instruction ID %i of invalid type (%i)\n", ins->id, ins->type);
             std::exit(1);
         } break;
         case CV::InstructionType::NOOP: {
@@ -1660,9 +1661,7 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
         };      
 
 
-
         case CV::InstructionType::CF_LOOP_ITER: { // CC
-
             auto nctx = stack->contexts[ins->data[0]];
             auto stepperCountId = ins->parameter[2];
             auto counter = 1;
@@ -1809,7 +1808,28 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
                         break;
                     }
                 }
+                // Process next from/to
+                fromV = stack->execute(stack->instructions[ins->parameter[0]], nctx, cursor).value;
+                if(cursor->raise()){
+                    return ctx->buildNil();
+                } 
+                if(fromV->type != CV::NaturalType::NUMBER){
+                    cursor->setError("Logic Error At '"+ins->token.first+"'", "from value must be a NUMBER", ins->token.line);
+                    return ctx->buildNil();                     
+                }
+                // Figure to
+                toV = stack->execute(stack->instructions[ins->parameter[1]], nctx, cursor).value;
+                if(cursor->raise()){
+                    return ctx->buildNil();
+                }   
+                if(toV->type != CV::NaturalType::NUMBER){
+                    cursor->setError("Logic Error At '"+ins->token.first+"'", "to value must be a NUMBER", ins->token.line);
+                    return ctx->buildNil();                     
+                } 
+                start = std::static_pointer_cast<CV::NumberType>(fromV);
+                end = std::static_pointer_cast<CV::NumberType>(toV);                                 
             }
+
 
             nctx->revert();
 
@@ -2375,38 +2395,3 @@ void CV::AddStandardConstructors(std::shared_ptr<CV::Stack> &stack){
 }
 
 /* -------------------------------------------------------------------------------------------------------------------------------- */
-
-
-// int main(){
-
-//     auto cursor = std::make_shared<CV::Cursor>();
-//     auto stack = std::make_shared<CV::Stack>();
-//     auto context = stack->createContext();
-//     CV::AddStandardConstructors(stack);
-
-//     // Get text tokens
-//     std::string pre = "bm-create 'RGB' 256 256";
-//     auto tokens = parseTokens(pre,  ' ', cursor);
-//     if(cursor->raise()){
-//         return 1;
-//     }
-
-//     // Compile tokens into its bytecode
-//     auto entry = compileTokens(tokens, stack, context, cursor);
-//     if(cursor->raise()){
-//         return 1;
-//     }
-
-//     // Execute
-//     auto result = stack->execute(entry, context, cursor).value;
-//     if(cursor->raise()){
-//         return 1;
-//     }
-
-
-//     std::cout << CV::ItemToText(stack, result) << std::endl;
-
-//     stack->clear();
-
-//     return 0;
-// }
