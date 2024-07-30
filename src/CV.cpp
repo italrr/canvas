@@ -681,6 +681,7 @@ static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::
             auto &nsName = v[0];
             auto &name = v[1];
             auto nsId = stack->getNamespaceId(nsName);
+
             if(nsId == 0){
                 cursor->setError(imp, "Undefined namespace '"+nsName+"'", token.line);
                 return stack->createInstruction(CV::InstructionType::NOOP, token);                   
@@ -691,14 +692,20 @@ static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::
                 cursor->setError(imp, "Failed to find name '"+name+"' within namespace '"+nsName+"'", token.line);
                 return stack->createInstruction(CV::InstructionType::NOOP, token);                  
             }
-            CV::Token token;
-            token.first = name;
-            token.solved = true;
-            token.line = token.line;
-            return interpretToken(token, tokens, stack, cctx, cursor);
+            CV::Token ntoken;
+            ntoken.first = name;
+            ntoken.solved = token.solved;
+            ntoken.line = token.line;
+            auto ntokens = std::vector<CV::Token>({ntoken});
+            for(int i = 1; i < tokens.size(); ++i){
+                ntokens.push_back(tokens[i]);
+            }
+            auto ins = compileTokens(ntokens, stack, cctx, cursor);
+            return ins;
         }else
         // Is it a name?
         if(ctx->check(imp)){
+
             auto pair = ctx->getIdByName(imp);
             if(pair.ctx == 0 || pair.id == 0){
                 cursor->setError("Fatal Error referencing name '"+imp+"'", "Name was not found on this context or above", token.line);
@@ -1030,7 +1037,6 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
         std::string lprefix = tokens[2].first;
 
         auto ns = stack->createNamespace(ctx, lname, lprefix);
-
         auto nctx = stack->contexts[ns->ctx];
         auto ins = stack->createInstruction(CV::InstructionType::DS_DEFINE_NAMESPACE, tokens[0]);
         ins->data.push_back(nctx->id);
@@ -1058,12 +1064,21 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
             if(cursor->raise()){
                 return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
             }
-            auto memberId = nctx->promise();
-            nctx->setName(mname, memberId);
+            unsigned memberId = 0;
+            unsigned type = 0;
             ins->parameter.push_back(v->id);
+            if(v->type == CV::InstructionType::STATIC_PROXY){
+                memberId = v->data[1];
+                type = 0;
+            }else{                
+                memberId =  nctx->promise();
+                type = 1;
+            }
             ins->data.push_back(memberId);
-        }
+            ins->data.push_back(type);
+            nctx->setName(mname, memberId);
 
+        }
 
         return ins;
     });     
@@ -1751,12 +1766,15 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
         case CV::InstructionType::DS_DEFINE_NAMESPACE: {
             auto nctx = stack->contexts[ins->data[0]];
             for(int i = 0; i < ins->parameter.size(); ++i){
-                auto memId = ins->data[2 + i];
+                auto memId = ins->data[2 + i*2 + 0];
+                auto type = ins->data[2 + i*2 + 1];
                 auto v = stack->execute(stack->instructions[ins->parameter[i]], nctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }    
-                nctx->setPromise(memId, v);
+                if(type != 0){
+                    nctx->setPromise(memId, v);
+                }
             }
 
             return ctx->buildNil();

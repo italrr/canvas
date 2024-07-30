@@ -1,7 +1,5 @@
-[import 'src/libs/core.cv']
-
 [namespace Library lb
-    [var:5]
+    [test:[fn [n][+ n 1]]]
 ]
 
-[io:out [++ lb:var]]
+[io:out [[lb:test 5]]]
