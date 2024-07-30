@@ -1074,9 +1074,11 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
                 memberId =  nctx->promise();
                 type = 1;
             }
-            ins->data.push_back(memberId);
-            ins->data.push_back(type);
             nctx->setName(mname, memberId);
+            ins->data.push_back(type);
+            ins->data.push_back(nctx->id);
+            ins->data.push_back(memberId);
+            
 
         }
 
@@ -1766,13 +1768,15 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
         case CV::InstructionType::DS_DEFINE_NAMESPACE: {
             auto nctx = stack->contexts[ins->data[0]];
             for(int i = 0; i < ins->parameter.size(); ++i){
-                auto memId = ins->data[2 + i*2 + 0];
-                auto type = ins->data[2 + i*2 + 1];
+                auto type = ins->data[2 + i*3 + 0];
+                auto cctx = ins->data[2 + i*3 + 1];
+                auto memId = ins->data[2 + i*3 + 2];
+                
                 auto v = stack->execute(stack->instructions[ins->parameter[i]], nctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }    
-                if(type != 0){
+                if(type == 1){
                     nctx->setPromise(memId, v);
                 }
             }
@@ -1837,6 +1841,8 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
             bool variadic = ins->data[2];
             auto fnIns = stack->instructions[ins->parameter[0]];
 
+            nctx->revert();
+
             for(int i = 1; i < ins->parameter.size(); ++i){
                 auto cins = stack->instructions[ins->parameter[i]];
                 auto v = stack->execute(cins, nctx, cursor).value;
@@ -1857,8 +1863,6 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
             if(cursor->raise()){
                 return ctx->buildNil();
             }
-
-            nctx->revert();
 
             return CV::ControlFlow(r.value, CV::ControlFlowType::CONTINUE);
 
