@@ -574,8 +574,6 @@ static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::
 
     auto &imp = token.first;
 
-    
-
     // Infere for natural types
     if(imp == "nil" && tokens.size() == 1){
         auto ins = stack->createInstruction(CV::InstructionType::STATIC_PROXY, token);
@@ -658,7 +656,7 @@ static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::
         auto cons = stack->constructors[imp];
         return cons(imp, tokens, stack, ctx, cursor);
     }else
-    if(auto bf = stack->getRegisteredFunction(stack, tokens[0])){
+    if(auto bf = stack->getRegisteredFunction(stack, token)){
         auto ins = stack->createInstruction(CV::InstructionType::CF_INVOKE_BINARY_FUNCTION, token);
         auto nctx = stack->createContext(ctx.get());
         ins->data.push_back(nctx->id);
@@ -702,9 +700,8 @@ static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::
             return ins;
         }else
         // Is it a name?
-        if(ctx->check(stack, tokens[0])){
-
-            auto pair = ctx->getIdByName(stack, tokens[0]);
+        if(ctx->check(stack, token)){
+            auto pair = ctx->getIdByName(stack, token);
             if(pair.ctx == 0 || pair.id == 0){
                 cursor->setError("Fatal Error referencing name '"+imp+"'", "Name was not found on this context or above", token.line);
                 return stack->createInstruction(CV::InstructionType::NOOP, token);     
@@ -1118,7 +1115,6 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
             return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
         }
         ins->parameter.push_back(source->id);
-
         // Process code
         auto code = interpretToken(tokens[tokens.size()-1], {tokens[tokens.size()-1]}, stack, nctx, cursor);
         if(cursor->raise()){
@@ -1445,7 +1441,7 @@ bool CV::Context::check(const std::shared_ptr<CV::Stack> &stack, const CV::Token
     // Check for names
     if(token.ns == 0){
         auto dv = this->dataIds.count(token.first);
-        auto bfv = stack->bfIds.count(token.first); 
+        auto bfv = stack->bfIds.count(token.first);      
         if(dv == 0 && bfv == 0){
             return this->top && this->top->check(stack, token);
         }
