@@ -1,2 +1,6 @@
-[let n 7]
-[io:out [1 2 3 n] '\n']
+[namespace Library lb
+    [test:[fn [n][+ n 5]]]
+    [nu:10]
+]
+
+[io:out [lb:test lb:nu] '\n']

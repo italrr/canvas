@@ -1,14 +1,14 @@
 [import 'src/libs/core.cv'] # bring in mutators
 
 [for i from 1 to 50 [
-    [if [eq [m-mod i 3] 0][
+    [if [eq [math:mod i 3] 0][
         [io-out 'fizz ' i '\n']
     ]
-        [if [eq [m-mod i 5] 0][
+        [if [eq [math:mod i 5] 0][
             [io-out 'buzz ' i '\n']
         ]]        
     ]
-    [if [eq [m-mod i 15] 0][
-        [io-out 'fizzbuzz ' i '\n']
+    [if [eq [math:mod i 15] 0][
+        [io:out 'fizzbuzz ' i '\n']
     ]]     
 ]]

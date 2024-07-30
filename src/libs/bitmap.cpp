@@ -15,9 +15,9 @@
 */
 
 
-void __CV_REGISTER_STANDARD_BITMAP_FUNCTIONS(std::shared_ptr<CV::Context> &topCtx, std::shared_ptr<CV::Stack> &stack){
+void __CV_REGISTER_STANDARD_BITMAP_FUNCTIONS(std::shared_ptr<CV::Stack> &stack){
 
-    auto ns = stack->createNamespace(topCtx, "Standard Bitmap Library", "bm");
+    auto ns = stack->createNamespace("Standard Bitmap Library", "bm");
 
 
     stack->registerFunction(ns->id, "create", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
