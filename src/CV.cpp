@@ -696,8 +696,7 @@ static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::
                 ntokens.push_back(tokens[i]);
             }
             // TODO
-            auto ins = compileTokens(ntokens, stack, ctx, cursor);
-            return ins;
+            return compileTokens(ntokens, stack, ctx, cursor);
         }else
         // Is it a name?
         if(ctx->check(stack, token)){
@@ -1917,7 +1916,7 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
                 ctx->transferFrom(stack, v);
             }
 
-            // stack->deleteContext(nctx->id);
+            stack->deleteContext(nctx->id);
 
             return CV::ControlFlow(v ? v : ctx->buildNil(), ncf);
         };      
@@ -2007,7 +2006,7 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
                 ctx->transferFrom(stack, v);
             }            
 
-            // stack->deleteContext(nctx->id);
+            stack->deleteContext(nctx->id);
 
             return CV::ControlFlow(v ? v : ctx->buildNil(), ncf);
         }; 
@@ -2100,7 +2099,7 @@ static CV::ControlFlow __execute(CV::Stack *stack, CV::Instruction *ins, std::sh
                 ctx->transferFrom(stack, v);
             }
 
-            // stack->deleteContext(nctx->id);
+            stack->deleteContext(nctx->id);
 
             return CV::ControlFlow(v ? v : ctx->buildNil(), ncf);
         }; 
