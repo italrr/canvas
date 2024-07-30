@@ -22,9 +22,9 @@ static void ___GET_STDIN(std::string &v){
     std::cin >> v;
 }  
 
-void __CV_REGISTER_STANDARD_BINARY_FUNCTIONS(std::shared_ptr<CV::Context> &topCtx, std::shared_ptr<CV::Stack> &stack){
+void __CV_REGISTER_STANDARD_BINARY_FUNCTIONS(std::shared_ptr<CV::Stack> &stack){
 
-    auto ns = stack->createNamespace(topCtx, "Standard IO Library", "io");
+    auto ns = stack->createNamespace("Standard IO Library", "io");
 
     stack->registerFunction(ns->id, "out", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
         std::string out = "";

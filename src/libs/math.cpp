@@ -11,9 +11,9 @@
 
 */
 
-void __CV_REGISTER_MATH_BINARY_FUNCTIONS(std::shared_ptr<CV::Context> &topCtx, std::shared_ptr<CV::Stack> &stack){
+void __CV_REGISTER_MATH_BINARY_FUNCTIONS(std::shared_ptr<CV::Stack> &stack){
 
-    auto ns = stack->createNamespace(topCtx, "Standard Math Library", "math");
+    auto ns = stack->createNamespace("Standard Math Library", "math");
 
     stack->registerFunction(ns->id, "sin", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
         

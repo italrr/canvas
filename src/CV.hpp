@@ -178,12 +178,15 @@
             std::string first;
             unsigned line;
             bool solved;
+            unsigned ns;
             Token(){
+                ns = 0;
                 solved = false;
             }
             Token(const std::string &first, unsigned line){
                 this->first = first;
                 this->line = line;
+                this->ns = 0;
                 parse();
             }    
             void parse(){
@@ -277,13 +280,16 @@
         struct ContextDataPair {
             unsigned ctx;
             unsigned id;
+            bool isBinaryFunc;
             ContextDataPair(){
                 ctx = 0;
                 id = 0;
+                isBinaryFunc = false;
             }
-            ContextDataPair(unsigned ctx, unsigned id){
+            ContextDataPair(unsigned ctx, unsigned id, bool isBinaryFunc = false){
                 this->ctx = ctx;
                 this->id = id;
+                this->isBinaryFunc = isBinaryFunc;
             }
         };
         struct Context;
@@ -297,11 +303,21 @@
 
         struct Namespace {
             unsigned id;
-            unsigned ctx;
             std::string name;
             std::string prefix;
+            std::unordered_map<std::string, unsigned> dataIds;
+            void setName(const std::string &name, unsigned id){
+                this->dataIds[name] = id;
+            }
+            unsigned getId(const std::string &name){
+                auto it = dataIds.find(name);
+                if(it == dataIds.end()){
+                    return 0;
+                }
+                return it->second;
+            }
         };
-
+        
         struct Context {
             Context *top;
             unsigned id; 
@@ -309,7 +325,6 @@
             std::unordered_map<unsigned, std::shared_ptr<CV::Item>> data;
             std::unordered_map<std::string, unsigned> dataIds;
             std::unordered_map<unsigned, unsigned> markedItems;
-            std::unordered_map<unsigned, std::shared_ptr<CV::BinaryFunction>> binaryFunctions;
             void deleteData(unsigned id);
             unsigned store(const std::shared_ptr<CV::Item> &item);
             unsigned promise();
@@ -318,10 +333,10 @@
             void setPromise(unsigned id, std::shared_ptr<CV::Item> &item);
             void setName(const std::string &name, unsigned id);
             void deleteName(unsigned id);
-            ContextDataPair getIdByName(const std::string &name);
+            ContextDataPair getIdByName(const std::shared_ptr<CV::Stack> &stack, const CV::Token &token);
             std::shared_ptr<CV::Item> get(unsigned id);
             std::shared_ptr<CV::Item> getByName(const std::string &name);
-            bool check(const std::string &name);
+            bool check(const std::shared_ptr<CV::Stack> &stack, const CV::Token &token);
             void clear();
             std::shared_ptr<CV::Item> buildNil();
             std::shared_ptr<CV::Item> buildNumber(__CV_DEFAULT_NUMBER_TYPE n);
@@ -331,9 +346,6 @@
             std::vector<std::shared_ptr<CV::Item>> originalData;
             void solidify();
             void revert();
-            void registerFunction(const std::string &name, const std::function<std::shared_ptr<CV::Item>(const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>>&, std::shared_ptr<CV::Context>&, std::shared_ptr<CV::Cursor> &cursor)> &fn); 
-            CV::BinaryFunction *getRegisteredFunction(const std::string &name);
-            CV::BinaryFunction *getRegisteredFunction(unsigned id);
         };
         
         struct Instruction {
@@ -366,20 +378,26 @@
             std::unordered_map<unsigned, std::shared_ptr<CV::Context>> contexts;
             std::unordered_map<unsigned, std::shared_ptr<CV::Namespace>> namespaces;
             std::unordered_map<std::string, unsigned> namespaceIds;
+
+            std::unordered_map<unsigned, std::shared_ptr<CV::BinaryFunction>> binaryFunctions;
+            std::unordered_map<std::string, unsigned> bfIds;
+
+            std::shared_ptr<CV::Context> topCtx;
             Stack();
             void clear();
-            std::shared_ptr<CV::Namespace> createNamespace(std::shared_ptr<CV::Context> &topCtx, const std::string &name, const std::string &prefix);
+            std::shared_ptr<CV::Namespace> createNamespace(const std::string &name, const std::string &prefix);
             bool deleteNamespace(const std::string &name);
             unsigned getNamespaceId(const std::string &name);
-
+            void setTopContext(std::shared_ptr<CV::Context> &ctx);
             CV::Instruction *createInstruction(unsigned type, const CV::Token &token);
             std::shared_ptr<CV::Context> createContext(CV::Context *top = NULL);
             std::shared_ptr<CV::Context> getContext(unsigned id) const;
             void deleteContext(unsigned id);
             void registerFunction(unsigned nsId, const std::string &name, const std::function<std::shared_ptr<CV::Item>(const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>>&, std::shared_ptr<CV::Context>&, std::shared_ptr<CV::Cursor> &cursor)> &fn); 
+            CV::BinaryFunction *getRegisteredFunction(const std::shared_ptr<CV::Stack> &stack, const CV::Token &token);
             CV::ControlFlow execute(CV::Instruction *ins, std::shared_ptr<Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);
         };
-        void AddStandardConstructors(std::shared_ptr<CV::Context> &topCtx, std::shared_ptr<CV::Stack> &stack);
+        void AddStandardConstructors(std::shared_ptr<CV::Stack> &stack);
         std::string ItemToText(const std::shared_ptr<CV::Stack> &stack, CV::Item *item);
         void SetUseColor(bool v);
         std::string QuickInterpret(const std::string &input, std::shared_ptr<CV::Stack> &stack, std::shared_ptr<Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);
