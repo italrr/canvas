@@ -1,5 +1,2 @@
-[namespace Library lb
-    [test:[fn [n][+ n 1]]]
-]
-
-[io:out [[lb:test 5]]]
+[let n 7]
+[io:out [1 2 3 n] '\n']
