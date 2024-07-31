@@ -151,6 +151,7 @@
                 OP_LOGIC_AND,
                 OP_LOGIC_OR,
                 OP_DESC_LENGTH,
+                OP_DESC_TYPE,
                 OP_LIST_PUSH,
                 OP_LIST_POP,
                 // LIST
