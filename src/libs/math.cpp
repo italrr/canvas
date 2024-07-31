@@ -15,6 +15,8 @@ void __CV_REGISTER_MATH_BINARY_FUNCTIONS(std::shared_ptr<CV::Stack> &stack){
 
     auto ns = stack->createNamespace("LibMath", "math");
 
+    ns->setName("PI", stack->topCtx->buildNumber(3.14159265358979323846)->id);
+
     stack->registerFunction(ns->id, "sin", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
         
         if(args.size() != 1){

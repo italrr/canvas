@@ -18,79 +18,37 @@ def run_test(test):
     return (( p.stdout.replace('\n', '') == test.expected if test.expEqual else p.stdout != test.expected ), p.stdout.replace('\n', ''))
 
 cases = [
-    # Test function definition
-    TestCase("fn [a b c][+ a b c]", "[fn [a b c] [[+ a b c]]]", True),
+    # Test let & mut
+    TestCase("[let n 5][+ n n]", "10", True),
+    TestCase("[let n 5][mut n [+ n 16]][n]", "21", True),
     
-    # Test Context definion and access
-    TestCase("[set a [fn [a b c][+ a b c]]][a 1 2 3]", "6", True),
+    # Test Arithmetic & sub chained expressions
+    TestCase("[+ 2 2]", "4", True),
+    TestCase("[+ 2 [+ 2 2]]", "6", True),
+    TestCase("[+ 2 [+ 2 [+ 2 2]]]", "8", True),
+    TestCase("[+ 2 [+ 2 [+ 2 2]]]", "8", True),
+
+    # Test embdded binary functions & namespaces
+    TestCase("[io:out 'This is a TEST']", "This is a TESTnil", True),
+    TestCase("[math:cos math:PI]", "-1", True),
+    TestCase("[namespace Lib lb [var:5]][lb:var]", "5", True),
+    TestCase("[namespace Lib lb [var:[fn [][25]]]][lb:var]", "25", True),
     
-    # Test `type` trait
-    TestCase("5|type", "'NUMBER'", True),
-    TestCase("'test'|type", "'STRING'", True),
-    TestCase("[1 2 3]|type", "'LIST'", True),
-    TestCase("[ct 10]|type", "'CONTEXT'", True),
+    # Test lists
+    TestCase("[1 2 3 4]", "[1 2 3 4]", True),
+    TestCase("[1 2 3 4]", "[1 2 3 4]", True),
+    TestCase(">> [1 2 3 4] 2", "[2 [1 2 3 4]]", True),
+    TestCase("<< [1 2 3 4] 2", "[1 2 3 4 2]", True),
+    TestCase("<< 1 2 3", "[1 2 3]", True),
 
-    # Test loops
-    TestCase("[set k 50][do [gt [-- k] 0] [io:out k]]", "49484746454443424140393837363534333231302928272625242322212019181716151413121110987654321nil", True),
+    # Test dynamic library
+    TestCase("[import 'lib/bm.cv'][let img [bm:create 3 25 25]]", "[0 0 0 0 0 0 0 0 0 0 ...(1865 hidden)]", True),
 
-    # Arithmetic
-    TestCase("+ 1 1", "2", True),
-    TestCase("- 5 2", "3", True),
-    TestCase("* 0.5 100", "50", True),
-    TestCase("/ 3.5 3.5", "1", True),
-    TestCase("** 2", "2", False),
-    TestCase("/ 1 0", "nil'/': Division by zero.", False),
-
-    # l-gen and ANY_NUMBER trait
-    TestCase("l-gen 1 10", "[1 2 3 4 5 6 7 8 9 10]", True),    
-    TestCase("[l-gen 1 100]|50", "51", True),
-
-    # Expand
-    TestCase("+ [l-gen 1 100]^", "5050", True),
-
-    # Complex list definition
-    TestCase("[1 2 [3 4 [5 6 [7 8 [9 10 [11 12]]]]]]", "[1 2 [3 4 [5 6 [7 8 [9 10 [11 12]]]]]]", True),
-
-    # Complex list defition and trait stress test
-    TestCase("[set k 10][+ k k][set w [ct 1500~n]][w: [** n]][set m [k w]][+ m|0|inv w:n]", "2249990", True),
-
-    # l-flat
-    TestCase("l-flat [1 2 [3 4 [5 6 [7 8 [9 10 [11 12]]]]]]", "[1 2 3 4 5 6 7 8 9 10 11 12]", True),
-
-    # Test List `reverse` trait
-    TestCase("[1 2 3]|reverse", "[3 2 1]", True),
-    TestCase("[l-gen 1 10]|reverse", "[10 9 8 7 6 5 4 3 2 1]", True),
-
-
-    # String definition
-    TestCase("'string test'", "'string test'", True),
-
-    # Test String `reverse` trait
-    TestCase("'string test'|reverse", "'tset gnirts'", True),
-
-    # Logic operators
-    TestCase("gt 10 5", "1", True),
-    TestCase("gte 8 8 5", "1", True),
-    TestCase("eq 5.2 1.2", "0", True),
-
-    # test ref
-    TestCase("ref l-sort", "[fn [c l] [BINARY]]", True),
-
-    # with / untether
-    TestCase("[with [untether [+ [l-gen 1 1000]^]] [+ 1 inherited]]|await", "500501", True), 
-    
-    # with / async
-    TestCase("[with [with [async [+ 0 1]] [+ inherited 1]] [+ inherited 1]]|await", "3", True),
-
-    # Function passing
-    TestCase("[set test [fn [t][t 1 1 1]]][test +]", "3", True),
-
-    # Function from context passing
-    TestCase("[set test [fn [t][t 1 1 1]]][test math:sin]", "[0.84147098 0.84147098 0.84147098]", True),      
-
-
-    # Function passing to binary functions
-    TestCase("l-filter [fn [n][math:mod n 2]] [l-gen 1 10]", "[2 4 6 8 10]", True)      
+    # Test loops & interrupts
+    TestCase("[for i from 1 to 10 [io:out i]]", "12345678910nil", True),
+    TestCase("[import 'lib/core.cv'][let n 5][do [gt n 0][-- n]]", "0", True),
+    TestCase("[let list [1 2 3 4 5]][iter i in list [io:out [<< i i]]]", "[1 1][2 2][3 3][4 4][5 5]nil", True),
+    TestCase("[import 'lib/core.cv'][let n 5][do [gt n 0][[-- n][if [eq n 2][skip][io:out n]]]]", "4310nil", True)
 ]
 
 print("ABOUT TO START TEST CASES FOR CANVAS")
