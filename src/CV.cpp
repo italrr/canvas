@@ -1002,7 +1002,27 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
         auto ins = stack->createInstruction(CV::InstructionType::OP_DESC_LENGTH, tokens[0]);
         ins->parameter.push_back(subject->id);
         return ins;
-    });      
+    });   
+
+
+    /*
+        type
+    */
+    DefConstructor(stack, "type", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+        if(tokens.size() != 2){
+            cursor->setError(name, "Expects exactly 1 argument", tokens[0].line);
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+        }
+        // Process subject
+        auto subject = interpretToken(tokens[1], {tokens[1]}, stack, ctx, cursor);
+        if(cursor->raise()){
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
+        }       
+        // Process code
+        auto ins = stack->createInstruction(CV::InstructionType::OP_DESC_TYPE, tokens[0]);
+        ins->parameter.push_back(subject->id);
+        return ins;
+    });          
 
 
     /*
@@ -2510,7 +2530,19 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             }
 
             return ctx->buildNumber(v->size);
+        };     
+
+        case CV::InstructionType::OP_DESC_TYPE: {
+            auto &subject = ins->parameter[0];
+
+            auto v = CV::execute(stack->instructions[subject], stack, ctx, cursor).value;
+            if(cursor->raise()){
+                return ctx->buildNil();
+            }
+
+            return ctx->buildString(CV::NaturalType::name(v->type));
         };                                           
+
 
         case CV::InstructionType::OP_LIST_POP:
         case CV::InstructionType::OP_LIST_PUSH: {
