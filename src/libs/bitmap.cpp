@@ -1,4 +1,3 @@
-#include <iostream>
 #include <fstream>
 
 #define STB_IMAGE_STATIC
@@ -10,15 +9,9 @@
 
 #include "../CV.hpp"
 
-/*
-    Here we should register all binary functions that are part of the standard
-*/
+extern "C" void _CV_REGISTER_LIBRARY(const std::shared_ptr<CV::Stack> &stack){
 
-
-void __CV_REGISTER_STANDARD_BITMAP_FUNCTIONS(std::shared_ptr<CV::Stack> &stack){
-
-    auto ns = stack->createNamespace("Standard Bitmap Library", "bm");
-
+    auto ns = stack->createNamespace("LibBitmap", "bm");
 
     stack->registerFunction(ns->id, "create", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
         

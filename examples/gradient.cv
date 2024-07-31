@@ -1,4 +1,5 @@
-[import 'src/libs/core.cv'] # bring in mutators
+[import 'lib/bm.cv']
+[import 'lib/core.cv'] # bring in mutators
 
 [let width 512]
 [let height 512]

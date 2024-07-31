@@ -11,17 +11,18 @@
     #define __CV_DEFAULT_NUMBER_TYPE float  
     static const __CV_DEFAULT_NUMBER_TYPE CANVAS_LANG_VERSION[3] = { 0, 3, 0 };
 
+    #define _CV_PLATFORM_TYPE_LINUX 0
+    #define _CV_PLATFORM_TYPE_WINDOWS 1
+    #define _CV_PLATFORM_TYPE_OSX 2
+    #define _CV_PLATFORM_TYPE_UNDEFINED 4
+
     namespace CV {
-
-        namespace Tools {
-            std::string readFile(const std::string &path);
-        }
-
         namespace SupportedPlatform {
             enum SupportedPlatform : int {
                 WINDOWS,
                 LINUX,
-                OSX
+                OSX,
+                UNKNOWN
             };
             static std::string name(int plat){
                 switch(plat){
@@ -29,6 +30,8 @@
                         return "WINDOWS";
                     case SupportedPlatform::LINUX:
                         return "LINUX";
+                    case SupportedPlatform::OSX:
+                        return "OSX";                        
                     default:
                         return "UNKNOWN";
                 }
@@ -62,7 +65,7 @@
         #if defined(__i386__) || defined(__i686__)
             const static int ARCH = SupportedArchitecture::X86;
         #elif defined(__x86_64__) || defined(__amd64__)
-            const static int ARCH = SupportedArchitecture::X86_64;
+            const static int ARCH = CV::SupportedArchitecture::X86_64;
         #elif defined(__arm__)
             const static int ARCH = SupportedArchitecture::ARM;
         #elif defined(__aarch64__)
@@ -70,15 +73,24 @@
         #else
             const static int ARCH = SupportedArchitecture::UNKNOWN;
         #endif
-
+        
         #ifdef _WIN32
             const static int PLATFORM = SupportedPlatform::WINDOWS;
+            #define _CV_PLATFORM _CV_PLATFORM_TYPE_WINDOWS
         #elif __linux__
-            const static int PLATFORM = SupportedPlatform::LINUX;
+            const static int PLATFORM = CV::SupportedPlatform::LINUX;
+            #define _CV_PLATFORM _CV_PLATFORM_TYPE_LINUX
         #else
             const static int PLATFORM = SupportedPlatform::UNSUPPORTED;
-        #endif    
+            #define _CV_PLATFORM _CV_PLATFORM_TYPE_UNDEFINED
+        #endif  
+    }
 
+    namespace CV {
+
+        namespace Tools {
+            std::string readFile(const std::string &path);
+        }  
 
         namespace NaturalType {
             enum NaturalType : unsigned {
