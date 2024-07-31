@@ -5,11 +5,11 @@ project(cv CXX C)
 set(CMAKE_C_FLAGS "-g")
 set(CMAKE_CXX_FLAGS "-std=c++11 -g")
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/builds/cmake)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib/)
 
-# src
 set (cv_src 
-            src/libs/std.cpp
-            src/libs/bitmap.cpp
+            # Compile io and math into binary
+            src/libs/io.cpp
             src/libs/math.cpp
             src/canvas.cpp)
 
@@ -30,3 +30,9 @@ ENDIF(MINGW)
 
 add_executable(cv src/CV.cpp)
 target_link_libraries(cv cv_bin)
+
+# LIBRARIES
+# -------------------------------------------------------------------------- #
+
+# bitmap
+add_library(bm SHARED src/libs/bitmap.cpp)

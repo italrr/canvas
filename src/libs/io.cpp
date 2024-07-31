@@ -24,7 +24,7 @@ static void ___GET_STDIN(std::string &v){
 
 void __CV_REGISTER_STANDARD_BINARY_FUNCTIONS(std::shared_ptr<CV::Stack> &stack){
 
-    auto ns = stack->createNamespace("Standard IO Library", "io");
+    auto ns = stack->createNamespace("LibIO", "io");
 
     stack->registerFunction(ns->id, "out", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
         std::string out = "";

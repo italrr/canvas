@@ -3,6 +3,9 @@
 #include <sys/stat.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <dlfcn.h> 
 
 #include "CV.hpp"
 
@@ -17,7 +20,7 @@
 
 static const std::string GENERIC_UNDEFINED_SYMBOL_ERROR = "Undefined constructor or name within this context or above";
 static bool useColorOnText = true;
-
+static std::vector<void*> loadedLibraries;
 
 /* -------------------------------------------------------------------------------------------------------------------------------- */
 // Tools
@@ -604,6 +607,82 @@ static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::
         ins->data.push_back(ctx->id);
         ins->data.push_back(ctx->store(std::static_pointer_cast<CV::Item>(string)));
         return ins;
+    }else
+    // Used to dynamically load libraries
+    if(imp == "__cv_load_dynamic_library"){
+        // look into ./lib/ only for now
+        // TODO: add ability to load from system files
+        if(tokens.size() != 2){
+            cursor->setError(imp, "Expected exactly 1 argument ("+imp+" FILENAME (no .so or .dll))", token.line);
+            return stack->createInstruction(CV::InstructionType::NOOP, token);   
+        }  
+        // Pre-process argument 0
+        auto p0entry = compileTokens({tokens[1]}, stack, ctx, cursor);
+        if(cursor->raise()){
+            return stack->createInstruction(CV::InstructionType::NOOP, token);   
+        }
+        // Execute
+        auto p0result = CV::execute(p0entry, stack, ctx, cursor).value;
+        if(cursor->raise()){
+            return stack->createInstruction(CV::InstructionType::NOOP, token);   
+        }
+        if(p0result->type != CV::NaturalType::STRING){
+            cursor->setError(imp, "Argument 0 expected to be STRING", token.line);
+            return stack->createInstruction(CV::InstructionType::NOOP, token);   
+        }
+
+        auto fname = std::static_pointer_cast<CV::StringType>(p0result)->get();
+
+        std::string path = "./lib/" + fname;
+        switch(CV::PLATFORM){
+            case CV::SupportedPlatform::LINUX: {
+                path += ".so";
+            } break; 
+            case CV::SupportedPlatform::WINDOWS: {
+                path += ".dll";
+            } break;
+            case CV::SupportedPlatform::OSX: {
+                // TODO
+            } break;                
+            default:
+            case CV::SupportedPlatform::UNKNOWN: {
+                fprintf(stderr, "%s: Unable to load dyanmic library for this platform (UNKNOWN/UNDEFINED).", imp.c_str());
+                std::exit(1);
+            } break;                        
+        }
+
+        if(!CV::Tools::fileExists(path)){
+            cursor->setError(imp, "No dynamic library '"+fname+"' was found", token.line);
+            return stack->createInstruction(CV::InstructionType::NOOP, token);   
+        }
+
+        // Load library (depending on the platform)
+        #if (_CV_PLATFORM == _CV_PLATFORM_TYPE_LINUX)
+            void (*registerlibrary )(const std::shared_ptr<CV::Stack> &stack);
+            void* handle = NULL;
+            const char* error = NULL;
+            handle = dlopen(path.c_str(), RTLD_LAZY);
+            if(!handle){
+                fprintf( stderr, "Failed to load dynamic library %s: %s\n", fname.c_str(), dlerror());
+                std::exit(1);
+            }
+            dlerror();
+            registerlibrary = (void (*)(const std::shared_ptr<CV::Stack> &stack)) dlsym( handle, "_CV_REGISTER_LIBRARY" );
+            error = dlerror();
+            if(error){
+                fprintf( stderr, "Failed to load dynamic library '_CV_REGISTER_LIBRARY' from '%s': %s\n", fname.c_str(), error);
+                dlclose(handle);
+                std::exit(1);
+            }
+            // Try to load
+            (*registerlibrary)(stack);
+
+            loadedLibraries.push_back(handle);
+        #elif  (_CV_PLATFORM == _CV_PLATFORM_TYPE_WINDOWS)
+
+        #endif
+
+        return stack->createInstruction(CV::InstructionType::NOOP, token);   
     }else
     // Import?
     if(imp == "import"){
@@ -2778,7 +2857,6 @@ std::string CV::QuickInterpret(const std::string &input, const std::shared_ptr<C
     return text;
 }
 
-void __CV_REGISTER_STANDARD_BITMAP_FUNCTIONS(std::shared_ptr<CV::Stack> &stack);
 void __CV_REGISTER_STANDARD_BINARY_FUNCTIONS(std::shared_ptr<CV::Stack> &stack);
 void __CV_REGISTER_MATH_BINARY_FUNCTIONS(std::shared_ptr<CV::Stack> &stack);
 void CV::AddStandardConstructors(std::shared_ptr<CV::Stack> &stack){
@@ -2787,7 +2865,6 @@ void CV::AddStandardConstructors(std::shared_ptr<CV::Stack> &stack){
 
     __addStandardConstructors(stack);
     __CV_REGISTER_STANDARD_BINARY_FUNCTIONS(stack);
-    __CV_REGISTER_STANDARD_BITMAP_FUNCTIONS(stack);
     __CV_REGISTER_MATH_BINARY_FUNCTIONS(stack);
 }
 
