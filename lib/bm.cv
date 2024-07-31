@@ -1,4 +1,4 @@
-
+# Entire library is binary
 [
     __cv_load_dynamic_library 'libbm'
 ]
