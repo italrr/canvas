@@ -1,0 +1,9 @@
+
+[obj 
+    [var1:'text']
+    [var2:[
+        obj
+    ]]
+]
+
+

@@ -3,10 +3,12 @@
 canvas is dynamic, high level, general-purpose, programming language designed and developed by me. canvas is heavily inspired by JavaScript, LISP and Python. It features a form of JIT compiler to speed up execution.
 
 canvas is:
-- Prefix Notation.
-- Lists are very important.
-- No classes, no objects. OOP nada. Purely function and procedurally defined.
-- Namespaces.
+- Prefix Notation. `[STATEMENT ARGUMENT0...ARGUMENTN]`
+- Brackets used to separate statements. 
+- Lists are very important. `[1 2 3]`
+- `Store` entities that work similar to JSON objects. `store a:5 b:10`
+- No OOP. Stores cannot contain functions, only data. The language discourages any type of OOP convention.
+- Namespaces used to organize hierarchies. `[namespace a:100 b:[fn [n][+ n n]]]`
 - Import/Library support.
 - Mostly immutable. There are SOME exceptions. In theory only NUMBERs and STRINGs can be fully mutated (changing memory's content without altering IDs).
 - Recursion highly encouraged.
@@ -14,12 +16,18 @@ canvas is:
 - Intended for scripting, but capable of general software development.
 - Very basic garbage collection using C++'s reference counting through std::memory.
 - Errors are handled by checking return types (nil, 1, 0 etc).
-- Every statement must be within their brackets to avoid unintentional behavior.
 - Parallelism and concurrency are first class citizens (WIP)
 
 This is what a _hello world_ looks in canvas:
 ```
 io:out 'Hello World!\n'
+```
+
+Simple arithmetic operations any number of real numbers:
+```
++ 2 2
+[* 2 [+ 2 2]]
+/ 100 2 2 2
 ```
 
 # Why?
