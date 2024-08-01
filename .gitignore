@@ -4,6 +4,7 @@ cvint.exe
 cvint
 cmake_install.cmake
 CMakeFiles/*
+lib/*.so
 Makefile
 cv.exe
 CMakeCache.txt

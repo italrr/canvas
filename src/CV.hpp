@@ -100,6 +100,7 @@
                 LIST,
                 FUNCTION,
                 NIL,
+                STORE
             };
             static std::string name(unsigned type){
                 switch(type){
@@ -117,7 +118,10 @@
                     };  
                     case CV::NaturalType::NIL: {
                         return "NIL";
-                    };                                                                               
+                    };  
+                    case CV::NaturalType::STORE: {
+                        return "STORE";
+                    };                                                                                                   
                     default:
                     case CV::NaturalType::UNDEFINED: {
                         return "UNDEFINED";
@@ -135,9 +139,8 @@
                 MUT,                    // Mutator
                 CONSTRUCT_LIST,
                 CONSTRUCT_FUNCTION,
-                // DATA STORAGE
-                DS_DEFINE_NAMESPACE,
-                DS_NAMESPACE_ADD_MEMBER,
+                CONSTRUCT_NAMESPACE,
+                CONSTRUCT_STORE,
                 // CONTROL FLOW
                 CF_INVOKE_FUNCTION,
                 CF_INVOKE_BINARY_FUNCTION,
@@ -175,6 +178,32 @@
             };
         };     
 
+        namespace ControlFlowType {
+            enum ControlFlowType : unsigned {
+                CONTINUE,
+                SKIP,
+                YIELD,
+                RETURN
+            };
+            static unsigned type(unsigned ins){
+                switch(ins){
+                    case CV::InstructionType::CF_INT_SKIP: {
+                        return CV::ControlFlowType::SKIP;
+                    };
+                    case CV::InstructionType::CF_INT_RETURN: {
+                        return CV::ControlFlowType::RETURN;
+                    };
+                    case CV::InstructionType::CF_INT_YIELD: {
+                        return CV::ControlFlowType::YIELD;
+                    };
+                    default: {
+                        return CV::ControlFlowType::CONTINUE;
+                    };                                                            
+                }
+            }
+        }
+
+
         struct Item;
         struct Cursor {
             std::mutex accessMutex;
@@ -195,14 +224,17 @@
             unsigned line;
             bool solved;
             unsigned ns;
+            unsigned store;
             Token(){
                 ns = 0;
+                store = 0;
                 solved = false;
             }
             Token(const std::string &first, unsigned line){
                 this->first = first;
                 this->line = line;
                 this->ns = 0;
+                this->store = 0;
                 parse();
             }    
             void parse(){
@@ -214,6 +246,31 @@
         /* -------------------------------------------------------------------------------------------------------------------------------- */
         // Types
 
+        struct ControlFlow {
+            std::shared_ptr<CV::Item> value;
+            unsigned type;
+            ControlFlow(){
+                this->value = NULL;
+            }
+            ControlFlow(const std::shared_ptr<CV::Item> &v, unsigned type = CV::ControlFlowType::CONTINUE){
+                this->value = v;
+                this->type = type;
+            }
+        };
+
+        struct ContextDataPair {
+            unsigned ctx;
+            unsigned id;
+            ContextDataPair(){
+                ctx = 0;
+                id = 0;
+            }
+            ContextDataPair(unsigned ctx, unsigned id, bool isBinaryFunc = false){
+                this->ctx = ctx;
+                this->id = id;
+            }
+        };        
+
         struct Item {
             unsigned id;
             unsigned ctx;
@@ -222,7 +279,7 @@
             unsigned bsize;
             void *data;
             Item();
-            void clear();
+            virtual void clear();
             virtual std::shared_ptr<CV::Item> copy();
             virtual void restore(std::shared_ptr<CV::Item> &item);
         };
@@ -254,61 +311,19 @@
             void restore(std::shared_ptr<CV::Item> &tem);            
         };
 
+        struct StoreType : Item {
+            std::unordered_map<std::string, CV::ContextDataPair> dataIds;
+            StoreType();
+            void setName(const std::string &name, unsigned id, unsigned ctx);
+            CV::ContextDataPair getId(const std::string &name);
+            std::shared_ptr<CV::Item> copy();
+            void restore(std::shared_ptr<CV::Item> &tem);    
+            void clear();                
+        };
+
         /* -------------------------------------------------------------------------------------------------------------------------------- */
         // JIT Stuff
 
-        namespace ControlFlowType {
-            enum ControlFlowType : unsigned {
-                CONTINUE,
-                SKIP,
-                YIELD,
-                RETURN
-            };
-            static unsigned type(unsigned ins){
-                switch(ins){
-                    case CV::InstructionType::CF_INT_SKIP: {
-                        return CV::ControlFlowType::SKIP;
-                    };
-                    case CV::InstructionType::CF_INT_RETURN: {
-                        return CV::ControlFlowType::RETURN;
-                    };
-                    case CV::InstructionType::CF_INT_YIELD: {
-                        return CV::ControlFlowType::YIELD;
-                    };
-                    default: {
-                        return CV::ControlFlowType::CONTINUE;
-                    };                                                            
-                }
-            }
-        }
-
-        struct ControlFlow {
-            std::shared_ptr<CV::Item> value;
-            unsigned type;
-            ControlFlow(){
-                this->value = NULL;
-            }
-            ControlFlow(const std::shared_ptr<CV::Item> &v, unsigned type = CV::ControlFlowType::CONTINUE){
-                this->value = v;
-                this->type = type;
-            }
-        };
-
-        struct ContextDataPair {
-            unsigned ctx;
-            unsigned id;
-            bool isBinaryFunc;
-            ContextDataPair(){
-                ctx = 0;
-                id = 0;
-                isBinaryFunc = false;
-            }
-            ContextDataPair(unsigned ctx, unsigned id, bool isBinaryFunc = false){
-                this->ctx = ctx;
-                this->id = id;
-                this->isBinaryFunc = isBinaryFunc;
-            }
-        };
         struct Context;
         struct BinaryFunction {
             std::string name;
@@ -350,14 +365,17 @@
             void setPromise(unsigned id, std::shared_ptr<CV::Item> &item);
             void setName(const std::string &name, unsigned id);
             void deleteName(unsigned id);
-            ContextDataPair getIdByName(const std::shared_ptr<CV::Stack> &stack, const CV::Token &token);
+            CV::ContextDataPair getIdByName(const std::shared_ptr<CV::Stack> &stack, const CV::Token &token);
+            unsigned getIdName(const std::string &name);
             std::shared_ptr<CV::Item> get(unsigned id);
             std::shared_ptr<CV::Item> getByName(const std::string &name);
             bool check(const std::shared_ptr<CV::Stack> &stack, const CV::Token &token);
+            bool check(const std::string &name);
             void clear();
             std::shared_ptr<CV::Item> buildNil();
             std::shared_ptr<CV::Item> buildNumber(__CV_DEFAULT_NUMBER_TYPE n);
             std::shared_ptr<CV::Item> buildString(const std::string &n);
+            std::shared_ptr<CV::Item> buildStore();
             Context();
             void transferFrom(CV::Stack *stack, std::shared_ptr<CV::Item> &item);
             void transferFrom(std::shared_ptr<CV::Stack> &stack, std::shared_ptr<CV::Item> &item);
@@ -404,6 +422,7 @@
             Stack();
             void clear();
             std::shared_ptr<CV::Namespace> createNamespace(const std::string &name, const std::string &prefix);
+            std::shared_ptr<CV::StoreType> createStore();
             bool deleteNamespace(const std::string &name);
             unsigned getNamespaceId(const std::string &name);
             void setTopContext(std::shared_ptr<CV::Context> &ctx);

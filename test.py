@@ -1,6 +1,6 @@
 import subprocess
 
-CV_BINARY_PATH = "./cv";
+CV_BINARY_PATH = "./cv"
 
 class TestCase:
     name = None

@@ -425,6 +425,59 @@ void CV::FunctionType::restore(std::shared_ptr<CV::Item> &item){
     // Does nothing (cannot be copied)
 }
 
+// STORE
+CV::StoreType::StoreType(){
+    this->type = CV::NaturalType::STORE;
+    this->size = this->dataIds.size();
+}
+
+void CV::StoreType::setName(const std::string &name, unsigned id, unsigned ctx){
+    this->dataIds[name] = CV::ContextDataPair(ctx, id);
+    this->size = this->dataIds.size();
+}
+
+CV::ContextDataPair CV::StoreType::getId(const std::string &name){
+    auto it = dataIds.find(name);
+    if(it == dataIds.end()){
+        return CV::ContextDataPair();
+    }
+    return it->second;
+}
+
+std::shared_ptr<CV::Item> CV::StoreType::copy(){
+    auto store = std::make_shared<CV::StoreType>();
+    store->type = this->type;
+    store->id = this->id;
+    store->ctx = this->ctx;
+    store->size = this->size;
+    store->bsize = this->bsize;
+    store->dataIds = this->dataIds;
+    return store;
+}
+
+void CV::StoreType::restore(std::shared_ptr<CV::Item> &item){
+    auto other = std::static_pointer_cast<CV::StoreType>(item);
+    this->type = other->type;
+    this->id = other->id;
+    this->ctx = other->ctx;
+    this->size = other->size;
+    this->bsize = other->bsize;
+    this->dataIds = other->dataIds;    
+}
+
+void CV::StoreType::clear(){
+    if(this->type == CV::NaturalType::NIL){
+        return;
+    }
+    if(data){
+        free(data);
+    }
+    this->data = NULL;
+    this->size = 0;
+    this->type = CV::NaturalType::NIL;
+    // TODO: refresh gc
+}
+
 /* -------------------------------------------------------------------------------------------------------------------------------- */
 // Parser
 
@@ -766,16 +819,30 @@ static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::
             }
             auto &nsName = v[0];
             auto &name = v[1];
-            auto nsId = stack->getNamespaceId(nsName);
-            if(nsId == 0){
-                cursor->setError(imp, "Undefined namespace '"+nsName+"'", token.line);
-                return stack->createInstruction(CV::InstructionType::NOOP, token);                   
-            }
-            auto ns = stack->namespaces[nsId];
+
             CV::Token ntoken;
             ntoken.first = name;
             ntoken.solved = token.solved;
             ntoken.line = token.line;
+
+            auto nsId = stack->getNamespaceId(nsName);
+            if(ctx->check(nsName)){ // store names take precedence over namespaces. Perhaps should warn the user?
+                // Must be a store
+                auto storeId = ctx->getIdName(nsName);
+                auto store = std::static_pointer_cast<CV::StoreType>(ctx->data[storeId]);
+                ntoken.store = storeId;
+                auto cctx = stack->contexts[store->ctx];
+                auto ntokens = std::vector<CV::Token>({ntoken});
+                for(int i = 1; i < tokens.size(); ++i){
+                    ntokens.push_back(tokens[i]);
+                }
+                return compileTokens(ntokens, stack, cctx, cursor);
+            }else
+            if(nsId == 0){
+                cursor->setError(imp, "Undefined namespace or store named '"+nsName+"'", token.line);
+                return stack->createInstruction(CV::InstructionType::NOOP, token);                   
+            }
+            auto ns = stack->namespaces[nsId];
             ntoken.ns = nsId;
             auto ntokens = std::vector<CV::Token>({ntoken});
             for(int i = 1; i < tokens.size(); ++i){
@@ -934,6 +1001,11 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
         }
         
         // TODO: Check for valid variable names
+
+        if(CV::Tools::isScoped(tokens[1])){
+            cursor->setError(name, "Name cannot be scoped", tokens[0].line);
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);            
+        }
 
         // Interpret data instruction
         auto dataIns = interpretToken(tokens[2], {tokens[2]}, stack, ctx, cursor);
@@ -1190,10 +1262,8 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
     });     
 
 
-
     /*
         namespace
-        [CC]  (Creates Context)
     */
     DefConstructor(stack, "namespace", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
 
@@ -1207,7 +1277,7 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
         std::string lprefix = tokens[2].first;
 
         auto ns = stack->createNamespace(lname, lprefix);
-        auto ins = stack->createInstruction(CV::InstructionType::DS_DEFINE_NAMESPACE, tokens[0]);
+        auto ins = stack->createInstruction(CV::InstructionType::CONSTRUCT_NAMESPACE, tokens[0]);
         ins->data.push_back(ns->id);
 
         for(int i = 3; i < tokens.size(); ++i){
@@ -1251,6 +1321,63 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
 
         return ins;
     });     
+
+
+    /*
+        store
+    */
+    DefConstructor(stack, "store", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+        
+        auto built = ctx->buildStore();
+        auto store = std::static_pointer_cast<CV::StoreType>(built);
+        auto ins = stack->createInstruction(CV::InstructionType::CONSTRUCT_STORE, tokens[0]);
+        ins->data.push_back(ctx->id);
+        ins->data.push_back(store->id);
+
+        for(int i = 1; i < tokens.size(); ++i){
+            auto subtokens = parseTokens(tokens[i].first,  ' ', cursor);  
+            if(subtokens.size() > 1){ // Should ONLY ONE subtoken
+                cursor->setError(name, "Invalid syntax or malformed token", tokens[i].line);
+                return stack->createInstruction(CV::InstructionType::NOOP, tokens[i]);
+            }
+            auto sep = CV::Tools::splitTokenByScope(subtokens[0]);
+            if(sep.size() == 0){ // Should be two elements per member
+                cursor->setError(name, "Invalid syntax or malformed token", tokens[i].line);
+                return stack->createInstruction(CV::InstructionType::NOOP, tokens[i]);                
+            }
+            // TODO: check member name
+            auto &mname = sep[0];
+            auto &mvalue = sep[1];
+            CV::Token current;
+            current.line = tokens[i].line;
+            current.first = mvalue;
+            current.solved = false;
+            auto v = interpretToken(current, {current}, stack, ctx, cursor);
+            if(cursor->raise()){
+                return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+            }
+            unsigned memberId = 0;
+            unsigned type = 0;
+            ins->parameter.push_back(v->id);
+            if(v->type == CV::InstructionType::STATIC_PROXY){
+                memberId = v->data[1];
+                type = 0;
+            }else{                
+                memberId =  ctx->promise();
+                type = 1;
+            }
+            store->setName(mname, memberId, ctx->id);
+            ins->data.push_back(type);
+            ins->data.push_back(memberId);
+        }
+
+
+        auto proxyIns = stack->createInstruction(CV::InstructionType::STATIC_PROXY, tokens[0]);
+        proxyIns->data.push_back(ctx->id);
+        proxyIns->data.push_back(store->id);
+
+        return proxyIns;
+    });        
 
     /*
         iter
@@ -1598,12 +1725,17 @@ void CV::Context::setPromise(unsigned id, std::shared_ptr<CV::Item> &item){
 
 CV::ContextDataPair CV::Context::getIdByName(const std::shared_ptr<CV::Stack> &stack, const CV::Token &token){
     // Check for names
-    if(token.ns == 0){
+    if(token.ns == 0 && token.store == 0){
         auto it = this->dataIds.find(token.first);
         if(it == this->dataIds.end()){
             return this->top ? this->top->getIdByName(stack, token) : CV::ContextDataPair();
         }
         return CV::ContextDataPair(this->id, it->second);
+    }else
+    if(token.store != 0){
+        auto store = std::static_pointer_cast<CV::StoreType>(this->data[token.store]);
+        auto pair = store->getId(token.first);
+        return pair.id == 0 && this->top ? this->top->getIdByName(stack, token) : pair;   
     }else{
         auto ns = stack->namespaces[token.ns];
         auto id = ns->getId(token.first);
@@ -1611,20 +1743,38 @@ CV::ContextDataPair CV::Context::getIdByName(const std::shared_ptr<CV::Stack> &s
     }
 }
 
+unsigned CV::Context::getIdName(const std::string &name){
+    auto it = this->dataIds.find(name);
+    if(it == this->dataIds.end()){
+        return 0;
+    }
+    return it->second;
+}
+
 bool CV::Context::check(const std::shared_ptr<CV::Stack> &stack, const CV::Token &token){
     // Check for names
-    if(token.ns == 0){
+    if(token.ns == 0 && token.store == 0){
         auto dv = this->dataIds.count(token.first);
         auto bfv = stack->bfIds.count(token.first);      
         if(dv == 0 && bfv == 0){
             return this->top && this->top->check(stack, token);
         }
         return true;
+    }else
+    if(token.store != 0){
+        auto store = std::static_pointer_cast<CV::StoreType>(this->data[token.store]);
+        auto pair = store->getId(token.first);
+        return pair.id == 0 && this->top ? this->top->check(stack, token) : pair.id != 0;
     }else{
+        // Otherwise it must be a namespace
         auto ns = stack->namespaces[token.ns];
         auto id = ns->getId(token.first);
         return id != 0;
     }
+}
+
+bool CV::Context::check(const std::string &name){
+    return this->dataIds.count(name) != 0;
 }
 
 void CV::Context::setName(const std::string &name, unsigned id){
@@ -1692,6 +1842,12 @@ std::shared_ptr<CV::Item> CV::Context::buildNil(){
     auto nil = std::make_shared<CV::Item>();
     this->store(nil);
     return nil;
+}
+
+std::shared_ptr<CV::Item> CV::Context::buildStore(){
+    auto store = std::make_shared<CV::StoreType>();
+    this->store(store);
+    return store;
 }
 
 std::shared_ptr<CV::Item> CV::Context::buildString(const std::string &v){
@@ -1778,6 +1934,7 @@ std::shared_ptr<CV::Context> CV::Stack::getContext(unsigned id) const {
 }
 
 CV::BinaryFunction *CV::Stack::getRegisteredFunction(const std::shared_ptr<CV::Stack> &stack, const CV::Token &token){
+    // We don't check stores here because they cannot store functions
     if(token.ns == 0){
         auto it = this->bfIds.find(token.first);
         if(it == this->bfIds.end()){
@@ -1945,10 +2102,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             return std::static_pointer_cast<CV::Item>(list);
 
         };        
-        /*
-            DATA STORE
-        */
-        case CV::InstructionType::DS_DEFINE_NAMESPACE: {
+        case CV::InstructionType::CONSTRUCT_NAMESPACE: {
             for(int i = 0; i < ins->parameter.size(); ++i){
                 auto type = ins->data[2 + i*3 + 0];
                 auto cctx = ins->data[2 + i*3 + 1];
@@ -1965,6 +2119,32 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
 
             return ctx->buildNil();
         };
+
+        case CV::InstructionType::CONSTRUCT_STORE: {
+            auto storeCtxId = ins->data[0];
+            auto storeId = ins->data[1];
+            auto store = stack->contexts[storeCtxId]->data[storeId];
+
+            for(int i = 0; i < ins->parameter.size(); ++i){
+                auto type = ins->data[2 + i*2 + 0];
+                auto memberId = ins->data[2 + i*2 + 1];
+                
+                auto v = CV::execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
+                if(cursor->raise()){
+                    return ctx->buildNil();
+                }    
+                if(v->type == CV::NaturalType::FUNCTION){
+                    cursor->setError("Illegal Operation At '"+ins->token.first+"'", "FUNCTION type cannot be stored", ins->token.line);
+                    return ctx->buildNil();
+                }   
+                if(type == 1){
+                    ctx->setPromise(memberId, v);
+                }
+            }
+
+            return store;
+        };
+
         /*
             CONTROL FLOW
         */
@@ -2793,7 +2973,25 @@ std::string CV::ItemToText(const std::shared_ptr<CV::Stack> &stack, CV::Item *it
             return Tools::setTextColor(Tools::Color::GREEN)+
                     "'"+static_cast<CV::StringType*>(item)->get()+"'"+
                     Tools::setTextColor(Tools::Color::RESET);
-        };        
+        };     
+
+        case CV::NaturalType::STORE: {
+            auto store = static_cast<CV::StoreType*>(item);
+            std::string output = Tools::setTextColor(Tools::Color::MAGENTA)+"["+Tools::setTextColor(Tools::Color::RESET);
+
+            unsigned c = 0;
+            for(auto &it : store->dataIds){
+                auto name = Tools::setTextColor(Tools::Color::YELLOW)+it.first+Tools::setTextColor(Tools::Color::RESET);
+                auto data = CV::ItemToText(stack, stack->contexts[it.second.ctx]->data[it.second.id].get());
+                output += name+":"+data;
+                if(c < store->dataIds.size()-1){
+                    output += " ";
+                }
+                ++c;
+            }
+
+            return output + Tools::setTextColor(Tools::Color::MAGENTA)+"]"+Tools::setTextColor(Tools::Color::RESET);
+        };           
 
         case CV::NaturalType::FUNCTION: {
             auto fn = static_cast<CV::FunctionType*>(item);      
@@ -2804,7 +3002,7 @@ std::string CV::ItemToText(const std::shared_ptr<CV::Stack> &stack, CV::Item *it
             std::string binary = Tools::setTextColor(Tools::Color::BLUE, true)+"BINARY"+Tools::setTextColor(Tools::Color::RESET);
             std::string body = Tools::setTextColor(Tools::Color::BLUE, true)+fn->body.first+Tools::setTextColor(Tools::Color::RESET);
 
-            return name+" "+start+(fn->variadic ? "args" : Tools::compileList(fn->args))+end+" "+( body );
+            return start+name+" "+start+(fn->variadic ? "args" : Tools::compileList(fn->args))+end+" "+( body )+end;
         };
 
         case CV::NaturalType::LIST: {
