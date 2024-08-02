@@ -141,6 +141,8 @@
                 CONSTRUCT_FUNCTION,
                 CONSTRUCT_NAMESPACE,
                 CONSTRUCT_STORE,
+                CONSTRUCT_RANGED_LIST,
+                CONSTRUCT_BULK_LIST,
                 // CONTROL FLOW
                 CF_INVOKE_FUNCTION,
                 CF_INVOKE_BINARY_FUNCTION,
@@ -174,6 +176,7 @@
                 // PROXIES
                 STATIC_PROXY = 200,
                 REFERRED_PROXY,
+                PROMISE_PROXY,
                 NTH_PROXY
             };
         };     
@@ -366,11 +369,11 @@
             void setName(const std::string &name, unsigned id);
             void deleteName(unsigned id);
             CV::ContextDataPair getIdByName(const std::shared_ptr<CV::Stack> &stack, const CV::Token &token);
-            unsigned getIdName(const std::string &name);
+            CV::ContextDataPair getIdName(const std::string &name, unsigned storeId);
             std::shared_ptr<CV::Item> get(unsigned id);
             std::shared_ptr<CV::Item> getByName(const std::string &name);
             bool check(const std::shared_ptr<CV::Stack> &stack, const CV::Token &token);
-            bool check(const std::string &name);
+            bool check(const std::string &name, unsigned store);
             void clear();
             std::shared_ptr<CV::Item> buildNil();
             std::shared_ptr<CV::Item> buildNumber(__CV_DEFAULT_NUMBER_TYPE n);

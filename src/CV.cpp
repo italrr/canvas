@@ -824,14 +824,13 @@ static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::
             ntoken.first = name;
             ntoken.solved = token.solved;
             ntoken.line = token.line;
-
             auto nsId = stack->getNamespaceId(nsName);
-            if(ctx->check(nsName)){ // store names take precedence over namespaces. Perhaps should warn the user?
+            if(ctx->check(nsName, token.store)){ // store names take precedence over namespaces. Perhaps should warn the user?
                 // Must be a store
-                auto storeId = ctx->getIdName(nsName);
-                auto store = std::static_pointer_cast<CV::StoreType>(ctx->data[storeId]);
-                ntoken.store = storeId;
-                auto cctx = stack->contexts[store->ctx];
+                auto pair = ctx->getIdName(nsName, token.store);
+                auto store = std::static_pointer_cast<CV::StoreType>(stack->contexts[pair.ctx]->data[pair.id]);
+                ntoken.store = pair.id;
+                auto cctx = stack->contexts[pair.ctx];
                 auto ntokens = std::vector<CV::Token>({ntoken});
                 for(int i = 1; i < tokens.size(); ++i){
                     ntokens.push_back(tokens[i]);
@@ -839,7 +838,7 @@ static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::
                 return compileTokens(ntokens, stack, cctx, cursor);
             }else
             if(nsId == 0){
-                cursor->setError(imp, "Undefined namespace or store named '"+nsName+"'", token.line);
+                cursor->setError(imp, "Undefined namespace or store named '"+nsName+"' within this namespace/store", token.line);
                 return stack->createInstruction(CV::InstructionType::NOOP, token);                   
             }
             auto ns = stack->namespaces[nsId];
@@ -972,6 +971,10 @@ static CV::Instruction* compileTokens(const VECTOR<CV::Token> &tokens, const SHA
             ins.push_back(nins);
         }
     }else{
+        if(tokens.size() == 0){
+            fprintf(stderr, "Invalid syntax used or malformed token\n");
+            std::exit(1);
+        }
         cursor->setError("Failed to parse token", "Invalid syntax used or malformed token", tokens[0].line);
         return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
     }
@@ -1016,7 +1019,9 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
         // Allocate promise in current context
         auto dataId = 0;
         unsigned type; 
-        if(dataIns->type == CV::InstructionType::STATIC_PROXY){
+        if( dataIns->type == CV::InstructionType::STATIC_PROXY ||
+            dataIns->type == CV::InstructionType::PROMISE_PROXY || 
+            dataIns->type == CV::InstructionType::REFERRED_PROXY){
             dataId = dataIns->data[1];
             type = 0; // direct, no need for promise
         }else{
@@ -1137,9 +1142,9 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
     });  
 
     /*
-        ~
+        length
     */
-    DefConstructor(stack, "~", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+    DefConstructor(stack, "length", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
         if(tokens.size() != 2){
             cursor->setError(name, "Expects exactly 1 argument", tokens[0].line);
             return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
@@ -1226,6 +1231,103 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
 
 
     /*
+        list-ranged
+    */
+    DefConstructor(stack, "list-ranged", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+        static const std::string guide = name+" START END (at 1)";
+        if(tokens.size() != 3 && tokens.size() != 5){
+            cursor->setError(name, "Expects at least 2 arguments ("+guide+")", tokens[0].line);
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+        }
+
+        if(tokens.size() == 5 && tokens[4].first == "at"){
+            cursor->setError(name, "Expected word 'at' as argument 3 ("+guide+")", tokens[0].line);
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);               
+        }
+
+        // start
+        auto start = interpretToken(tokens[1], {tokens[1]}, stack, ctx, cursor);
+        if(cursor->raise()){
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
+        }        
+
+        // end
+        auto end = interpretToken(tokens[2], {tokens[2]}, stack, ctx, cursor);
+        if(cursor->raise()){
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
+        }  
+
+        unsigned stepIns = 0;
+
+        // step
+        if(tokens.size() == 5){
+            auto step = interpretToken(tokens[4], {tokens[4]}, stack, ctx, cursor);
+            if(cursor->raise()){
+                return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
+            }
+            stepIns = step->id;            
+        }
+
+        auto dataId = ctx->promise();
+
+
+        // Create instruction
+        auto consIns = stack->createInstruction(CV::InstructionType::CONSTRUCT_RANGED_LIST, tokens[0]);
+        consIns->data.push_back(ctx->id);
+        consIns->data.push_back(dataId);
+        consIns->parameter.push_back(start->id);
+        consIns->parameter.push_back(end->id);
+        consIns->parameter.push_back(stepIns);
+
+        // Create proxy instruction
+        auto ins = stack->createInstruction(CV::InstructionType::PROMISE_PROXY, tokens[0]);
+        ins->data.push_back(ctx->id);
+        ins->data.push_back(dataId);
+        ins->parameter.push_back(consIns->id);
+        return ins;
+    });     
+
+
+    /*
+        list-bulk
+    */
+    DefConstructor(stack, "list-bulk", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+        static const std::string guide = name+" AMOUNT VALUE";
+        if(tokens.size() != 3){
+            cursor->setError(name, "Expects at least 2 arguments ("+guide+")", tokens[0].line);
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+        }
+
+        // amount
+        auto amount = interpretToken(tokens[1], {tokens[1]}, stack, ctx, cursor);
+        if(cursor->raise()){
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
+        }        
+
+        // value
+        auto value = interpretToken(tokens[2], {tokens[2]}, stack, ctx, cursor);
+        if(cursor->raise()){
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
+        }  
+
+        auto dataId = ctx->promise();
+        // Create instruction
+        auto consIns = stack->createInstruction(CV::InstructionType::CONSTRUCT_BULK_LIST, tokens[0]);
+        consIns->data.push_back(ctx->id);
+        consIns->data.push_back(dataId);
+        consIns->parameter.push_back(amount->id);
+        consIns->parameter.push_back(value->id);
+
+        // Create proxy instruction
+        auto ins = stack->createInstruction(CV::InstructionType::PROMISE_PROXY, tokens[0]);
+        ins->data.push_back(ctx->id);
+        ins->data.push_back(dataId);
+        ins->parameter.push_back(consIns->id);
+        return ins;
+    });   
+
+
+    /*
         do
         [CC]  (Creates Context)
     */
@@ -1305,7 +1407,9 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
             unsigned memberId = 0;
             unsigned type = 0;
             ins->parameter.push_back(v->id);
-            if(v->type == CV::InstructionType::STATIC_PROXY){
+            if( v->type == CV::InstructionType::STATIC_PROXY ||
+                v->type == CV::InstructionType::PROMISE_PROXY ||
+                v->type == CV::InstructionType::REFERRED_PROXY){
                 memberId = v->data[1];
                 type = 0;
             }else{                
@@ -1356,25 +1460,30 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
             if(cursor->raise()){
                 return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
             }
+            unsigned memCtxId = ctx->id;
             unsigned memberId = 0;
             unsigned type = 0;
             ins->parameter.push_back(v->id);
-            if(v->type == CV::InstructionType::STATIC_PROXY){
+            if( v->type == CV::InstructionType::STATIC_PROXY ||
+                v->type == CV::InstructionType::REFERRED_PROXY ||
+                v->type == CV::InstructionType::PROMISE_PROXY){
+                memCtxId = v->data[0];
                 memberId = v->data[1];
                 type = 0;
             }else{                
                 memberId =  ctx->promise();
                 type = 1;
             }
-            store->setName(mname, memberId, ctx->id);
+            store->setName(mname, memberId, memCtxId);
             ins->data.push_back(type);
             ins->data.push_back(memberId);
         }
 
 
-        auto proxyIns = stack->createInstruction(CV::InstructionType::STATIC_PROXY, tokens[0]);
+        auto proxyIns = stack->createInstruction(CV::InstructionType::REFERRED_PROXY, tokens[0]);
         proxyIns->data.push_back(ctx->id);
         proxyIns->data.push_back(store->id);
+        proxyIns->parameter.push_back(ins->id);
 
         return proxyIns;
     });        
@@ -1743,12 +1852,18 @@ CV::ContextDataPair CV::Context::getIdByName(const std::shared_ptr<CV::Stack> &s
     }
 }
 
-unsigned CV::Context::getIdName(const std::string &name){
-    auto it = this->dataIds.find(name);
-    if(it == this->dataIds.end()){
-        return 0;
+CV::ContextDataPair CV::Context::getIdName(const std::string &name, unsigned storeId){
+    if(storeId == 0){
+        auto it = this->dataIds.find(name);
+        if(it == this->dataIds.end()){
+            return this->top ? this->top->getIdName(name, storeId) : CV::ContextDataPair();
+        }
+        return CV::ContextDataPair(this->id, it->second);
+    }else{
+        auto store = std::static_pointer_cast<CV::StoreType>(this->data[storeId]);
+        auto pair = store->getId(name);
+        return pair.id == 0 && this->top ? this->top->getIdName(name, storeId) : pair; 
     }
-    return it->second;
 }
 
 bool CV::Context::check(const std::shared_ptr<CV::Stack> &stack, const CV::Token &token){
@@ -1762,6 +1877,9 @@ bool CV::Context::check(const std::shared_ptr<CV::Stack> &stack, const CV::Token
         return true;
     }else
     if(token.store != 0){
+        if(this->data[token.store].get() == NULL){
+            return this->top ? this->top->check(stack, token) : false;
+        }
         auto store = std::static_pointer_cast<CV::StoreType>(this->data[token.store]);
         auto pair = store->getId(token.first);
         return pair.id == 0 && this->top ? this->top->check(stack, token) : pair.id != 0;
@@ -1773,8 +1891,15 @@ bool CV::Context::check(const std::shared_ptr<CV::Stack> &stack, const CV::Token
     }
 }
 
-bool CV::Context::check(const std::string &name){
-    return this->dataIds.count(name) != 0;
+bool CV::Context::check(const std::string &name, unsigned storeId){
+    if(storeId == 0){
+        auto f = this->dataIds.count(name);
+        return f == 0 && this->top ? this->top->check(name, storeId) : f;
+    }else{
+        auto store = std::static_pointer_cast<CV::StoreType>(this->data[storeId]);
+        auto pair = store->getId(name);
+        return pair.id == 0 && this->top ? this->top->check(name, storeId) : pair.id != 0;        
+    }
 }
 
 void CV::Context::setName(const std::string &name, unsigned id){
@@ -2100,8 +2225,112 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             }
 
             return std::static_pointer_cast<CV::Item>(list);
-
         };        
+
+        case CV::InstructionType::CONSTRUCT_RANGED_LIST: {
+            __CV_DEFAULT_NUMBER_TYPE start = 0;
+            __CV_DEFAULT_NUMBER_TYPE end = 0;
+            __CV_DEFAULT_NUMBER_TYPE step = 1;
+
+            // complete promise
+            auto list = std::make_shared<CV::ListType>();
+            auto cctx = stack->contexts[ins->data[0]];
+            auto lItem = std::static_pointer_cast<CV::Item>(list);
+            cctx->setPromise(ins->data[1], lItem);
+
+            // Process start
+            auto startV = CV::execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor).value;
+            if(cursor->raise()){
+                return ctx->buildNil();
+            }  
+            if(startV->type != CV::NaturalType::NUMBER){
+                cursor->setError("Logic Error At '"+ins->token.first+"'", "START must be a NUMBER", ins->token.line);
+                return ctx->buildNil();                
+            }
+            start = std::static_pointer_cast<CV::NumberType>(startV)->get();
+
+            // Process end
+            auto endV = CV::execute(stack->instructions[ins->parameter[1]], stack, ctx, cursor).value;
+            if(cursor->raise()){
+                return ctx->buildNil();
+            }  
+            if(endV->type != CV::NaturalType::NUMBER){
+                cursor->setError("Logic Error At '"+ins->token.first+"'", "END must be a NUMBER", ins->token.line);
+                return ctx->buildNil();                
+            }
+            end = std::static_pointer_cast<CV::NumberType>(endV)->get();   
+
+            // Process step if any
+            if(ins->parameter[2] != 0){
+                auto stepV = CV::execute(stack->instructions[ins->parameter[2]], stack, ctx, cursor).value;
+                if(cursor->raise()){
+                    return ctx->buildNil();
+                }  
+                if(stepV->type != CV::NaturalType::NUMBER){
+                    cursor->setError("Logic Error At '"+ins->token.first+"'", "STEP must be a NUMBER", ins->token.line);
+                    return ctx->buildNil();                
+                }
+                step = std::static_pointer_cast<CV::NumberType>(stepV)->get();                   
+            }
+
+            // Count how many items
+            __CV_DEFAULT_NUMBER_TYPE s = start;
+            __CV_DEFAULT_NUMBER_TYPE e = end;
+            bool lessthan = e > s;
+            std::vector<std::shared_ptr<CV::Item>> elements;
+            while((lessthan && s <= e) || (!lessthan && s >= e)){
+                elements.push_back(cctx->buildNumber(s));
+                s += step;
+            }
+            list->build(elements);
+            return lItem;
+        };
+
+
+        case CV::InstructionType::CONSTRUCT_BULK_LIST: {
+            __CV_DEFAULT_NUMBER_TYPE amount = 0;
+            __CV_DEFAULT_NUMBER_TYPE value = 0;
+
+            // complete promise
+            auto list = std::make_shared<CV::ListType>();
+            auto cctx = stack->contexts[ins->data[0]];
+            auto lItem = std::static_pointer_cast<CV::Item>(list);
+            cctx->setPromise(ins->data[1], lItem);
+
+            // Process amount
+            auto amountV = CV::execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor).value;
+            if(cursor->raise()){
+                return ctx->buildNil();
+            }  
+            if(amountV->type != CV::NaturalType::NUMBER){
+                cursor->setError("Logic Error At '"+ins->token.first+"'", "END must be a NUMBER", ins->token.line);
+                return ctx->buildNil();                
+            }
+            amount = std::static_pointer_cast<CV::NumberType>(amountV)->get();  
+            if(amount <= 0){
+                cursor->setError("Logic Error At '"+ins->token.first+"'", "AMOUNT must be a non-zero positive NUMBER", ins->token.line);
+                return ctx->buildNil();  
+            }
+            // Process value
+            auto valueV = CV::execute(stack->instructions[ins->parameter[1]], stack, ctx, cursor).value;
+            if(cursor->raise()){
+                return ctx->buildNil();
+            }  
+            if(valueV->type != CV::NaturalType::NUMBER){
+                cursor->setError("Logic Error At '"+ins->token.first+"'", "VALUE must be a NUMBER", ins->token.line);
+                return ctx->buildNil();                
+            }
+            value = std::static_pointer_cast<CV::NumberType>(valueV)->get();               
+
+            std::vector<std::shared_ptr<CV::Item>> elements;
+            for(int i = 0; i < amount; ++i){
+                elements.push_back(cctx->buildNumber(value));
+            }
+            list->build(elements);            
+
+            return lItem;
+        };        
+
         case CV::InstructionType::CONSTRUCT_NAMESPACE: {
             for(int i = 0; i < ins->parameter.size(); ++i){
                 auto type = ins->data[2 + i*3 + 0];
@@ -2195,6 +2424,10 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             }
             auto result = bf->fn(bf->name, ins->token, arguments, nctx, cursor);
             nctx->store(result);
+
+
+
+
             return result;
         };
         case CV::InstructionType::CF_INVOKE_FUNCTION: { // CC
@@ -2897,7 +3130,20 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             auto &ctxId = ins->data[0];
             auto &dataId = ins->data[1];
             return stack->contexts[ctxId]->data[dataId];
-        };        
+        };      
+        case CV::InstructionType::PROMISE_PROXY: {
+            // run instruction
+            auto v = CV::execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor);
+            if(cursor->raise()){
+                return ctx->buildNil();
+            }
+            // complete promise
+            auto &ctxId = ins->data[0];
+            auto &dataId = ins->data[1];
+            auto cctx = stack->contexts[ctxId];
+            cctx->setPromise(dataId, v.value);
+            return v;            
+        };
         case CV::InstructionType::REFERRED_PROXY: {
             // pre-fetch the item
             auto &ctxId = ins->data[0];
