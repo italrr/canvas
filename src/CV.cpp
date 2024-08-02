@@ -101,42 +101,43 @@ namespace CV {
 
         namespace UnixColor {
 
-            static const std::unordered_map<int, std::string> TextColorCodes = {
-                {0, "\e[0;30m"},
-                {1, "\e[0;31m"},
-                {2, "\e[0;32m"},
-                {3, "\e[0;33m"},
-                {4, "\e[0;34m"},
-                {5, "\e[0;35m"},
-                {6, "\e[0;36m"},
-                {7, "\e[0;37m"},
-                {8, "\e[0m"},
+            static std::unordered_map<int, std::string> TextColorCodes = {
+                {CV::Tools::Color::BLACK,   "\e[0;30m"},
+                {CV::Tools::Color::RED,     "\e[0;31m"},
+                {CV::Tools::Color::GREEN,   "\e[0;32m"},
+                {CV::Tools::Color::YELLOW,  "\e[0;33m"},
+                {CV::Tools::Color::BLUE,    "\e[0;34m"},
+                {CV::Tools::Color::MAGENTA, "\e[0;35m"},
+                {CV::Tools::Color::CYAN,    "\e[0;36m"},
+                {CV::Tools::Color::WHITE,   "\e[0;37m"},
+                {CV::Tools::Color::RESET,   "\e[0m"}
             };
 
-            static const std::unordered_map<int, std::string> BoldTextColorCodes = {
-                {0, "\e[1;30m"},
-                {1, "\e[1;31m"},
-                {2, "\e[1;32m"},
-                {3, "\e[1;33m"},
-                {4, "\e[1;34m"},
-                {5, "\e[1;35m"},
-                {6, "\e[1;36m"},
-                {7, "\e[1;37m"},
-                {8, "\e[0m"},
+            static std::unordered_map<int, std::string> BoldTextColorCodes = {
+                {CV::Tools::Color::BLACK,   "\e[1;30m"},
+                {CV::Tools::Color::RED,     "\e[1;31m"},
+                {CV::Tools::Color::GREEN,   "\e[1;32m"},
+                {CV::Tools::Color::YELLOW,  "\e[1;33m"},
+                {CV::Tools::Color::BLUE,    "\e[1;34m"},
+                {CV::Tools::Color::MAGENTA, "\e[1;35m"},
+                {CV::Tools::Color::CYAN,    "\e[1;36m"},
+                {CV::Tools::Color::WHITE,   "\e[1;37m"},
+                {CV::Tools::Color::RESET,   "\e[0m"}
             };        
 
-            static const std::unordered_map<int, std::string> BackgroundColorCodes = {
-                {0, "\e[40m"},
-                {1, "\e[41m"},
-                {2, "\e[42m"},
-                {3, "\e[43m"},
-                {4, "\e[44m"},
-                {5, "\e[45m"},
-                {6, "\e[46m"},
-                {7, "\e[47m"},
-                {8, "\e[0m"},
+            static std::unordered_map<int, std::string> BackgroundColorCodes = {
+                {CV::Tools::Color::BLACK,   "\e[40m"},
+                {CV::Tools::Color::RED,     "\e[41m"},
+                {CV::Tools::Color::GREEN,   "\e[42m"},
+                {CV::Tools::Color::YELLOW,  "\e[43m"},
+                {CV::Tools::Color::BLUE,    "\e[44m"},
+                {CV::Tools::Color::MAGENTA, "\e[45m"},
+                {CV::Tools::Color::CYAN,    "\e[46m"},
+                {CV::Tools::Color::WHITE,   "\e[47m"},
+                {CV::Tools::Color::RESET,   "\e[0m"}
             };     
         }   
+  
 
         static std::string setTextColor(int color, bool bold = false){
             return useColorOnText ? (bold ? UnixColor::BoldTextColorCodes.find(color)->second : UnixColor::TextColorCodes.find(color)->second) : "";
@@ -722,7 +723,7 @@ static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::
             return stack->createInstruction(CV::InstructionType::NOOP, token);   
         }
         // Execute
-        auto p0result = CV::execute(p0entry, stack, ctx, cursor).value;
+        auto p0result = CV::Execute(p0entry, stack, ctx, cursor).value;
         if(cursor->raise()){
             return stack->createInstruction(CV::InstructionType::NOOP, token);   
         }
@@ -798,7 +799,7 @@ static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::
         }
 
         // Execute
-        auto p0result = CV::execute(p0entry, stack, ctx, cursor).value;
+        auto p0result = CV::Execute(p0entry, stack, ctx, cursor).value;
         if(cursor->raise()){
             return stack->createInstruction(CV::InstructionType::NOOP, token);   
         }
@@ -830,7 +831,7 @@ static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::
         }
 
         // Load it up (execute)
-        auto result = CV::execute(entry, stack, ctx, cursor).value;
+        auto result = CV::Execute(entry, stack, ctx, cursor).value;
         if(cursor->raise()){
             return stack->createInstruction(CV::InstructionType::NOOP, token);   
         }
@@ -2217,7 +2218,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             auto &ctxId = ins->data[1];
             auto &dataId = ins->data[2];
             
-            auto v = CV::execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor);
+            auto v = CV::Execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor);
             if(cursor->raise()){
                 return ctx->buildNil();
             }
@@ -2230,12 +2231,12 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
         };
         case CV::InstructionType::MUT: {
 
-            auto target = CV::execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor).value;
+            auto target = CV::Execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor).value;
             if(cursor->raise()){
                 return ctx->buildNil();
             }
 
-            auto v = CV::execute(stack->instructions[ins->parameter[1]], stack, ctx, cursor).value;
+            auto v = CV::Execute(stack->instructions[ins->parameter[1]], stack, ctx, cursor).value;
             if(cursor->raise()){
                 return ctx->buildNil();
             }
@@ -2274,7 +2275,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             unsigned c = 0;
             
             for(int i = 0; i < nelements; ++i){
-                auto elementV = CV::execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
+                auto elementV = CV::Execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 } 
@@ -2297,7 +2298,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             cctx->setPromise(ins->data[1], lItem);
 
             // Process start
-            auto startV = CV::execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor).value;
+            auto startV = CV::Execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor).value;
             if(cursor->raise()){
                 return ctx->buildNil();
             }  
@@ -2308,7 +2309,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             start = std::static_pointer_cast<CV::NumberType>(startV)->get();
 
             // Process end
-            auto endV = CV::execute(stack->instructions[ins->parameter[1]], stack, ctx, cursor).value;
+            auto endV = CV::Execute(stack->instructions[ins->parameter[1]], stack, ctx, cursor).value;
             if(cursor->raise()){
                 return ctx->buildNil();
             }  
@@ -2320,7 +2321,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
 
             // Process step if any
             if(ins->parameter[2] != 0){
-                auto stepV = CV::execute(stack->instructions[ins->parameter[2]], stack, ctx, cursor).value;
+                auto stepV = CV::Execute(stack->instructions[ins->parameter[2]], stack, ctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }  
@@ -2356,7 +2357,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             cctx->setPromise(ins->data[1], lItem);
 
             // Process amount
-            auto amountV = CV::execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor).value;
+            auto amountV = CV::Execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor).value;
             if(cursor->raise()){
                 return ctx->buildNil();
             }  
@@ -2370,7 +2371,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
                 return ctx->buildNil();  
             }
             // Process value
-            auto valueV = CV::execute(stack->instructions[ins->parameter[1]], stack, ctx, cursor).value;
+            auto valueV = CV::Execute(stack->instructions[ins->parameter[1]], stack, ctx, cursor).value;
             if(cursor->raise()){
                 return ctx->buildNil();
             }  
@@ -2395,7 +2396,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
                 auto cctx = ins->data[2 + i*3 + 1];
                 auto memId = ins->data[2 + i*3 + 2];
                 
-                auto v = CV::execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
+                auto v = CV::Execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }    
@@ -2416,7 +2417,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
                 auto type = ins->data[2 + i*2 + 0];
                 auto memberId = ins->data[2 + i*2 + 1];
                 
-                auto v = CV::execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
+                auto v = CV::Execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }    
@@ -2439,7 +2440,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
 
             auto nctx = stack->contexts[ins->data[0]];
 
-            auto cond = CV::execute(stack->instructions[ins->parameter[0]], stack, nctx, cursor).value;
+            auto cond = CV::Execute(stack->instructions[ins->parameter[0]], stack, nctx, cursor).value;
             if(cursor->raise()){
                 return ctx->buildNil();
             }       
@@ -2447,7 +2448,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             bool isTrue = cond->type != CV::NaturalType::NIL && (cond->type == CV::NaturalType::NUMBER ? std::static_pointer_cast<CV::NumberType>(cond)->get() != 0 : true);
 
             if(isTrue){
-                auto trueBranch = CV::execute(stack->instructions[ins->parameter[1]], stack, nctx, cursor);
+                auto trueBranch = CV::Execute(stack->instructions[ins->parameter[1]], stack, nctx, cursor);
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }          
@@ -2455,7 +2456,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
                 return trueBranch;
             }else
             if(ins->parameter.size() > 2){
-                auto falseBranch = CV::execute(stack->instructions[ins->parameter[2]], stack, nctx, cursor);
+                auto falseBranch = CV::Execute(stack->instructions[ins->parameter[2]], stack, nctx, cursor);
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }                    
@@ -2474,7 +2475,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             nctx->revert();
             for(int i = 0; i < ins->parameter.size(); ++i){
                 auto cins = stack->instructions[ins->parameter[i]];
-                auto v = CV::execute(cins, stack, ctx, cursor).value;
+                auto v = CV::Execute(cins, stack, ctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 } 
@@ -2499,7 +2500,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             nctx->revert();
             for(int i = 0; i < ins->parameter.size(); ++i){
                 auto cins = stack->instructions[ins->parameter[i]];
-                auto v = CV::execute(cins, stack, nctx, cursor).value;
+                auto v = CV::Execute(cins, stack, nctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 } 
@@ -2518,7 +2519,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
                 return ctx->buildNil();
             }
 
-            auto r = CV::execute(bodyIns, stack, nctx, cursor);
+            auto r = CV::Execute(bodyIns, stack, nctx, cursor);
             if(cursor->raise()){
                 return ctx->buildNil();
             }
@@ -2542,7 +2543,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             do {
                 // Check condition
                 nctx->revert();
-                cond = CV::execute(stack->instructions[ins->parameter[0]], stack, nctx, cursor).value;
+                cond = CV::Execute(stack->instructions[ins->parameter[0]], stack, nctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }
@@ -2552,7 +2553,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
                 }
 
                 // Execute
-                auto cfv = CV::execute(stack->instructions[ins->parameter[1]], stack, nctx, cursor);
+                auto cfv = CV::Execute(stack->instructions[ins->parameter[1]], stack, nctx, cursor);
                 if(cursor->raise()){
                     break;
                 }
@@ -2592,7 +2593,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
 
             // Figure out counter
             if(stepperCountId != 0){
-                auto v = CV::execute(stack->instructions[stepperCountId], stack, ctx, cursor).value;
+                auto v = CV::Execute(stack->instructions[stepperCountId], stack, ctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }                
@@ -2604,7 +2605,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             }
 
             // Figure out source
-            auto source = CV::execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor).value;
+            auto source = CV::Execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor).value;
             if(cursor->raise()){
                 return ctx->buildNil();
             }          
@@ -2643,7 +2644,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             for(int i = 0; i < list->size; i += counter){
                 nctx->revert();
                 updateStepper(i);
-                auto cfv = CV::execute(stack->instructions[ins->parameter[1]], stack, nctx, cursor);
+                auto cfv = CV::Execute(stack->instructions[ins->parameter[1]], stack, nctx, cursor);
                 if(cursor->raise()){
                     break;
                 }
@@ -2682,7 +2683,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             __CV_DEFAULT_NUMBER_TYPE counter = 1;
             // Figure out counter
             if(stepperCountId != 0){
-                auto v = CV::execute(stack->instructions[stepperCountId], stack, nctx, cursor).value;
+                auto v = CV::Execute(stack->instructions[stepperCountId], stack, nctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }                
@@ -2693,7 +2694,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
                 counter = std::static_pointer_cast<CV::NumberType>(v)->get();
             }
             // Figure from
-            auto fromV = CV::execute(stack->instructions[ins->parameter[0]], stack, nctx, cursor).value;
+            auto fromV = CV::Execute(stack->instructions[ins->parameter[0]], stack, nctx, cursor).value;
             if(cursor->raise()){
                 return ctx->buildNil();
             } 
@@ -2702,7 +2703,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
                 return ctx->buildNil();                     
             }
             // Figure to
-            auto toV = CV::execute(stack->instructions[ins->parameter[1]], stack, nctx, cursor).value;
+            auto toV = CV::Execute(stack->instructions[ins->parameter[1]], stack, nctx, cursor).value;
             if(cursor->raise()){
                 return ctx->buildNil();
             }   
@@ -2717,7 +2718,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
 
             for(__CV_DEFAULT_NUMBER_TYPE i = start->get(); i <= end->get(); i += counter){
                 std::static_pointer_cast<CV::NumberType>(stepper)->set(i);                
-                auto cfv = CV::execute(stack->instructions[ins->parameter[2]], stack, nctx, cursor);
+                auto cfv = CV::Execute(stack->instructions[ins->parameter[2]], stack, nctx, cursor);
                 if(cursor->raise()){
                     break;
                 }
@@ -2735,7 +2736,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
                 }
                 nctx->revert();
                 // Process next from/to
-                fromV = CV::execute(stack->instructions[ins->parameter[0]], stack, nctx, cursor).value;
+                fromV = CV::Execute(stack->instructions[ins->parameter[0]], stack, nctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 } 
@@ -2744,7 +2745,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
                     return ctx->buildNil();                     
                 }
                 // Figure to
-                toV = CV::execute(stack->instructions[ins->parameter[1]], stack, nctx, cursor).value;
+                toV = CV::Execute(stack->instructions[ins->parameter[1]], stack, nctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }   
@@ -2770,7 +2771,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
         case CV::InstructionType::CF_INT_SKIP: {
             auto hasPayload = ins->data[0];
             if(hasPayload){
-                auto v = CV::execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor).value;
+                auto v = CV::Execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }
@@ -2789,7 +2790,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             auto &dataId = ins->data[1];
             auto item = stack->contexts[ctxId]->data[dataId];
             for(int i = 0; i < ins->parameter.size(); ++i){
-                auto v = CV::execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
+                auto v = CV::Execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }
@@ -2801,13 +2802,13 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             auto &ctxId = ins->data[0];
             auto &dataId = ins->data[1];
             auto item = stack->contexts[ctxId]->data[dataId];
-            auto firstv = CV::execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor).value;
+            auto firstv = CV::Execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor).value;
             if(cursor->raise()){
                 return ctx->buildNil();
             }                 
             *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = std::static_pointer_cast<CV::NumberType>(firstv)->get();
             for(int i = 1; i < ins->parameter.size(); ++i){
-                auto v = CV::execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
+                auto v = CV::Execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }
@@ -2819,13 +2820,13 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             auto &ctxId = ins->data[0];
             auto &dataId = ins->data[1];
             auto item = stack->contexts[ctxId]->data[dataId];
-            auto firstv = CV::execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor).value;
+            auto firstv = CV::Execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor).value;
             if(cursor->raise()){
                 return ctx->buildNil();
             }                 
             *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = std::static_pointer_cast<CV::NumberType>(firstv)->get();
             for(int i = 1; i < ins->parameter.size(); ++i){
-                auto v = CV::execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
+                auto v = CV::Execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }
@@ -2837,14 +2838,14 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             auto &ctxId = ins->data[0];
             auto &dataId = ins->data[1];
             auto item = stack->contexts[ctxId]->data[dataId];
-            auto firstv = CV::execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor).value;
+            auto firstv = CV::Execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor).value;
             if(cursor->raise()){
                 return ctx->buildNil();
             }                 
             *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = std::static_pointer_cast<CV::NumberType>(firstv)->get();
             for(int i = 1; i < ins->parameter.size(); ++i){
                 auto cins = stack->instructions[ins->parameter[i]];
-                auto v = CV::execute(cins, stack, ctx, cursor).value;
+                auto v = CV::Execute(cins, stack, ctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }
@@ -2861,13 +2862,13 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             auto &ctxId = ins->data[0];
             auto &dataId = ins->data[1];
             auto item = stack->contexts[ctxId]->data[dataId];
-            auto firstv = CV::execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor).value;
+            auto firstv = CV::Execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor).value;
             if(cursor->raise()){
                 return ctx->buildNil();
             }                 
             *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 1;
             for(int i = 1; i < ins->parameter.size(); ++i){
-                auto v = CV::execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
+                auto v = CV::Execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }
@@ -2885,7 +2886,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 1;
             std::vector<std::shared_ptr<CV::Item>> operands;
             for(int i = 0; i < ins->parameter.size(); ++i){
-                auto v = CV::execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
+                auto v = CV::Execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }                
@@ -2913,7 +2914,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 1;
             std::vector<std::shared_ptr<CV::Item>> operands;
             for(int i = 0; i < ins->parameter.size(); ++i){
-                auto v = CV::execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
+                auto v = CV::Execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }                
@@ -2936,7 +2937,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 1;
             std::vector<std::shared_ptr<CV::Item>> operands;
             for(int i = 0; i < ins->parameter.size(); ++i){
-                auto v = CV::execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
+                auto v = CV::Execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }                
@@ -2959,7 +2960,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 1;
             std::vector<std::shared_ptr<CV::Item>> operands;
             for(int i = 0; i < ins->parameter.size(); ++i){
-                auto v = CV::execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
+                auto v = CV::Execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }                
@@ -2982,7 +2983,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 1;
             std::vector<std::shared_ptr<CV::Item>> operands;
             for(int i = 0; i < ins->parameter.size(); ++i){
-                auto v = CV::execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
+                auto v = CV::Execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }                
@@ -3009,7 +3010,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
 
             
             for(int i = 0; i < ins->parameter.size(); ++i){
-                auto v = CV::execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
+                auto v = CV::Execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }                
@@ -3033,7 +3034,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
 
             
             for(int i = 0; i < ins->parameter.size(); ++i){
-                auto v = CV::execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
+                auto v = CV::Execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }                
@@ -3056,7 +3057,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
 
             *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 0;
 
-            auto v = CV::execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor).value;
+            auto v = CV::Execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor).value;
             if(cursor->raise()){
                 return ctx->buildNil();
             }
@@ -3074,7 +3075,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
         case CV::InstructionType::OP_DESC_LENGTH: {
             auto &subject = ins->parameter[0];
 
-            auto v = CV::execute(stack->instructions[subject], stack, ctx, cursor).value;
+            auto v = CV::Execute(stack->instructions[subject], stack, ctx, cursor).value;
             if(cursor->raise()){
                 return ctx->buildNil();
             }
@@ -3085,7 +3086,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
         case CV::InstructionType::OP_DESC_TYPE: {
             auto &subject = ins->parameter[0];
 
-            auto v = CV::execute(stack->instructions[subject], stack, ctx, cursor).value;
+            auto v = CV::Execute(stack->instructions[subject], stack, ctx, cursor).value;
             if(cursor->raise()){
                 return ctx->buildNil();
             }
@@ -3105,7 +3106,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             unsigned end = ins->type == CV::InstructionType::OP_LIST_PUSH ? ins->parameter.size()-1 : ins->parameter.size();
 
             std::vector<std::shared_ptr<CV::Item>> items;
-            auto subject = CV::execute(stack->instructions[ins->parameter[subjectIns]], stack, ctx, cursor).value;
+            auto subject = CV::Execute(stack->instructions[ins->parameter[subjectIns]], stack, ctx, cursor).value;
             if(cursor->raise()){
                 return ctx->buildNil();
             }
@@ -3120,7 +3121,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             }            
             // Remainer
             for(int i = start; i < end; ++i){
-                auto v = CV::execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
+                auto v = CV::Execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
                 if(cursor->raise()){
                     return ctx->buildNil();
                 }
@@ -3142,11 +3143,11 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             auto &listId = ins->parameter[1];
 
             // run
-            auto index = CV::execute(stack->instructions[indexId], stack, ctx, cursor).value;
+            auto index = CV::Execute(stack->instructions[indexId], stack, ctx, cursor).value;
             if(cursor->raise()){
                 return ctx->buildNil();
             }
-            auto list = CV::execute(stack->instructions[listId], stack, ctx, cursor).value;
+            auto list = CV::Execute(stack->instructions[listId], stack, ctx, cursor).value;
             if(cursor->raise()){
                 return ctx->buildNil();
             }
@@ -3191,7 +3192,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
         };      
         case CV::InstructionType::PROMISE_PROXY: {
             // run instruction
-            auto v = CV::execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor);
+            auto v = CV::Execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor);
             if(cursor->raise()){
                 return ctx->buildNil();
             }
@@ -3208,7 +3209,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             auto &dataId = ins->data[1];
             auto item = stack->contexts[ctxId]->data[dataId];
             // run instruction
-            CV::execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor);
+            CV::Execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor);
             if(cursor->raise()){
                 return ctx->buildNil();
             }      
@@ -3224,7 +3225,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
     return ctx->buildNil();
 }
 
-CV::ControlFlow CV::execute(CV::Instruction *ins, const std::shared_ptr<CV::Stack> &stack, std::shared_ptr<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+CV::ControlFlow CV::Execute(CV::Instruction *ins, const std::shared_ptr<CV::Stack> &stack, std::shared_ptr<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
     CV::ControlFlow result;
     bool valid = false;
     do {
@@ -3350,7 +3351,7 @@ std::string CV::QuickInterpret(const std::string &input, const std::shared_ptr<C
 
 
     // Execute
-    auto result = CV::execute(entry, stack, ctx, cursor).value;
+    auto result = CV::Execute(entry, stack, ctx, cursor).value;
     if(cursor->raise()){
         return "";
     }
@@ -3364,7 +3365,16 @@ std::string CV::QuickInterpret(const std::string &input, const std::shared_ptr<C
     return text;
 }
 
-std::string CV::getPrompt(){
+void CV::SetColorTableText(const std::unordered_map<int, std::string> &ct){
+    CV::Tools::UnixColor::TextColorCodes = ct;
+    CV::Tools::UnixColor::BoldTextColorCodes = ct;
+}
+
+void CV::SetColorTableBackground(const std::unordered_map<int, std::string> &ct){
+    CV::Tools::UnixColor::BackgroundColorCodes = ct;
+}
+
+std::string CV::GetPrompt(){
     std::string start = Tools::setTextColor(Tools::Color::MAGENTA) + "[" + Tools::setTextColor(Tools::Color::RESET);
     std::string cv = Tools::setTextColor(Tools::Color::CYAN) + "~" + Tools::setTextColor(Tools::Color::RESET);
     std::string end = Tools::setTextColor(Tools::Color::MAGENTA) + "]" + Tools::setTextColor(Tools::Color::RESET);

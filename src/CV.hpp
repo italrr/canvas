@@ -9,7 +9,7 @@
     #include <mutex>
 
     #define __CV_DEFAULT_NUMBER_TYPE double  
-    static const __CV_DEFAULT_NUMBER_TYPE CANVAS_LANG_VERSION[3] = { 0, 3, 0 };
+    static const __CV_DEFAULT_NUMBER_TYPE CANVAS_LANG_VERSION[3] = { 0, 3, 1 };
 
     #define _CV_PLATFORM_TYPE_LINUX 0
     #define _CV_PLATFORM_TYPE_WINDOWS 1
@@ -441,12 +441,14 @@
             CV::BinaryFunction *getRegisteredFunction(const std::shared_ptr<CV::Stack> &stack, const CV::Token &token);
             // CV::ControlFlow execute(CV::Instruction *ins, std::shared_ptr<Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);
         };
+        void SetColorTableText(const std::unordered_map<int, std::string> &ct);
+        void SetColorTableBackground(const std::unordered_map<int, std::string> &ct);        
         void AddStandardConstructors(std::shared_ptr<CV::Stack> &stack);
         std::string ItemToText(const std::shared_ptr<CV::Stack> &stack, CV::Item *item);
         void SetUseColor(bool v);
-        CV::ControlFlow execute(CV::Instruction *ins, const std::shared_ptr<CV::Stack> &stack, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);
+        CV::ControlFlow Execute(CV::Instruction *ins, const std::shared_ptr<CV::Stack> &stack, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);
         std::string QuickInterpret(const std::string &input, const std::shared_ptr<CV::Stack> &stack, std::shared_ptr<Context> &ctx, std::shared_ptr<CV::Cursor> &cursor, bool shouldClear = true);
-        std::string getPrompt();
+        std::string GetPrompt();
     }
 
 
