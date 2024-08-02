@@ -556,7 +556,10 @@ static VECTOR<CV::Token> parseTokens(std::string input, char sep, SHARED<CV::Cur
             buffer += '\n';
             ++i;
             continue;
-        }else               
+        }else            
+        if(c == '\t'){
+            buffer +=  ' ';
+        }else
         if(c == '\n' && !onString){
             ++cline;
             onComment = false;
@@ -625,7 +628,40 @@ static bool CheckConstructor(const std::shared_ptr<CV::Stack> &stack, const std:
     return stack->constructors.find(name) != stack->constructors.end();
 }
 
-static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, std::shared_ptr<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+static std::shared_ptr<CV::Item> solveStoreProxy(const SHARED<CV::Stack> &stack, SHARED<CV::StoreType> &store, CV::Token &token, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+    if(CV::Tools::isScoped(token)){
+        auto v = CV::Tools::splitTokenByScope(token);
+        if(v.size() != 2){
+            cursor->setError(token.first, "Invalid syntax or malformed token", token.line);
+            return ctx->buildNil();                 
+        }
+        auto &nsName = v[0];
+        auto &name = v[1];
+        CV::Token ntoken;
+        ntoken.first = name;
+        ntoken.solved = token.solved;
+        ntoken.line = token.line;
+        if(ctx->check(nsName, token.store)){
+            auto pair = ctx->getIdName(nsName, token.store);
+            // These shouldn't happen
+            if(stack->contexts[pair.ctx]->data[pair.id].get() == NULL){
+                cursor->setError(token.first, "Undefined store named '"+nsName+"'", token.line);
+                return ctx->buildNil(); 
+            }                  
+            auto store = std::static_pointer_cast<CV::StoreType>(stack->contexts[pair.ctx]->data[pair.id]);
+            ntoken.store = pair.id;
+            return solveStoreProxy(stack, store, token, ctx, cursor);
+        }else{
+            cursor->setError(token.first, "Undefined store named '"+nsName+"'", token.line);
+            return ctx->buildNil(); 
+        }
+    }else{
+        auto pair = store->getId(token.first);
+        return stack->contexts[pair.ctx]->data[pair.id];
+    }
+}
+
+static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
     if(!token.solved){
         auto tokens = parseTokens(token.first, ' ', cursor);
         // Update line number
@@ -819,7 +855,6 @@ static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::
             }
             auto &nsName = v[0];
             auto &name = v[1];
-
             CV::Token ntoken;
             ntoken.first = name;
             ntoken.solved = token.solved;
@@ -828,6 +863,14 @@ static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::
             if(ctx->check(nsName, token.store)){ // store names take precedence over namespaces. Perhaps should warn the user?
                 // Must be a store
                 auto pair = ctx->getIdName(nsName, token.store);
+                // Does it exist right now?
+                if(stack->contexts[pair.ctx]->data[pair.id].get() == NULL){
+                    // store proxy
+                    auto ins = stack->createInstruction(CV::InstructionType::STORE_PROXY, ntoken);
+                    ins->data.push_back(pair.ctx);   
+                    ins->data.push_back(pair.id);
+                    return ins;
+                }                
                 auto store = std::static_pointer_cast<CV::StoreType>(stack->contexts[pair.ctx]->data[pair.id]);
                 ntoken.store = pair.id;
                 auto cctx = stack->contexts[pair.ctx];
@@ -1021,7 +1064,8 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
         unsigned type; 
         if( dataIns->type == CV::InstructionType::STATIC_PROXY ||
             dataIns->type == CV::InstructionType::PROMISE_PROXY || 
-            dataIns->type == CV::InstructionType::REFERRED_PROXY){
+            dataIns->type == CV::InstructionType::REFERRED_PROXY ||
+            dataIns->type == CV::InstructionType::STORE_PROXY){
             dataId = dataIns->data[1];
             type = 0; // direct, no need for promise
         }else{
@@ -1409,7 +1453,8 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
             ins->parameter.push_back(v->id);
             if( v->type == CV::InstructionType::STATIC_PROXY ||
                 v->type == CV::InstructionType::PROMISE_PROXY ||
-                v->type == CV::InstructionType::REFERRED_PROXY){
+                v->type == CV::InstructionType::REFERRED_PROXY ||
+                v->type == CV::InstructionType::STORE_PROXY){
                 memberId = v->data[1];
                 type = 0;
             }else{                
@@ -1466,7 +1511,8 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
             ins->parameter.push_back(v->id);
             if( v->type == CV::InstructionType::STATIC_PROXY ||
                 v->type == CV::InstructionType::REFERRED_PROXY ||
-                v->type == CV::InstructionType::PROMISE_PROXY){
+                v->type == CV::InstructionType::PROMISE_PROXY ||
+                v->type == CV::InstructionType::STORE_PROXY){
                 memCtxId = v->data[0];
                 memberId = v->data[1];
                 type = 0;
@@ -1878,6 +1924,7 @@ bool CV::Context::check(const std::shared_ptr<CV::Stack> &stack, const CV::Token
     }else
     if(token.store != 0){
         if(this->data[token.store].get() == NULL){
+            std::cout << token.store << std::endl;
             return this->top ? this->top->check(stack, token) : false;
         }
         auto store = std::static_pointer_cast<CV::StoreType>(this->data[token.store]);
@@ -1970,9 +2017,9 @@ std::shared_ptr<CV::Item> CV::Context::buildNil(){
 }
 
 std::shared_ptr<CV::Item> CV::Context::buildStore(){
-    auto store = std::make_shared<CV::StoreType>();
-    this->store(store);
-    return store;
+    auto v = std::make_shared<CV::StoreType>();
+    this->store(v);
+    return v;
 }
 
 std::shared_ptr<CV::Item> CV::Context::buildString(const std::string &v){
@@ -3154,9 +3201,12 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             if(cursor->raise()){
                 return ctx->buildNil();
             }      
-
             return item;
         };   
+        case CV::InstructionType::STORE_PROXY: {
+            auto store = std::static_pointer_cast<CV::StoreType>(stack->contexts[ins->data[0]]->data[ins->data[1]]);
+            return solveStoreProxy(stack, store, ins->token, ctx, cursor);
+        };
                     
     }
 
@@ -3305,7 +3355,7 @@ void __CV_REGISTER_STANDARD_BINARY_FUNCTIONS(std::shared_ptr<CV::Stack> &stack);
 void __CV_REGISTER_MATH_BINARY_FUNCTIONS(std::shared_ptr<CV::Stack> &stack);
 void CV::AddStandardConstructors(std::shared_ptr<CV::Stack> &stack){
 
-    auto nsStd = stack->createNamespace("Standard Core Library", "std");
+    auto nsStd = stack->createNamespace("LibCore", "std");
 
     __addStandardConstructors(stack);
     __CV_REGISTER_STANDARD_BINARY_FUNCTIONS(stack);

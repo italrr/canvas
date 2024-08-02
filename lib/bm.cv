@@ -1,3 +1,6 @@
+#
+#   Basic Bitmap manipulation library
+#
 
 [namespace LibBitmap bm 
     [create:[fn [chan w h][

@@ -8,7 +8,7 @@
     #include <string>
     #include <mutex>
 
-    #define __CV_DEFAULT_NUMBER_TYPE float  
+    #define __CV_DEFAULT_NUMBER_TYPE double  
     static const __CV_DEFAULT_NUMBER_TYPE CANVAS_LANG_VERSION[3] = { 0, 3, 0 };
 
     #define _CV_PLATFORM_TYPE_LINUX 0
@@ -177,7 +177,8 @@
                 STATIC_PROXY = 200,
                 REFERRED_PROXY,
                 PROMISE_PROXY,
-                NTH_PROXY
+                NTH_PROXY,
+                STORE_PROXY
             };
         };     
 
