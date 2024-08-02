@@ -75,29 +75,56 @@ int main(int argc, char* argv[]){
 
     if(dashFile.get() && dashFile->valid){
 		if(dashRepl.get() && dashRepl->valid){
-			std::cout << "REPL mode cannot be used while reading a file. Start REPL mode and import a file by using \"[import LIBRAY]\"" << std::endl;
+			std::cerr << "REPL mode cannot be used while reading a file. Start REPL mode and import a file by using \"[import LIBRAY]\"" << std::endl;
 			return 1;
 		}
-        // TODO: Check if file exists
         auto &path = dashFile->val;
+        if(!CV::Tools::fileExists(path)){
+			std::cerr << "Failed to read file '" << path << "': It doesn't exist." << std::endl;
+			return 1;
+		}
         std::string buffer = CV::Tools::readFile(path);
-
+		if(buffer.size() == 0){
+			std::cerr << "Failed to read file '" << path << "': File it's empty." << std::endl;
+			return 1;			
+		}
         auto cursor = std::make_shared<CV::Cursor>();
         auto stack = std::make_shared<CV::Stack>();
         auto context = stack->createContext();    
 		stack->setTopContext(context);
         CV::AddStandardConstructors(stack);      
         auto result = CV::QuickInterpret(buffer, stack, context, cursor);
+		cursor->raise();
     }else
     if(dashRepl.get() && dashRepl->valid){
-
+		printCVEntry(false, relaxed ? "RELAXED MODE" : "");
+        auto cursor = std::make_shared<CV::Cursor>();
+        auto stack = std::make_shared<CV::Stack>();
+        auto context = stack->createContext();    
+		cursor->shouldExit = !relaxed;
+		stack->setTopContext(context);
+        CV::AddStandardConstructors(stack);   
+		while(true){
+			std::cout << std::endl;
+			std::string input = "";
+			std::cout << CV::getPrompt();
+			std::getline (std::cin, input);		
+			if(input.size() > 0){
+				auto result = CV::QuickInterpret(input, stack, context, cursor, false);
+				cursor->raise();
+				std::cout << result << std::endl;				
+				if(relaxed){
+					cursor->reset();
+				}				
+			}			
+		}
+		return 0;
     }else{
         auto cursor = std::make_shared<CV::Cursor>();
         auto stack = std::make_shared<CV::Stack>();
         auto context = stack->createContext();    
 		stack->setTopContext(context);
         CV::AddStandardConstructors(stack);
-
         std::string cmd = "";
         for(int i = 1; i < params.size(); ++i){
             cmd += params[i];
@@ -108,7 +135,8 @@ int main(int argc, char* argv[]){
             return 0;
         }
         auto result = CV::QuickInterpret(cmd, stack, context, cursor);
-        std::cout << result << std::endl;;
+		cursor->raise();
+        std::cout << result << std::endl;
     }
 
     return 0;

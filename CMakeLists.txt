@@ -20,11 +20,11 @@ endif()
 add_library(cv_bin ${cv_src})
 
 IF(LINUX)
-	target_link_libraries(cv_bin -pthread  -m64  -lSDL2 -lSDL2main )
+	target_link_libraries(cv_bin -pthread -m64 )
 ENDIF(LINUX)
 
 IF(MINGW)
-	target_link_libraries(cv_bin -m64 -lSDL2 -lSDL2main -lopengl32 -lws2_32)
+	target_link_libraries(cv_bin -m64)
 ENDIF(MINGW)
 
 
