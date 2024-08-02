@@ -90,6 +90,7 @@
 
         namespace Tools {
             std::string readFile(const std::string &path);
+            bool fileExists(const std::string &path);
         }  
 
         namespace NaturalType {
@@ -217,8 +218,10 @@
             unsigned line;
             Item *subject;
             bool shouldExit;
+            bool used;
             Cursor();
             bool raise();
+            void reset();
             void setError(const std::string &title, const std::string &message, unsigned line);
             void setError(const std::string &title, const std::string &message, unsigned line, Item *subject);            
         };
@@ -442,8 +445,8 @@
         std::string ItemToText(const std::shared_ptr<CV::Stack> &stack, CV::Item *item);
         void SetUseColor(bool v);
         CV::ControlFlow execute(CV::Instruction *ins, const std::shared_ptr<CV::Stack> &stack, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);
-        std::string QuickInterpret(const std::string &input, const std::shared_ptr<CV::Stack> &stack, std::shared_ptr<Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);
-
+        std::string QuickInterpret(const std::string &input, const std::shared_ptr<CV::Stack> &stack, std::shared_ptr<Context> &ctx, std::shared_ptr<CV::Cursor> &cursor, bool shouldClear = true);
+        std::string getPrompt();
     }
 
 

@@ -26,7 +26,7 @@ This is what a _hello world_ looks in canvas:
 io:out 'Hello World!\n'
 ```
 
-Simple arithmetic operations any number of real numbers:
+Simple arithmetic operations using any number of real numbers:
 ```
 + 2 2
 [* 2 [+ 2 2]]
@@ -34,7 +34,7 @@ Simple arithmetic operations any number of real numbers:
 ```
 
 # Why?
-It started as an experiment, or toy project. The original idea began when I was om colleged. I worked on it through the years on and off, constantly starting over. Recently finally managed to get something to show for. My current intention with it is to use it on my game engine (Caribbean Raster), but will eventually mature it enough for other people to use.
+It started as an experiment, or toy project. The original idea began when I was in colleged. I worked on it through the years on and off, constantly starting over. Recently finally managed to get something to show for. My current intention with it is to use it on my game engine (Caribbean Raster), but will eventually mature it enough for other people to use.
 
 # Standard Library
 - `math`: Includes general math function such as `math:sin`, `math:PI`.
@@ -44,7 +44,24 @@ It started as an experiment, or toy project. The original idea began when I was 
 - `fs`: It includes File System functions.
 - `io`: Related to terminal functions such as `out`, `err` and `in`. It's embedded in the binary (no need to import).
 
-Standard Library is in still in heavy development.
+The Standard Library is in still in heavy development.
+
+# How to Build?
+canvas is very simple and thus easy to build. It only really needs a C++11 compiler, pthreads and CMake. It however was built around GCC, and depends on Unix/Linux and related `std`. You should be able to build it on Windows by using MinGW easily, VC++ would require some work.
+
+### Building on LINUX:
+Simply:
+```
+cmake .
+make -j
+```
+
+### Building on WINDOWS:
+Using MinGW & Window's CMAKE:
+```
+cmake . -G "MinGW Makefiles"
+make -j
+```
 
 # TODO
 - Further stability testing.

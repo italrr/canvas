@@ -197,7 +197,7 @@ namespace CV {
             return result;
         }
         
-        static bool fileExists(const std::string &path){
+        bool fileExists(const std::string &path){
 			struct stat tt;
 			stat(path.c_str(), &tt);
 			return S_ISREG(tt.st_mode);	            
@@ -229,6 +229,7 @@ namespace CV {
 
 CV::Cursor::Cursor(){
     this->error = false;
+    this->used = false;
     this->shouldExit = true;
 }
 
@@ -249,10 +250,14 @@ void CV::Cursor::setError(const std::string &title, const std::string &message, 
     this->line = line;
     this->subject = subject;
     this->error = true;
+    this->used = true;
     accessMutex.unlock();
 }
 
 bool CV::Cursor::raise(){
+    if(used){
+        return true;
+    }
     accessMutex.lock();
     if(!this->error){
         accessMutex.unlock();
@@ -275,8 +280,14 @@ bool CV::Cursor::raise(){
     if(this->shouldExit){
         std::exit(1);
     }
+    used = true;
     accessMutex.unlock();
     return true;
+}
+
+void  CV::Cursor::reset(){
+    used = false;
+    error = false;
 }
 
 /* -------------------------------------------------------------------------------------------------------------------------------- */
@@ -3324,7 +3335,7 @@ std::string CV::ItemToText(const std::shared_ptr<CV::Stack> &stack, CV::Item *it
     }
 }
 
-std::string CV::QuickInterpret(const std::string &input, const std::shared_ptr<CV::Stack> &stack, std::shared_ptr<Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
+std::string CV::QuickInterpret(const std::string &input, const std::shared_ptr<CV::Stack> &stack, std::shared_ptr<Context> &ctx, std::shared_ptr<CV::Cursor> &cursor, bool shouldClear){
     // Get text tokens
     auto tokens = parseTokens(input,  ' ', cursor);
     if(cursor->raise()){
@@ -3346,9 +3357,18 @@ std::string CV::QuickInterpret(const std::string &input, const std::shared_ptr<C
 
     auto text = CV::ItemToText(stack, result.get());
 
-    stack->clear();
+    if(shouldClear){
+        stack->clear();
+    }
 
     return text;
+}
+
+std::string CV::getPrompt(){
+    std::string start = Tools::setTextColor(Tools::Color::MAGENTA) + "[" + Tools::setTextColor(Tools::Color::RESET);
+    std::string cv = Tools::setTextColor(Tools::Color::CYAN) + "~" + Tools::setTextColor(Tools::Color::RESET);
+    std::string end = Tools::setTextColor(Tools::Color::MAGENTA) + "]" + Tools::setTextColor(Tools::Color::RESET);
+    return start+cv+end+"> ";
 }
 
 void __CV_REGISTER_STANDARD_BINARY_FUNCTIONS(std::shared_ptr<CV::Stack> &stack);

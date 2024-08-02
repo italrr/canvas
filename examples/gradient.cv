@@ -11,6 +11,7 @@
 [let img [bm:create channels width height]]
 
 [let c 0]
+[let time-proc-start [tm:epoch]]
 [iter pixel in img:pixels at 3 [
     [let y [math:floor [math:mod c width]]]
     [let x [math:floor [/ c width]]]
@@ -22,6 +23,11 @@
     [mut [nth 2 pixel] b]
     [++ c]  
 ]]
+[let time-proc-end [tm:epoch]]
+[io:out 'Created image. Elapsed time: ' [/ [- time-proc-end time-proc-start] 1000] ' seconds\n']
 
+[io:out 'Writing ' filename '\n']
+[let time-write-start [tm:epoch]]
 [bm:write-png img filename]
-[io:out 'Wrote ' filename '\n']
+[let time-write-end [tm:epoch]]
+[io:out 'Wrote ' filename '. Elapsed time ' [/ [- time-write-end time-write-start] 1000] ' seconds\n']
