@@ -89,6 +89,19 @@
     namespace CV {
 
         namespace Tools {
+            namespace Color {
+                enum Color : int {
+                    BLACK,
+                    RED,
+                    GREEN,
+                    YELLOW,
+                    BLUE,
+                    MAGENTA,
+                    CYAN,
+                    WHITE,
+                    RESET
+                };
+            }            
             std::string readFile(const std::string &path);
             bool fileExists(const std::string &path);
         }  

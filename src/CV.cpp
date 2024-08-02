@@ -85,20 +85,6 @@ namespace CV {
             return out;
         }
 
-        namespace Color {
-            enum Color : int {
-                BLACK,
-                RED,
-                GREEN,
-                YELLOW,
-                BLUE,
-                MAGENTA,
-                CYAN,
-                WHITE,
-                RESET
-            };
-        }
-
         namespace UnixColor {
 
             static std::unordered_map<int, std::string> TextColorCodes = {
