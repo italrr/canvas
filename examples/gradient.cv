@@ -1,5 +1,6 @@
-[import 'lib/bm.cv']
-[import 'lib/core.cv'] # bring in mutators
+[import 'lib/bm.cv']    # bitmap manipulation
+[import 'lib/time.cv']  # for tm:epoch
+[import 'lib/core.cv']  # bring in mutators
 
 [let width 512]
 [let height 512]
@@ -8,8 +9,6 @@
 
 [io:out 'Creating ' width 'x' height ' RGB image' '\n']
 [let img [bm:create channels width height]]
-
-[io:out img '\n']
 
 [let c 0]
 [iter pixel in img:pixels at 3 [

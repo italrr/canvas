@@ -1,0 +1,8 @@
+#
+#   Time Library
+#
+
+[namespace LibTime tm]
+
+# load rest of the library
+[__cv_load_dynamic_library 'libtm']

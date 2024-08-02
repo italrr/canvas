@@ -1,4 +1,8 @@
-# Mutating Arithmetic Unary Operators
+#
+#   CORE and STD related functions
+#
+
+# Mutating Arithmetic Unary Operators (should prob move to its dedicated lib)
 [let ++ [fn [n]
     [
         mut n [+ n 1]
@@ -22,3 +26,6 @@
         mut n [/ n 2]
     ]
 ]]
+
+# Rest of the library
+[__cv_load_dynamic_library 'libcore']

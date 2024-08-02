@@ -46,6 +46,7 @@ cases = [
 
     # Test dynamic library
     TestCase("[import 'lib/bm.cv'][let img [bm:create 3 25 25]]", "[height:25 channels:3 width:25 pixels:[0 0 0 0 0 0 0 0 0 0 ...(1865 hidden)]]", True),
+    TestCase("[import 'lib/bm.cv'][let img [bm:create 3 25 25]][img:pixels]", "[0 0 0 0 0 0 0 0 0 0 ...(1865 hidden)]", True),
 
     # Test loops & interrupts
     TestCase("[for i from 1 to 10 [io:out i]]", "12345678910nil", True),

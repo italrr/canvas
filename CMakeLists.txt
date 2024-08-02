@@ -36,3 +36,7 @@ target_link_libraries(cv cv_bin)
 
 # bitmap
 add_library(bm SHARED src/libs/bitmap.cpp)
+# time
+add_library(tm SHARED src/libs/time.cpp)
+# std
+add_library(core SHARED src/libs/core.cpp)
