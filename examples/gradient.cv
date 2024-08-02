@@ -9,8 +9,10 @@
 [io:out 'Creating ' width 'x' height ' RGB image' '\n']
 [let img [bm:create channels width height]]
 
+[io:out img '\n']
+
 [let c 0]
-[iter pixel in img at 3 [
+[iter pixel in img:pixels at 3 [
     [let y [math:floor [math:mod c width]]]
     [let x [math:floor [/ c width]]]
     [let r [/ [+ x 1] width]]
@@ -22,5 +24,5 @@
     [++ c]  
 ]]
 
-[bm:write-png img channels width height filename]
+[bm:write-png img filename]
 [io:out 'Wrote ' filename '\n']

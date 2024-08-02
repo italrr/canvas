@@ -7,16 +7,16 @@ canvas is:
 - Brackets used to separate statements. 
 - Lists are very important. `[1 2 3]`
 - `Store` entities that work similar to JSON objects. `store a:5 b:10`
-- No OOP. Stores cannot contain functions, only data. The language discourages any type of OOP convention.
+- No OOP. Stores cannot contain functions, only data. The language actively discourages any type of OOP convention.
 - Namespaces used to organize hierarchies. `[namespace a:100 b:[fn [n][+ n n]]]`
-- Import/Library support.
+- Import/Library support. Compiled/Binary functions/libraries also possible with some limitations.
 - Mostly immutable. There are SOME exceptions. In theory only NUMBERs and STRINGs can be fully mutated (changing memory's content without altering IDs).
 - Recursion highly encouraged.
 - JIT compiled.
 - Intended for scripting, but capable of general software development.
-- Very basic garbage collection using C++'s reference counting through std::memory.
+- Very basic garbage collection using C++'s reference counting through std::memory (expect some leaks until v1.0.0).
 - Errors are handled by checking return types (nil, 1, 0 etc).
-- Parallelism and concurrency are first class citizens (WIP)
+- Parallelism and concurrency are first class citizens (TBD/WIP)
 
 This is what a _hello world_ looks in canvas:
 ```
