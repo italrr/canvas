@@ -1,6 +1,8 @@
 # canvas [~]
 
-canvas is dynamic, high level, general-purpose, programming language designed and developed by me. canvas is heavily inspired by JavaScript, LISP and Python. It features a form of JIT compiler to speed up execution.
+canvas is dynamic, high level, general-purpose, programming language, designed and developed by me. canvas is heavily inspired by JavaScript, LISP and Python. It features a form of JIT compiler to speed up execution. It comes with a couple of fundamental Standard Libraries such as `fs` File System and `core/std` signal handling.
+
+canvas was created to be used as the extension language for my own projects. It still is in heavy development.
 
 canvas is:
 - Prefix Notation. `[STATEMENT ARGUMENT0...ARGUMENTN]`
@@ -16,6 +18,7 @@ canvas is:
 - Intended for scripting, but capable of general software development.
 - Very basic garbage collection using C++'s reference counting through std::memory (expect some leaks until v1.0.0).
 - Errors are handled by checking return types (nil, 1, 0 etc).
+- Standard Library!
 - Parallelism and concurrency are first class citizens (TBD/WIP)
 
 This is what a _hello world_ looks in canvas:
@@ -33,7 +36,26 @@ Simple arithmetic operations any number of real numbers:
 # Why?
 It started as an experiment, or toy project. The original idea began when I was om colleged. I worked on it through the years on and off, constantly starting over. Recently finally managed to get something to show for. My current intention with it is to use it on my game engine (Caribbean Raster), but will eventually mature it enough for other people to use.
 
+# Standard Library
+- `math`: Includes general math function such as `math:sin`, `math:PI`.
+- `time/tm`: It includes time related function such as `tm:epoch` (milliseconds since epoch).
+- `bm`: It's a very basic Bitmap manipulation library.
+- `core`: It includes a couple of generic, core and standard functions such as `std::exit`.
+- `fs`: It includes File System functions.
+- `io`: Related to terminal functions such as `out`, `err` and `in`. It's embedded in the binary (no need to import).
+
+Standard Library is in still in heavy development.
+
+# TODO
+- Further stability testing.
+- Improve GC. canvas is probably wasting *a lot* of memory right now.
+- Further complete Standard Library.
+- Add innate concurrency/parralelism interface (Including thread safetiness tools such as atomics, sempahores, etc).
+- Improve error handling and checking.
+
 # Examples
+
+Checkout `./examples/`
 
 ### FizzBizz Example
 ```
