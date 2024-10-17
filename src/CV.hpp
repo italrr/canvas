@@ -222,12 +222,14 @@
             std::mutex accessMutex;
             std::string message;
             std::string title;
+            bool autoprint;
             bool error;
             unsigned line;
             Item *subject;
             bool shouldExit;
             bool used;
             Cursor();
+            std::string getRaised();
             bool raise();
             void reset();
             void setError(const std::string &title, const std::string &message, unsigned line);
@@ -420,8 +422,63 @@
             void registerVar(const std::string name, const std::shared_ptr<CV::Item> &var);
             void registerFunction(const std::string &name, const std::function<std::shared_ptr<CV::Item>(const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>>&, std::shared_ptr<CV::Context>&, std::shared_ptr<CV::Cursor> &cursor)> &fn); 
             CV::BinaryFunction *getRegisteredFunction(const std::shared_ptr<CV::Stack> &stack, const CV::Token &token);
+            void garbageCollect();
             // CV::ControlFlow execute(CV::Instruction *ins, std::shared_ptr<Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);
         };
+
+        namespace ErrorCheck {
+
+            namespace ConstraintType {
+                enum ConstraintType : unsigned {
+                    ARG_NUMBER,
+                    ARG_TYPE,
+                    ARG_LIST
+                };
+            }
+
+            struct Constraint {
+                unsigned type;
+                virtual bool check(const std::shared_ptr<CV::Stack> &stack, std::string &msg, const std::vector<std::shared_ptr<CV::Item>> &args){
+                    return true;
+                }
+            };
+
+            struct ConstraintArgNumber : Constraint {
+                unsigned type;
+                unsigned minNumber;
+                unsigned maxNumber;
+                ConstraintArgNumber();
+                ConstraintArgNumber(unsigned minNumber, unsigned maxNumber);
+                bool check(const std::shared_ptr<CV::Stack> &stack, std::string &msg, const std::vector<std::shared_ptr<CV::Item>> &args);
+            }; 
+
+            struct ConstraintArgType : Constraint {   
+                unsigned argPos;
+                unsigned argType;
+                ConstraintArgType();
+                ConstraintArgType(unsigned argPos, unsigned argType);
+                bool check(const std::shared_ptr<CV::Stack> &stack, std::string &msg, const std::vector<std::shared_ptr<CV::Item>> &args);
+            };
+
+            struct ConstraintArgList : Constraint {   
+                unsigned argType;
+                unsigned argPos;
+                unsigned argSize;
+                ConstraintArgList();
+                ConstraintArgList(unsigned argType, unsigned argPos, unsigned argSize);
+                bool check(const std::shared_ptr<CV::Stack> &stack, std::string &msg, const std::vector<std::shared_ptr<CV::Item>> &args);
+            };
+
+            bool TestArguments(
+                            const std::vector<std::shared_ptr<Constraint>> &constraints,
+                            const std::string &name,
+                            const CV::Token &token,
+                            const std::shared_ptr<CV::Stack> &stack,
+                            std::vector<std::shared_ptr<CV::Item>> &args,
+                            std::shared_ptr<CV::Cursor> &cursor);
+
+        }
+
         void SetColorTableText(const std::unordered_map<int, std::string> &ct);
         void SetColorTableBackground(const std::unordered_map<int, std::string> &ct);        
         void AddStandardConstructors(std::shared_ptr<CV::Stack> &stack);

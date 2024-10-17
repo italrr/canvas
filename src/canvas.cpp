@@ -95,6 +95,7 @@ int main(int argc, char* argv[]){
         CV::AddStandardConstructors(stack);      
         auto result = CV::QuickInterpret(buffer, stack, context, cursor);
 		cursor->raise();
+		stack->garbageCollect();
     }else
     if(dashRepl.get() && dashRepl->valid){
 		printCVEntry(false, relaxed ? "RELAXED MODE" : "");
@@ -112,6 +113,7 @@ int main(int argc, char* argv[]){
 			if(input.size() > 0){
 				auto result = CV::QuickInterpret(input, stack, context, cursor, false);
 				cursor->raise();
+				stack->garbageCollect();
 				std::cout << result << std::endl;				
 				if(relaxed){
 					cursor->reset();
@@ -136,6 +138,7 @@ int main(int argc, char* argv[]){
         }
         auto result = CV::QuickInterpret(cmd, stack, context, cursor);
 		cursor->raise();
+		stack->garbageCollect();
         std::cout << result << std::endl;
     }
 

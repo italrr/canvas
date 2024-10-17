@@ -1,6 +1,7 @@
 #include <fstream>
 #include <set>
 #include <sys/stat.h>
+#include <stdarg.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <stdio.h>
@@ -31,6 +32,15 @@ namespace CV {
             }
         }
         #endif
+
+        std::string format(const std::string &_str, ...){
+            va_list arglist;
+            char buff[1024];
+            va_start(arglist, _str);
+            vsnprintf(buff, sizeof(buff), _str.c_str(), arglist);
+            va_end( arglist );
+            return std::string(buff);
+        }
 
         static bool isNumber(const std::string &s){
             return (s.find_first_not_of( "-.0123456789") == std::string::npos) && (s != "-" && s != "--" && s != "+" && s != "++");
@@ -215,6 +225,7 @@ CV::Cursor::Cursor(){
     this->error = false;
     this->used = false;
     this->shouldExit = true;
+    this->autoprint = true;
 }
 
 void CV::Cursor::setError(const std::string &title, const std::string &message, unsigned line){
@@ -238,6 +249,10 @@ void CV::Cursor::setError(const std::string &title, const std::string &message, 
     accessMutex.unlock();
 }
 
+std::string CV::Cursor::getRaised(){
+    return "[Line #"+std::to_string(this->line)+"] "+this->title+": "+this->message;
+}
+
 bool CV::Cursor::raise(){
     if(used){
         return true;
@@ -247,20 +262,20 @@ bool CV::Cursor::raise(){
         accessMutex.unlock();
         return false;
     }
-    fprintf(stderr, "%s[Line #%i]%s %s: %s%s%s.\n",
-            (
-                CV::Tools::setTextColor(CV::Tools::Color::BLACK, true) +
-                CV::Tools::setBackgroundColor(CV::Tools::Color::WHITE)
-            ).c_str(),
-            this->line,
-            CV::Tools::setTextColor(CV::Tools::Color::RESET, false).c_str(),
-            this->title.c_str(),
-            CV::Tools::setTextColor(CV::Tools::Color::RED, false).c_str(),
-            this->message.c_str(),
-            CV::Tools::setTextColor(CV::Tools::Color::RESET, false).c_str()
-            
-
-    );
+    if(this->autoprint){
+        fprintf(stderr, "%s[Line #%i]%s %s: %s%s%s.\n",
+                (
+                    CV::Tools::setTextColor(CV::Tools::Color::BLACK, true) +
+                    CV::Tools::setBackgroundColor(CV::Tools::Color::WHITE)
+                ).c_str(),
+                this->line,
+                CV::Tools::setTextColor(CV::Tools::Color::RESET, false).c_str(),
+                this->title.c_str(),
+                CV::Tools::setTextColor(CV::Tools::Color::RED, false).c_str(),
+                this->message.c_str(),
+                CV::Tools::setTextColor(CV::Tools::Color::RESET, false).c_str()
+        );
+    }
     if(this->shouldExit){
         std::exit(1);
     }
@@ -1849,6 +1864,20 @@ void CV::Stack::deleteContext(unsigned id){
     this->contexts.erase(it);
 }
 
+void CV::Stack::garbageCollect(){
+    int count = 0;
+    for(auto &itctx : this->contexts){
+        auto &ctx = itctx.second;
+        for(auto &itdata : ctx->data){
+            auto &data = itdata.second;
+            if(data.unique()){
+                ctx->data.erase(data->id);
+                ++count;
+            }
+        }
+    }
+}
+
 static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::Instruction *ins, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
     switch(ins->type){
         default:
@@ -1857,7 +1886,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             std::exit(1);
         } break;
         case CV::InstructionType::NOOP: {
-            return CV::ControlFlow(ctx->buildNil(stack));
+            return CV::ControlFlow(ctx->buildNil(stack), CV::ControlFlowType::RETURN);
         };
 
         /*
@@ -2950,11 +2979,10 @@ std::string CV::QuickInterpret(const std::string &input, const std::shared_ptr<C
     if(cursor->raise()){
         return "";
     }
-
     // Execute
     auto result = CV::Execute(entry, stack, ctx, cursor).value;
     if(cursor->raise()){
-        return "";
+        return CV::ItemToText(stack, result.get());
     }
 
     auto text = CV::ItemToText(stack, result.get());
@@ -2987,3 +3015,128 @@ void CV::AddStandardConstructors(std::shared_ptr<CV::Stack> &stack){
 }
 
 /* -------------------------------------------------------------------------------------------------------------------------------- */
+
+CV::ErrorCheck::ConstraintArgNumber::ConstraintArgNumber(){
+    type = ConstraintType::ARG_NUMBER;
+}
+
+CV::ErrorCheck::ConstraintArgNumber::ConstraintArgNumber(unsigned minNumber, unsigned maxNumber){
+    type = ConstraintType::ARG_NUMBER;
+    this->minNumber = minNumber;
+    this->maxNumber = maxNumber;
+}
+
+bool CV::ErrorCheck::ConstraintArgNumber::check(const std::shared_ptr<CV::Stack> &stack, std::string &msg, const std::vector<std::shared_ptr<CV::Item>> &args){
+    if(minNumber == 0 && maxNumber == 0 && args.size() != 0){
+        msg = CV::Tools::format("Expected no arguments, %i were provided", args.size());
+        return true;
+    }
+    if(minNumber != maxNumber && args.size() < minNumber){
+        msg = CV::Tools::format("Expected at least %i arguments, %i were provided", minNumber, args.size());
+        return true;
+    }
+    if(minNumber != maxNumber && args.size() > maxNumber){
+        msg = CV::Tools::format("Expected no more than %i arguments, %i were provided", maxNumber, args.size());
+        return true;
+    }                
+    if(minNumber == maxNumber && args.size() != maxNumber){
+        msg = CV::Tools::format("Expected exactly %i arguments, %i were provided", maxNumber, args.size());
+        return true;                    
+    }
+    return false;
+}
+
+CV::ErrorCheck::ConstraintArgType::ConstraintArgType(){
+    this->type = ConstraintType::ARG_TYPE;
+}
+
+CV::ErrorCheck::ConstraintArgType::ConstraintArgType(unsigned argPos, unsigned argType){
+    this->type = ConstraintType::ARG_TYPE;
+    this->argPos = argPos;
+    this->argType = argType;
+}
+
+bool CV::ErrorCheck::ConstraintArgType::check(const std::shared_ptr<CV::Stack> &stack, std::string &msg, const std::vector<std::shared_ptr<CV::Item>> &args){
+    if(args.size() < (this->argPos+1)){
+        msg = CV::Tools::format("Provided mismatching number of arguments, %i were provided, %i expected at least", args.size(), argPos+1);
+        return true;
+    }
+    if(args[argPos]->type != this->argType){
+        msg = CV::Tools::format(
+            "Provided argument type '%s' at position %i: Expected '%s'",
+            CV::NaturalType::name(args[argPos]->type).c_str(),
+            argPos,
+            CV::NaturalType::name(this->argType).c_str()
+        );
+        return true;                    
+    }
+    return false;
+}
+
+CV::ErrorCheck::ConstraintArgList::ConstraintArgList(){
+    this->type = ConstraintType::ARG_LIST;
+}
+
+CV::ErrorCheck::ConstraintArgList::ConstraintArgList(unsigned argType, unsigned argPos, unsigned argSize){
+    this->type = ConstraintType::ARG_LIST;
+    this->argType = argType;
+    this->argPos = argPos;
+    this->argSize = argSize;
+}
+
+bool CV::ErrorCheck::ConstraintArgList::check(const std::shared_ptr<CV::Stack> &stack, std::string &msg, const std::vector<std::shared_ptr<CV::Item>> &args){
+    if(args.size() < (this->argPos+1)){
+        msg = CV::Tools::format("Provided mismatching number of arguments, %i were provided, %i expected at least", args.size(), argPos+1);
+        return true;
+    }
+
+    if(args[argPos]->type != CV::NaturalType::LIST){
+        msg = CV::Tools::format("Expected argument type 'LIST' at position %i: Provided %s",
+            argPos,
+            CV::NaturalType::name(args[argPos]->type)
+        );
+        return true;                    
+    }
+
+    auto lst = std::static_pointer_cast<CV::ListType>(args[argPos]);
+
+    if(lst->getSize() != this->argSize){
+        msg = CV::Tools::format("Expected argument type 'LIST' of exactly %i elements, provided %i",
+            argSize,
+            lst->getSize()
+        );
+        return true;                      
+    }
+
+    for(int i = 0; i < lst->getSize(); ++i){
+        auto item = lst->get(stack, i);
+        if(item->type != argType){
+            msg = CV::Tools::format("Expected argument type 'LIST' of '%s' elements, provided '%s' at position %i",
+                CV::NaturalType::name(argType).c_str(),
+                CV::NaturalType::name(item->type).c_str(),
+                i
+            );
+            return true; 
+        }
+    }
+
+    return false;
+}
+
+bool CV::ErrorCheck::TestArguments(
+                const std::vector<std::shared_ptr<Constraint>> &constraints,
+                const std::string &name,
+                const CV::Token &token,
+                const std::shared_ptr<CV::Stack> &stack,
+                std::vector<std::shared_ptr<CV::Item>> &args,
+                std::shared_ptr<CV::Cursor> &cursor){
+    for(int i = 0; i < constraints.size(); ++i){
+        auto &cons = constraints[i];
+        std::string error;
+        if(cons->check(stack, error, args)){
+            cursor->setError(name, error, token.line);
+            return true;
+        }
+    }
+    return false;
+}
