@@ -1886,7 +1886,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             std::exit(1);
         } break;
         case CV::InstructionType::NOOP: {
-            return CV::ControlFlow(ctx->buildNil(stack), CV::ControlFlowType::RETURN);
+            return CV::ControlFlow(ctx->buildNil(stack));
         };
 
         /*
