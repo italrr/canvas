@@ -9,44 +9,49 @@
 
 #include "../CV.hpp"
 
+#include <iostream>
 extern "C" void _CV_REGISTER_LIBRARY(const std::shared_ptr<CV::Stack> &stack){
 
-    auto nsId = stack->getNamespaceId("LibBitmap");
-    auto ns = stack->namespaces[nsId];
+    stack->registerFunction("bm:write-png", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
 
-    stack->registerFunction(ns->id, "write-png", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
-
-        if(args.size() != 2){
-            cursor->setError(name, "Expects exactly 2 arguments", token.line);
-            return ctx->buildNumber(0);
+        if(args.size() != 4){
+            cursor->setError(name, "Expects exactly 4 arguments: bm-write-png [PIXELS] [WIDTH HEIGHT] CHANNELS FILENAME", token.line);
+            return ctx->buildNumber(stack, 0);
         }
 
-        if(args[0]->type != CV::NaturalType::STORE){
-            cursor->setError(name, "argument 0 must be a STORE (bm object)", token.line);
-            return ctx->buildNumber(0);
-        }
-
-        if(args[1]->type != CV::NaturalType::STRING){
-            cursor->setError(name, "argument 1 must be a STORE (filename)", token.line);
-            return ctx->buildNumber(0);
+        if(args[0]->type != CV::NaturalType::LIST){
+            cursor->setError(name, "argument 0 must be a LIST: PIXELS", token.line);
+            return ctx->buildNumber(stack, 0);
         }        
 
-        auto store = std::static_pointer_cast<CV::StoreType>(args[0]);
-        auto filename = std::static_pointer_cast<CV::StringType>(args[1])->get();
+        if(args[1]->type != CV::NaturalType::LIST){
+            cursor->setError(name, "argument 1 must be a LIST [WIDTH HEIGHT]", token.line);
+            return ctx->buildNumber(stack, 0);
+        }
 
+        if(args[2]->type != CV::NaturalType::NUMBER){
+            cursor->setError(name, "argument 2 must be a NUMBER: CHANNELS", token.line);
+            return ctx->buildNumber(stack, 0);
+        }
 
-        auto widthV = store->getId("width");
-        auto width = static_cast<unsigned>(std::static_pointer_cast<CV::NumberType>(stack->contexts[widthV.ctx]->data[widthV.id])->get());
+        if(args[3]->type != CV::NaturalType::STRING){
+            cursor->setError(name, "argument 3 must be a STRING: FILENAME/PATH", token.line);
+            return ctx->buildNumber(stack, 0);
+        }        
 
-        auto heightV = store->getId("height");
-        auto height = static_cast<unsigned>(std::static_pointer_cast<CV::NumberType>(stack->contexts[heightV.ctx]->data[heightV.id])->get());
+        
+        auto pixels = std::static_pointer_cast<CV::ListType>(args[0]);      
+        auto size = std::static_pointer_cast<CV::ListType>(args[1]);
+        auto channels = static_cast<int>(std::static_pointer_cast<CV::NumberType>(args[2])->get());
+        auto filename = std::static_pointer_cast<CV::StringType>(args[3])->get();
 
-        auto channelsV = store->getId("channels");
-        auto channels = static_cast<unsigned>(std::static_pointer_cast<CV::NumberType>(stack->contexts[channelsV.ctx]->data[channelsV.id])->get());
+        if(size->size != 2 || size->get(stack, 0)->type != CV::NaturalType::NUMBER || size->get(stack, 1)->type != CV::NaturalType::NUMBER){
+            cursor->setError(name, "argument 1 must be a LIST with exactly 2 numerical members [WIDTH HEIGHT]", token.line);
+            return ctx->buildNumber(stack, 0);
+        }
 
-
-        auto pixelsV = store->getId("pixels");
-        auto pixels = std::static_pointer_cast<CV::ListType>(stack->contexts[pixelsV.ctx]->data[pixelsV.id]);          
+        auto width = static_cast<int>(std::static_pointer_cast<CV::NumberType>(size->get(stack, 0))->get());
+        auto height = static_cast<int>(std::static_pointer_cast<CV::NumberType>(size->get(stack, 1))->get());
 
         unsigned char *bytes = new unsigned char[width * height * channels];
 
@@ -60,7 +65,7 @@ extern "C" void _CV_REGISTER_LIBRARY(const std::shared_ptr<CV::Stack> &stack){
         delete bytes;
 
 
-        return ctx->buildNumber(1);
+        return ctx->buildNumber(stack, 1);
     });    
 
 }

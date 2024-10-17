@@ -1,3 +1,8 @@
+[import 'lib/io.cv']
+
+[io:out 'Please provide a number' '\n> ']
+[let num [io:str-to-number [io:in]]]
+
 [let fib [fn [n][
     [if [lt n 2][
         [return n]
@@ -6,7 +11,6 @@
     ]]
 ]]]
 
-[let range 4]
-[for i from 0 to range [
+[for i from 0 to num [
     [io:out [fib i] '\n']
 ]]

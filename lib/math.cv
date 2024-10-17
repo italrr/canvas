@@ -1,0 +1,5 @@
+#
+#   Standard Math Library
+#
+
+[__cv_load_dynamic_library 'libmath']

@@ -107,7 +107,7 @@ int main(int argc, char* argv[]){
 		while(true){
 			std::cout << std::endl;
 			std::string input = "";
-			std::cout << CV::getPrompt();
+			std::cout << CV::GetPrompt();
 			std::getline (std::cin, input);		
 			if(input.size() > 0){
 				auto result = CV::QuickInterpret(input, stack, context, cursor, false);

@@ -2,16 +2,9 @@
 #   Basic Bitmap manipulation library
 #
 
-[namespace LibBitmap bm 
-    [create:[fn [chan w h][
-        [store
-            [pixels:[list-bulk [* chan w h] 0]]
-            [width:w]
-            [height:h]
-            [channels:chan]
-        ]
-    ]]]
-]
+[let bm:create [fn [chan w h][
+    [list-bulk [* chan w h] 0]
+]]]
 
 # write-png is in binary as to utilize stbi to actually write the PNG
 [__cv_load_dynamic_library 'libbm']

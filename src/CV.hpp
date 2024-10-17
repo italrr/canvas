@@ -9,13 +9,13 @@
     #include <mutex>
 
     #define __CV_DEFAULT_NUMBER_TYPE double  
-    static const __CV_DEFAULT_NUMBER_TYPE CANVAS_LANG_VERSION[3] = { 0, 3, 0 };
+    static const __CV_DEFAULT_NUMBER_TYPE CANVAS_LANG_VERSION[3] = { 0, 3, 1 };
 
     #define _CV_PLATFORM_TYPE_LINUX 0
     #define _CV_PLATFORM_TYPE_WINDOWS 1
     #define _CV_PLATFORM_TYPE_OSX 2
     #define _CV_PLATFORM_TYPE_UNDEFINED 4
-
+#include <iostream>
     namespace CV {
         namespace SupportedPlatform {
             enum SupportedPlatform : int {
@@ -87,10 +87,24 @@
     }
 
     namespace CV {
-
+        struct Stack;
         namespace Tools {
+            namespace Color {
+                enum Color : int {
+                    BLACK,
+                    RED,
+                    GREEN,
+                    YELLOW,
+                    BLUE,
+                    MAGENTA,
+                    CYAN,
+                    WHITE,
+                    RESET
+                };
+            }            
             std::string readFile(const std::string &path);
             bool fileExists(const std::string &path);
+            bool importBinaryLibrary(const std::string &path, const std::string &fname, const std::shared_ptr<CV::Stack> &stack);
         }  
 
         namespace NaturalType {
@@ -100,8 +114,7 @@
                 STRING,
                 LIST,
                 FUNCTION,
-                NIL,
-                STORE
+                NIL
             };
             static std::string name(unsigned type){
                 switch(type){
@@ -119,10 +132,7 @@
                     };  
                     case CV::NaturalType::NIL: {
                         return "NIL";
-                    };  
-                    case CV::NaturalType::STORE: {
-                        return "STORE";
-                    };                                                                                                   
+                    };                                                                                             
                     default:
                     case CV::NaturalType::UNDEFINED: {
                         return "UNDEFINED";
@@ -172,8 +182,6 @@
                 OP_DESC_TYPE,
                 OP_LIST_PUSH,
                 OP_LIST_POP,
-                // LIST
-                LS_NTH_ELEMENT,
                 // PROXIES
                 STATIC_PROXY = 200,
                 REFERRED_PROXY,
@@ -230,18 +238,12 @@
             std::string first;
             unsigned line;
             bool solved;
-            unsigned ns;
-            unsigned store;
             Token(){
-                ns = 0;
-                store = 0;
                 solved = false;
             }
             Token(const std::string &first, unsigned line){
                 this->first = first;
                 this->line = line;
-                this->ns = 0;
-                this->store = 0;
                 parse();
             }    
             void parse(){
@@ -318,16 +320,6 @@
             void restore(std::shared_ptr<CV::Item> &tem);            
         };
 
-        struct StoreType : Item {
-            std::unordered_map<std::string, CV::ContextDataPair> dataIds;
-            StoreType();
-            void setName(const std::string &name, unsigned id, unsigned ctx);
-            CV::ContextDataPair getId(const std::string &name);
-            std::shared_ptr<CV::Item> copy();
-            void restore(std::shared_ptr<CV::Item> &tem);    
-            void clear();                
-        };
-
         /* -------------------------------------------------------------------------------------------------------------------------------- */
         // JIT Stuff
 
@@ -339,24 +331,7 @@
             BinaryFunction(){
             }
         };
-
-        struct Namespace {
-            unsigned id;
-            std::string name;
-            std::string prefix;
-            std::unordered_map<std::string, unsigned> dataIds;
-            void setName(const std::string &name, unsigned id){
-                this->dataIds[name] = id;
-            }
-            unsigned getId(const std::string &name){
-                auto it = dataIds.find(name);
-                if(it == dataIds.end()){
-                    return 0;
-                }
-                return it->second;
-            }
-        };
-        
+        struct Stack;
         struct Context {
             Context *top;
             unsigned id; 
@@ -365,24 +340,23 @@
             std::unordered_map<std::string, unsigned> dataIds;
             std::unordered_map<unsigned, unsigned> markedItems;
             void deleteData(unsigned id);
-            unsigned store(const std::shared_ptr<CV::Item> &item);
-            unsigned promise();
+            unsigned promise(CV::Stack *stack);
+            unsigned promise(const std::shared_ptr<CV::Stack> &stack);
+            unsigned store(CV::Stack *stack, const std::shared_ptr<CV::Item> &item);
+            unsigned store(const std::shared_ptr<CV::Stack> &stack, const std::shared_ptr<CV::Item> &item);
             void markPromise(unsigned id, unsigned type);
             unsigned getMarked(unsigned id);
             void setPromise(unsigned id, std::shared_ptr<CV::Item> &item);
             void setName(const std::string &name, unsigned id);
             void deleteName(unsigned id);
             CV::ContextDataPair getIdByName(const std::shared_ptr<CV::Stack> &stack, const CV::Token &token);
-            CV::ContextDataPair getIdName(const std::string &name, unsigned storeId);
             std::shared_ptr<CV::Item> get(unsigned id);
             std::shared_ptr<CV::Item> getByName(const std::string &name);
             bool check(const std::shared_ptr<CV::Stack> &stack, const CV::Token &token);
-            bool check(const std::string &name, unsigned store);
             void clear();
-            std::shared_ptr<CV::Item> buildNil();
-            std::shared_ptr<CV::Item> buildNumber(__CV_DEFAULT_NUMBER_TYPE n);
-            std::shared_ptr<CV::Item> buildString(const std::string &n);
-            std::shared_ptr<CV::Item> buildStore();
+            std::shared_ptr<CV::Item> buildNil(const std::shared_ptr<CV::Stack> &stack);
+            std::shared_ptr<CV::Item> buildNumber(const std::shared_ptr<CV::Stack> &stack, __CV_DEFAULT_NUMBER_TYPE n);
+            std::shared_ptr<CV::Item> buildString(const std::shared_ptr<CV::Stack> &stack, const std::string &n);
             Context();
             void transferFrom(CV::Stack *stack, std::shared_ptr<CV::Item> &item);
             void transferFrom(std::shared_ptr<CV::Stack> &stack, std::shared_ptr<CV::Item> &item);
@@ -419,17 +393,18 @@
                                            )>> constructors;
             std::unordered_map<unsigned, CV::Instruction*> instructions;
             std::unordered_map<unsigned, std::shared_ptr<CV::Context>> contexts;
-            std::unordered_map<unsigned, std::shared_ptr<CV::Namespace>> namespaces;
             std::unordered_map<std::string, unsigned> namespaceIds;
 
             std::unordered_map<unsigned, std::shared_ptr<CV::BinaryFunction>> binaryFunctions;
             std::unordered_map<std::string, unsigned> bfIds;
 
             std::shared_ptr<CV::Context> topCtx;
+
+            unsigned lastGenId;
+            std::mutex idGeneratorMutex;
+            unsigned generateId();
             Stack();
             void clear();
-            std::shared_ptr<CV::Namespace> createNamespace(const std::string &name, const std::string &prefix);
-            std::shared_ptr<CV::StoreType> createStore();
             bool deleteNamespace(const std::string &name);
             unsigned getNamespaceId(const std::string &name);
             void setTopContext(std::shared_ptr<CV::Context> &ctx);
@@ -437,16 +412,19 @@
             std::shared_ptr<CV::Context> createContext(CV::Context *top = NULL);
             std::shared_ptr<CV::Context> getContext(unsigned id) const;
             void deleteContext(unsigned id);
-            void registerFunction(unsigned nsId, const std::string &name, const std::function<std::shared_ptr<CV::Item>(const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>>&, std::shared_ptr<CV::Context>&, std::shared_ptr<CV::Cursor> &cursor)> &fn); 
+            void registerVar(const std::string name, const std::shared_ptr<CV::Item> &var);
+            void registerFunction(const std::string &name, const std::function<std::shared_ptr<CV::Item>(const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>>&, std::shared_ptr<CV::Context>&, std::shared_ptr<CV::Cursor> &cursor)> &fn); 
             CV::BinaryFunction *getRegisteredFunction(const std::shared_ptr<CV::Stack> &stack, const CV::Token &token);
             // CV::ControlFlow execute(CV::Instruction *ins, std::shared_ptr<Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);
         };
+        void SetColorTableText(const std::unordered_map<int, std::string> &ct);
+        void SetColorTableBackground(const std::unordered_map<int, std::string> &ct);        
         void AddStandardConstructors(std::shared_ptr<CV::Stack> &stack);
         std::string ItemToText(const std::shared_ptr<CV::Stack> &stack, CV::Item *item);
         void SetUseColor(bool v);
-        CV::ControlFlow execute(CV::Instruction *ins, const std::shared_ptr<CV::Stack> &stack, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);
+        CV::ControlFlow Execute(CV::Instruction *ins, const std::shared_ptr<CV::Stack> &stack, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);
         std::string QuickInterpret(const std::string &input, const std::shared_ptr<CV::Stack> &stack, std::shared_ptr<Context> &ctx, std::shared_ptr<CV::Cursor> &cursor, bool shouldClear = true);
-        std::string getPrompt();
+        std::string GetPrompt();
     }
 
 

@@ -1,6 +1,8 @@
-[import 'lib/bm.cv']    # bitmap manipulation
-[import 'lib/time.cv']  # for tm:epoch
-[import 'lib/core.cv']  # bring in mutators
+[import 'lib/bm.cv']            # bitmap manipulation
+[import 'lib/time.cv']          # for tm:epoch
+[import 'lib/mutators.cv']      # bring in mutators
+[import 'lib/io.cv']            # bring in mutators
+[import 'lib/math.cv']          # bring in math, floor, mod, etc
 
 [let width 512]
 [let height 512]
@@ -12,7 +14,7 @@
 
 [let c 0]
 [let time-proc-start [tm:epoch]]
-[iter pixel in img:pixels at 3 [
+[iter pixel in img at 3 [
     [let y [math:floor [math:mod c width]]]
     [let x [math:floor [/ c width]]]
     [let r [/ [+ x 1] width]]
@@ -28,6 +30,6 @@
 
 [io:out 'Writing ' filename '\n']
 [let time-write-start [tm:epoch]]
-[bm:write-png img filename]
+[bm:write-png img [width height] channels filename]
 [let time-write-end [tm:epoch]]
 [io:out 'Wrote ' filename '. Elapsed time ' [/ [- time-write-end time-write-start] 1000] ' seconds\n']

@@ -1,10 +1,11 @@
-libcv_bin.a
+*.a
 cv
 cvint.exe
 cvint
 cmake_install.cmake
 CMakeFiles/*
 lib/*.so
+lib/*.dll
 Makefile
 cv.exe
 CMakeCache.txt

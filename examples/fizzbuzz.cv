@@ -1,4 +1,6 @@
-[import 'lib/core.cv'] # bring in mutators
+[import 'lib/mutators.cv'] # bring in mutators
+[import 'lib/math.cv']
+[import 'lib/io.cv']
 
 [for i from 1 to 50 [
     [if [eq [math:mod i 3] 0]
