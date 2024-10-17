@@ -8,7 +8,7 @@
     #include <string>
     #include <mutex>
 
-    #define __CV_DEFAULT_NUMBER_TYPE double  
+    #define __CV_DEFAULT_NUMBER_TYPE float  
     static const __CV_DEFAULT_NUMBER_TYPE CANVAS_LANG_VERSION[3] = { 0, 3, 1 };
 
     #define _CV_PLATFORM_TYPE_LINUX 0
@@ -281,6 +281,7 @@
         };        
 
         struct Item {
+            bool proxy;
             unsigned id;
             unsigned ctx;
             unsigned type;
@@ -291,6 +292,7 @@
             virtual void clear();
             virtual std::shared_ptr<CV::Item> copy();
             virtual void restore(std::shared_ptr<CV::Item> &item);
+            virtual unsigned getSize(){ return this->size; }
         };
 
         struct NumberType : Item {
@@ -301,6 +303,7 @@
         struct StringType : Item {
             void set(const std::string &v);
             std::string get();
+            unsigned getSize();
         };        
 
         struct Stack;
@@ -356,7 +359,9 @@
             void clear();
             std::shared_ptr<CV::Item> buildNil(const std::shared_ptr<CV::Stack> &stack);
             std::shared_ptr<CV::Item> buildNumber(const std::shared_ptr<CV::Stack> &stack, __CV_DEFAULT_NUMBER_TYPE n);
+            std::shared_ptr<CV::Item> buildProxyNumber(const std::shared_ptr<CV::Stack> &stack, void *ref);
             std::shared_ptr<CV::Item> buildString(const std::shared_ptr<CV::Stack> &stack, const std::string &n);
+            std::shared_ptr<CV::Item> buildProxyString(const std::shared_ptr<CV::Stack> &stack, void *ref);
             Context();
             void transferFrom(CV::Stack *stack, std::shared_ptr<CV::Item> &item);
             void transferFrom(std::shared_ptr<CV::Stack> &stack, std::shared_ptr<CV::Item> &item);

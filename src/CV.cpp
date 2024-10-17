@@ -285,9 +285,13 @@ CV::Item::Item(){
     type = CV::NaturalType::NIL;
     data = NULL;
     size = 0;
+    proxy = false;
 }
 
 void CV::Item::clear(){
+    if(this->proxy){
+        return;
+    }
     if(this->type == CV::NaturalType::NIL){
         return;
     }
@@ -302,20 +306,30 @@ void CV::Item::clear(){
 std::shared_ptr<CV::Item> CV::Item::copy(){
     auto item = std::make_shared<CV::Item>();
     item->type = this->type;
+    item->proxy = this->proxy;
     item->size = this->size;
     item->bsize = this->bsize;
     item->id = this->id;
-    item->data = malloc(this->bsize);
-    memcpy(item->data, this->data, this->bsize);
+    if(!proxy){
+        item->data = malloc(this->bsize);
+        memcpy(item->data, this->data, this->bsize);
+    }else{
+        item->data = this->data;
+    }
     return item;
 }
 
 void CV::Item::restore(std::shared_ptr<CV::Item> &item){
     this->type = item->type;
     this->size = item->size;
+    this->proxy = item->proxy;
     this->bsize = item->bsize;
     this->id = item->id;
-    memcpy(this->data, item->data, item->bsize);
+    if(!proxy){
+        memcpy(this->data, item->data, item->bsize);
+    }else{
+        this->data = item->data;
+    }
 }
 
 // NUMBER
@@ -342,6 +356,11 @@ __CV_DEFAULT_NUMBER_TYPE CV::NumberType::get(){
 
 // STRING
 void CV::StringType::set(const std::string &_v){
+    if(this->proxy){
+        auto castStr = static_cast<std::string*>(this->data);
+        *castStr = _v;
+        return;
+    }    
     clear();
     auto v = CV::Tools::solveEscapedCharacters(_v);
     this->type = CV::NaturalType::STRING;
@@ -354,7 +373,20 @@ void CV::StringType::set(const std::string &_v){
     }
 }
 
+unsigned CV::StringType::getSize(){
+    if(this->proxy){
+        auto castStr = static_cast<std::string*>(this->data);
+        return (*castStr).size();
+    }else{
+        return this->size;
+    }
+}
+
 std::string CV::StringType::get(){
+    if(this->proxy){
+        auto castStr = static_cast<std::string*>(this->data);
+        return *castStr;
+    }       
     if(this->type == CV::NaturalType::NIL){
         fprintf(stderr, "Dereferenced NIL Item %i\n", this->id);
         std::exit(1);
@@ -1687,6 +1719,24 @@ std::shared_ptr<CV::Item> CV::Context::buildNumber(const std::shared_ptr<CV::Sta
     return number;
 }
 
+std::shared_ptr<CV::Item> CV::Context::buildProxyNumber(const std::shared_ptr<CV::Stack> &stack, void *ref){
+    auto number = std::make_shared<CV::NumberType>();
+    number->type = CV::NaturalType::NUMBER;
+    number->proxy = true;
+    number->size = sizeof(__CV_DEFAULT_NUMBER_TYPE);
+    number->bsize = sizeof(__CV_DEFAULT_NUMBER_TYPE);
+    number->data = ref;
+    return number;
+}
+
+std::shared_ptr<CV::Item> CV::Context::buildProxyString(const std::shared_ptr<CV::Stack> &stack, void *ref){
+    auto str = std::make_shared<CV::StringType>();
+    str->type = CV::NaturalType::STRING;
+    str->proxy = true;
+    str->data = ref;
+    return str;
+}
+
 void CV::Context::transferFrom(CV::Stack *stack, std::shared_ptr<CV::Item> &item){
     // if it's here already, then we skip this
     if(this->data.count(item->id) == 1){ 
@@ -2188,10 +2238,10 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
                 return ctx->buildNil(stack);                 
             }
             auto list = std::static_pointer_cast<CV::ListType>(source);
-            if(list->size == 0){
+            if(list->getSize() == 0){
                 return source;
             }
-            if(list->size % (int)counter != 0){
+            if(list->getSize() % (int)counter != 0){
                 cursor->setError("Logic Error At '"+ins->token.first+"'", "Step increment must a number divisible by the amount of the LIST", ins->token.line);
                 return ctx->buildNil(stack);                 
             }
@@ -2215,7 +2265,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
                 }
             };
 
-            for(int i = 0; i < list->size; i += counter){
+            for(int i = 0; i < list->getSize(); i += counter){
                 nctx->revert();
                 updateStepper(i);
                 auto cfv = CV::Execute(stack->instructions[ins->parameter[1]], stack, nctx, cursor);
@@ -2653,7 +2703,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
                 return ctx->buildNil(stack);
             }
 
-            return ctx->buildNumber(stack, v->size);
+            return ctx->buildNumber(stack, v->getSize());
         };     
 
         case CV::InstructionType::OP_DESC_TYPE: {
@@ -2686,7 +2736,7 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             // Subject
             if(subject->type == CV::NaturalType::LIST){
                 auto list = std::static_pointer_cast<CV::ListType>(subject); 
-                for(int i = 0; i < list->size; ++i){
+                for(int i = 0; i < list->getSize(); ++i){
                     items.push_back(list->get(stack, i));
                 }
             }else{
@@ -2739,8 +2789,8 @@ static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::In
             switch(list->type){
                 case CV::NaturalType::LIST: {
                     auto ls = std::static_pointer_cast<CV::ListType>(list);
-                    if(n < 0 || n >= ls->size){
-                        cursor->setError("Logic Error At '"+ins->token.first+"'", "Provided out-of-range index("+std::to_string(n)+"), expected from 0 to "+std::to_string(ls->size-1), ins->token.line);
+                    if(n < 0 || n >= ls->getSize()){
+                        cursor->setError("Logic Error At '"+ins->token.first+"'", "Provided out-of-range index("+std::to_string(n)+"), expected from 0 to "+std::to_string(ls->getSize()-1), ins->token.line);
                         return ctx->buildNil(stack);                 
                     }
 
@@ -2867,12 +2917,12 @@ std::string CV::ItemToText(const std::shared_ptr<CV::Stack> &stack, CV::Item *it
             std::string output = Tools::setTextColor(Tools::Color::MAGENTA)+"["+Tools::setTextColor(Tools::Color::RESET);
             auto list = static_cast<CV::ListType*>(item);
 
-            int total = list->size;
+            int total = list->getSize();
             int limit = total > 30 ? 10 : total;
             for(int i = 0; i < limit; ++i){
                 auto item = list->get(stack, i);
                 output += CV::ItemToText(stack, item.get());
-                if(i < list->size-1){
+                if(i < list->getSize()-1){
                     output += " ";
                 }
             }
