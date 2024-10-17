@@ -1726,6 +1726,7 @@ std::shared_ptr<CV::Item> CV::Context::buildProxyNumber(const std::shared_ptr<CV
     number->size = sizeof(__CV_DEFAULT_NUMBER_TYPE);
     number->bsize = sizeof(__CV_DEFAULT_NUMBER_TYPE);
     number->data = ref;
+    this->store(stack, number);
     return number;
 }
 
@@ -1734,6 +1735,7 @@ std::shared_ptr<CV::Item> CV::Context::buildProxyString(const std::shared_ptr<CV
     str->type = CV::NaturalType::STRING;
     str->proxy = true;
     str->data = ref;
+    this->store(stack, str);
     return str;
 }
 
