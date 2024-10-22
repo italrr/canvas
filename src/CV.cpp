@@ -1250,6 +1250,34 @@ static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
     });   
 
     /*
+        list
+    */
+    DefConstructor(stack, "list", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
+        if(tokens.size() < 2){
+            cursor->setError(name, "Expects at least 1 argument", tokens[0].line);
+            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+        }
+       
+        auto nins = stack->createInstruction(CV::InstructionType::CONSTRUCT_LIST, tokens[0]);
+        auto list = std::make_shared<CV::ListType>();        
+        list->build(tokens.size()-1);
+        nins->data.push_back(ctx->id);
+        nins->data.push_back(ctx->store(stack, list));
+        nins->data.push_back(tokens.size()-1);
+        for(int i = 1; i < tokens.size(); ++i){
+            auto cins = interpretToken(tokens[i], {tokens[i]}, stack, ctx, cursor);
+            if(cursor->raise()){
+                return stack->createInstruction(CV::InstructionType::NOOP, tokens[i]);
+            }
+            
+            nins->parameter.push_back(cins->id);
+            nins->data.push_back(ctx->id);
+        }
+
+        return nins;
+    }); 
+
+    /*
         do
         [CC]  (Creates Context)
     */
@@ -2967,6 +2995,27 @@ std::string CV::ItemToText(const std::shared_ptr<CV::Stack> &stack, CV::Item *it
     }
 }
 
+std::shared_ptr<CV::Item> CV::Interpret(const std::string &input, const std::shared_ptr<CV::Stack> &stack, std::shared_ptr<Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
+    // Get text tokens
+    auto tokens = parseTokens(input,  ' ', cursor);
+    if(cursor->raise()){
+        return ctx->buildNil(stack);
+    }
+
+    // Compile tokens into its bytecode
+    auto entry = compileTokens(tokens, stack, ctx, cursor);
+    if(cursor->raise()){
+        return ctx->buildNil(stack);
+    }
+    // Execute
+    auto result = CV::Execute(entry, stack, ctx, cursor).value;
+    if(cursor->raise()){
+        return ctx->buildNil(stack);
+    }
+
+    return result;
+}
+
 std::string CV::QuickInterpret(const std::string &input, const std::shared_ptr<CV::Stack> &stack, std::shared_ptr<Context> &ctx, std::shared_ptr<CV::Cursor> &cursor, bool shouldClear){
     // Get text tokens
     auto tokens = parseTokens(input,  ' ', cursor);
@@ -3012,6 +3061,10 @@ std::string CV::GetPrompt(){
 
 void CV::AddStandardConstructors(std::shared_ptr<CV::Stack> &stack){
     __addStandardConstructors(stack);
+}
+
+bool CV::isVarTrue(const std::shared_ptr<CV::Item> &v){
+    return v->type != CV::NaturalType::NIL && (v->type == CV::NaturalType::NUMBER ? std::static_pointer_cast<CV::NumberType>(v)->get() : true);
 }
 
 /* -------------------------------------------------------------------------------------------------------------------------------- */
@@ -3100,7 +3153,7 @@ bool CV::ErrorCheck::ConstraintArgList::check(const std::shared_ptr<CV::Stack> &
 
     auto lst = std::static_pointer_cast<CV::ListType>(args[argPos]);
 
-    if(lst->getSize() != this->argSize){
+    if(this->argSize != 0 && lst->getSize() != this->argSize){
         msg = CV::Tools::format("Expected argument type 'LIST' of exactly %i elements, provided %i",
             argSize,
             lst->getSize()

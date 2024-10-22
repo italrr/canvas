@@ -479,12 +479,14 @@
 
         }
 
+        bool isVarTrue(const std::shared_ptr<CV::Item> &v);
         void SetColorTableText(const std::unordered_map<int, std::string> &ct);
         void SetColorTableBackground(const std::unordered_map<int, std::string> &ct);        
         void AddStandardConstructors(std::shared_ptr<CV::Stack> &stack);
         std::string ItemToText(const std::shared_ptr<CV::Stack> &stack, CV::Item *item);
         void SetUseColor(bool v);
         CV::ControlFlow Execute(CV::Instruction *ins, const std::shared_ptr<CV::Stack> &stack, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);
+        std::shared_ptr<CV::Item> Interpret(const std::string &input, const std::shared_ptr<CV::Stack> &stack, std::shared_ptr<Context> &ctx, std::shared_ptr<CV::Cursor> &cursor);
         std::string QuickInterpret(const std::string &input, const std::shared_ptr<CV::Stack> &stack, std::shared_ptr<Context> &ctx, std::shared_ptr<CV::Cursor> &cursor, bool shouldClear = true);
         std::string GetPrompt();
     }
