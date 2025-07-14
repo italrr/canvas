@@ -1,7 +1,0 @@
-[import 'lib/core.cv']
-[import 'lib/time.cv']
-
-[do 1 [
-    [io:out tm:epoch-secs '\n']
-    [std:sleep 1000]
-]]

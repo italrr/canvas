@@ -1,0 +1,791 @@
+// SYSTEM INCLUDES
+#include <iostream>
+#include <stdarg.h>
+#include <functional>
+#include <sys/stat.h>
+#include <fstream>
+
+// LOCAL INCLUDES
+#include "CV.hpp"
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//  TOOLS
+// 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+namespace CV {
+    namespace Tools {
+
+        std::string format(const std::string &_str, ...){
+            va_list arglist;
+            char buff[1024];
+            va_start(arglist, _str);
+            vsnprintf(buff, sizeof(buff), _str.c_str(), arglist);
+            va_end( arglist );
+            return std::string(buff);
+        }
+
+        static bool isNumber(const std::string &s){
+            return (s.find_first_not_of( "-.0123456789") == std::string::npos) && (s != "-" && s != "--" && s != "+" && s != "++");
+        }      
+
+        static bool isString(const std::string &s){
+            return s.size() > 1 && s[0] == '\'' && s[s.length()-1] == '\'';
+        }
+
+        static bool isList(const std::string &s){
+            if(s.length() < 3){
+                return false;
+            }
+            bool str = false;
+            for(unsigned i = 0; i < s.length(); ++i){
+                char c = s[i];
+                if(c == '\''){
+                    str = !str;
+                }     
+                if(!str && s[i] == ' '){
+                    return true;
+                }
+            }
+            return false;
+        }     
+
+        static std::string removeTrailingZeros(double d){
+            size_t len = std::snprintf(0, 0, "%.8f", d);
+            std::string s(len+1, 0);
+            std::snprintf(&s[0], len+1, "%.8f", d);
+            s.pop_back();
+            s.erase(s.find_last_not_of('0') + 1, std::string::npos);
+            if(s.back() == '.') {
+                s.pop_back();
+            }
+            return s;
+        }
+
+        static std::string compileList(const std::vector<std::string> &strings){
+            std::string out;
+            for(int i = 0; i < strings.size(); ++i){
+                out += strings[i];
+                if(i < strings.size()-1){
+                    out += " ";
+                }
+            }
+            return out;
+        }
+
+        static std::string removeOutterBrackets(const std::string &input){
+            if(input.size() < 3){
+                return input;
+            }
+            auto r = input;
+            if(input[0] == '['){
+                r = std::string(r.begin() + 1, r.end());
+            }
+            if(input[input.size()-1] == ']'){
+                r = std::string(r.begin(), r.end() - 1);
+            }
+            return r;
+        }
+
+        std::string solveEscapedCharacters(const std::string &v){
+            std::string result;
+            for(int i = 0; i < v.size(); ++i){
+                auto c = v[i];
+                // process escaped quotation
+                if(i < v.size()-1 && v[i] == '\\' && v[i+1] == '\''){
+                    result += '\'';
+                    ++i;
+                    continue;
+                }  
+                result += c;              
+            }
+            return result;
+        }
+
+        bool fileExists(const std::string &path){
+			struct stat tt;
+			stat(path.c_str(), &tt);
+			return S_ISREG(tt.st_mode);	            
+        }
+
+        std::string readFile(const std::string &path){
+            std::string buffer;
+            std::ifstream file(path);
+            for(std::string line; std::getline(file, line);){
+                if(line.size() > 0){
+                    buffer += line+"\n";
+                }
+            }    
+            return buffer;
+        } 
+
+    }
+}
+
+static int GEN_ID(){
+    static std::mutex access;
+    static int v = 0;
+    access.lock();
+    int r = ++v;
+    access.unlock();
+    return r;
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//  TYPES
+// 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// BASE
+CV::Quant::Quant(){
+    this->id = GEN_ID();
+    this->type = CV::QuantType::NIL;
+}
+
+// NUMBER
+CV::TypeNumber::TypeNumber() : CV::Quant() {
+    this->type = CV::QuantType::NUMBER;
+}
+
+bool CV::TypeNumber::clear(){
+    v = 0;
+    return true;
+}
+
+// STRING
+CV::TypeString::TypeString() : CV::Quant() {
+    this->type = CV::QuantType::STRING;
+}
+
+bool CV::TypeString::clear(){
+    v = "";
+    return true;
+}
+
+// LIST
+CV::TypeList::TypeList() : CV::Quant() {
+    this->type = CV::QuantType::LIST;
+}
+bool CV::TypeList::clear(){
+    v.clear();
+    return true;
+}
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//  CURSOR
+// 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+CV::Cursor::Cursor(){
+    this->error = false;
+    this->used = false;
+    this->shouldExit = true;
+    this->autoprint = true;
+}
+
+void CV::Cursor::setError(const std::string &title, const std::string &message, unsigned line){
+    accessMutex.lock();
+    this->title = title;
+    this->message = message;
+    this->line = line;
+    this->subject = NULL;
+    this->error = true;
+    accessMutex.unlock();
+}
+
+void CV::Cursor::setError(const std::string &title, const std::string &message, unsigned line, std::shared_ptr<CV::Quant> subject){
+    accessMutex.lock();
+    this->title = title;
+    this->message = message;
+    this->line = line;
+    this->subject = subject;
+    this->error = true;
+    this->used = true;
+    accessMutex.unlock();
+}
+
+std::string CV::Cursor::getRaised(){
+    return "[Line #"+std::to_string(this->line)+"] "+this->title+": "+this->message;
+}
+
+bool CV::Cursor::raise(){
+    if(used){
+        return true;
+    }
+    accessMutex.lock();
+    if(!this->error){
+        accessMutex.unlock();
+        return false;
+    }
+    // if(this->autoprint){
+    //     fprintf(stderr, "%s[Line #%i]%s %s: %s%s%s.\n",
+    //             (
+    //                 CV::Tools::setTextColor(CV::Tools::Color::BLACK, true) +
+    //                 CV::Tools::setBackgroundColor(CV::Tools::Color::WHITE)
+    //             ).c_str(),
+    //             this->line,
+    //             CV::Tools::setTextColor(CV::Tools::Color::RESET, false).c_str(),
+    //             this->title.c_str(),
+    //             CV::Tools::setTextColor(CV::Tools::Color::RED, false).c_str(),
+    //             this->message.c_str(),
+    //             CV::Tools::setTextColor(CV::Tools::Color::RESET, false).c_str()
+    //     );
+    // }
+    if(this->shouldExit){
+        std::exit(1);
+    }
+    used = true;
+    accessMutex.unlock();
+    return true;
+}
+
+void  CV::Cursor::reset(){
+    used = false;
+    error = false;
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//  TYPE TO STRING
+// 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+std::string CV::QuantToText(const std::shared_ptr<CV::Quant> &t){
+    switch(t->type){
+        
+        default:
+        case CV::QuantType::NIL: {
+            // return Tools::setTextColor(Tools::Color::BLUE)+"nil"+Tools::setTextColor(Tools::Color::RESET);
+            return "nil";
+        };
+
+        case CV::QuantType::NUMBER: {
+            // return  CV::Tools::setTextColor(Tools::Color::CYAN) +
+            //         CV::Tools::removeTrailingZeros(static_cast<CV::NumberType*>(item)->get())+
+            //         CV::Tools::setTextColor(Tools::Color::RESET);
+            return CV::Tools::removeTrailingZeros(std::static_pointer_cast<CV::TypeNumber>(t)->v);
+        };
+
+        case CV::QuantType::STRING: {
+            // return Tools::setTextColor(Tools::Color::GREEN)+
+            //         "'"+static_cast<CV::StringType*>(item)->get()+"'"+
+            //         Tools::setTextColor(Tools::Color::RESET);
+            // return 
+
+            return "'"+std::static_pointer_cast<CV::TypeString>(t)->v+"'";
+        };     
+
+        // case CV::NaturalType::FUNCTION: {
+        //     auto fn = static_cast<CV::FunctionType*>(item);      
+
+        //     std::string start = Tools::setTextColor(Tools::Color::RED, true)+"["+Tools::setTextColor(Tools::Color::RESET);
+        //     std::string end = Tools::setTextColor(Tools::Color::RED, true)+"]"+Tools::setTextColor(Tools::Color::RESET);
+        //     std::string name = Tools::setTextColor(Tools::Color::RED, true)+"fn"+Tools::setTextColor(Tools::Color::RESET);
+        //     std::string binary = Tools::setTextColor(Tools::Color::BLUE, true)+"BINARY"+Tools::setTextColor(Tools::Color::RESET);
+        //     std::string body = Tools::setTextColor(Tools::Color::BLUE, true)+fn->body.first+Tools::setTextColor(Tools::Color::RESET);
+
+        //     return start+name+" "+start+(fn->variadic ? "args" : Tools::compileList(fn->args))+end+" "+( body )+end;
+        // };
+
+        case CV::QuantType::LIST: {
+            // std::string output = Tools::setTextColor(Tools::Color::MAGENTA)+"["+Tools::setTextColor(Tools::Color::RESET);
+            std::string output = "[";
+
+            auto list = std::static_pointer_cast<CV::TypeList>(t);
+
+            int total = list->v.size();
+            int limit = total > 30 ? 10 : total;
+            for(int i = 0; i < limit; ++i){
+                auto &q = list->v[i];
+                output += CV::QuantToText(q);
+                if(i < list->v.size()-1){
+                    output += " ";
+                }
+            }
+            if(limit != total){
+                // output += Tools::setTextColor(Tools::Color::YELLOW)+"...("+std::to_string(total-limit)+" hidden)"+Tools::setTextColor(Tools::Color::RESET);
+
+                output += "...("+std::to_string(total-limit)+" hidden)";
+
+            }
+                        
+            // return output + Tools::setTextColor(Tools::Color::MAGENTA)+"]"+Tools::setTextColor(Tools::Color::RESET);
+            return output + "]";
+        };
+
+    }
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//  PARSING
+// 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+static std::vector<CV::TokenType> parseTokens(std::string input, char sep, std::shared_ptr<CV::Cursor> &cursor){
+    std::vector<std::shared_ptr<CV::Token>> tokens; 
+    std::string buffer;
+    int open = 0;
+    bool onString = false;
+    bool onComment = false;
+    int leftBrackets = 0;
+    int rightBrackets = 0;
+    int cline = 0;
+    int quotes = 0;
+    // Count outer brackets
+    for(int i = 0; i < input.size(); ++i){
+        char c = input[i];
+        if(c == '\n'){
+            ++cline;
+        }else
+        if(c == '\\' && i < input.size()-1 && input[i+1] == '\''){
+            i += 1;
+        }else
+        if(c == '\''){
+            onString = !onString;
+            if(onString){
+                ++quotes;
+            }else{
+                --quotes;
+            }
+        }else
+        if(c == '[' && !onString){
+            if(open == 0) ++leftBrackets;
+            ++open;
+        }else
+        if(c == ']' && !onString){
+            if(open == 1) ++rightBrackets;
+            --open;
+        }
+    }
+    onString = false;
+    open = 0;
+    // Throw mismatching brackets
+    if(leftBrackets != rightBrackets){
+        cursor->setError("Syntax Error", "Mismatching brackets", cline+1);
+        return {};
+    }
+    // Throw mismatching quotes
+    if(quotes != 0){
+        cursor->setError("Syntax Error", "Mismatching quotes", cline);
+        return {};
+    }
+    cline = 1;
+    // Add missing brackets for simple statements
+    if(((leftBrackets+rightBrackets)/2 > 1) || (leftBrackets+rightBrackets) == 0 || input[0] != '[' || input[input.length()-1] != ']'){
+        input = "[" + input + "]";
+    }
+    // For debugging:
+    // std::cout << "To Parse '" << input << "' " << leftBrackets+rightBrackets << std::endl;
+    // Parse
+    
+    for(int i = 0; i < input.size(); ++i){
+        char c = input[i];
+        if(i < input.size()-1 && c == '\\' && input[i+1] == '\'' && onString){
+            buffer += '\\';
+            buffer += '\'';
+            i += 1;
+            continue;
+        }else      
+        if(c == '\'' && !onComment){
+            onString = !onString;
+            buffer += c;
+        }else        
+        if(c == '#' && !onString){
+            onComment = !onComment;
+        }else
+        if(i < input.size()-1 && c == '\\' && input[i+1] == 'n' && onString){
+            buffer += '\n';
+            ++i;
+            continue;
+        }else            
+        if(c == '\t'){
+            buffer +=  ' ';
+        }else
+        if(c == '\n' && !onString){
+            ++cline;
+            onComment = false;
+            continue;
+        }else
+        if(onComment){
+            continue;
+        }else
+        if(c == '[' && !onString){
+            if(open > 0){
+                buffer += c;
+            }
+            ++open;
+        }else
+        if(c == ']' && !onString){
+            if(open > 1){
+                buffer += c;
+            }            
+            --open;
+            if(open == 1 || i == input.size()-1 && buffer.length() > 0){
+                // std::cout << "[1] \"" << buffer << "\"" << std::endl;
+                if(buffer != ""){
+                    tokens.push_back(std::make_shared<CV::Token>(buffer, cline));
+                }
+                buffer = "";
+            }
+        }else
+        if(i == input.size()-1){
+            // std::cout << "[2] " << buffer+c << std::endl;
+            if(buffer != ""){
+                tokens.push_back(std::make_shared<CV::Token>(buffer+c, cline));
+            }
+            buffer = "";
+        }else
+        if(c == sep && open == 1 && !onString){
+            // std::cout << "[3] \"" << buffer << "\"" << std::endl;
+            if(buffer != ""){
+                tokens.push_back(std::make_shared<CV::Token>(buffer, cline));
+            }
+            buffer = "";
+        }else{
+            buffer += c;
+        }
+    }
+
+    return tokens;
+};
+
+static std::vector<CV::TokenType> rebuildTokenHierarchy(const std::vector<CV::TokenType> &input, char sep, CV::CursorType &cursor){
+    
+    if(input.size() == 0){
+        cursor->setError("NOOP", CV_ERROR_MSG_NOOP_NO_INSTRUCTIONS, 1);
+        return {};
+    }
+
+    std::function<CV::TokenType(const CV::TokenType &token)> unwrap = [&](const CV::TokenType &token){
+        auto innerTokens = parseTokens(token->first, sep, cursor);
+        if(cursor->error){
+            return CV::TokenType(NULL);
+        }
+        auto target = innerTokens[0];
+
+        if(!target->solved){
+            target->inner.push_back(unwrap(target));
+            target->first = "";
+            if(cursor->error){
+                return CV::TokenType(NULL);
+            }
+        }
+        for(int i = 1; i < innerTokens.size(); ++i){
+            target->inner.push_back(unwrap(innerTokens[i]));
+        }
+        target->refresh();
+        return target;
+    };
+
+    std::vector<CV::TokenType> result;
+    
+    for(int i = 0; i < input.size(); ++i){
+        auto built = unwrap(input[i]);
+        if(cursor->error){
+            return {};
+        }
+        result.push_back(built);
+    }
+
+    return result;
+}
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//  JIT
+// 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor){
+    
+    if(token->first.size() == 0 && token->inner.size() == 0){
+        cursor->setError("NOOP", CV_ERROR_MSG_NOOP_NO_INSTRUCTIONS, token->line);
+        return prog->createInstruction(CV::InstructionType::NOOP, token);
+    }
+
+    auto bListConstruct = [prog, cursor](const CV::TokenType &origin, std::vector<CV::TokenType> &tokens, const CV::ContextType &ctx){
+        auto ins = prog->createInstruction(CV::InstructionType::CONSTRUCT_LIST, origin);
+        ins->data.push_back(ctx->id);
+        for(int i = 0; i < tokens.size(); ++i){
+            auto &inc = tokens[i];
+            auto fetched = CV::Translate(inc, prog, ctx, cursor);
+            if(cursor->error){
+                return prog->createInstruction(CV::InstructionType::NOOP, origin);
+            }
+            ins->params.push_back(fetched->id);
+        }
+        return ins;
+    };
+
+    auto bListConstructFromToken = [bListConstruct, prog, cursor](const CV::TokenType &origin, const CV::ContextType &ctx){
+        auto cpy = origin->emptyCopy();
+        std::vector<CV::TokenType> inners { cpy };
+        for(int i = 0; i < origin->inner.size(); ++i){
+            inners.push_back(origin->inner[i]);
+        }
+        return bListConstruct(origin, inners, ctx);
+    };
+
+    if(token->first.size() == 0 && token->inner.size() > 0){
+        return bListConstruct(token, token->inner, ctx);
+    }else{
+        /*
+            NUMBER
+        */
+        if(CV::Tools::isNumber(token->first)){
+            if(token->inner.size() > 0){
+                return bListConstructFromToken(token, ctx);
+            }else{
+                auto ins = prog->createInstruction(CV::InstructionType::STATIC_PROXY, token);
+                auto data = ctx->buildNumber(std::stod(token->first));
+                ins->data.push_back(ctx->id);
+                ins->data.push_back(data->id);
+                return ins;
+            }
+        }else
+        /*
+            STRING
+        */
+        if(CV::Tools::isString(token->first)){
+            if(token->inner.size() > 0){
+                return bListConstructFromToken(token, ctx);
+            }else{            
+                auto ins = prog->createInstruction(CV::InstructionType::STATIC_PROXY, token);
+                auto string = ctx->buildString("");
+                string->v = token->first.substr(1, token->first.length() - 2);
+                ins->data.push_back(ctx->id);
+                ins->data.push_back(string->id);
+                return ins;
+            }
+        }
+
+    }
+    
+    return prog->createInstruction(CV::InstructionType::NOOP, token);
+}
+
+CV::ProgramType CV::Compile(const std::string &input, CV::CursorType &cursor){
+
+    auto program = std::make_shared<CV::Program>();
+    program->rootContext = program->createContext();
+
+    // Fix outter brackets (Input must always be accompained by brackets)
+    auto fixedInput = input;
+    if(fixedInput[0] != '['){
+        fixedInput = "["+fixedInput;
+    }
+    if(fixedInput[fixedInput.size()-1] != ']'){
+        fixedInput = fixedInput+"]";
+    }
+    fixedInput = "["+fixedInput+"]";
+
+
+    // Split basic tokens
+    auto tokens = parseTokens(fixedInput, ' ', cursor);
+    if(cursor->error){
+        return CV::ProgramType(NULL);
+    }
+
+    std::vector<CV::TokenType> root;
+    // Build Token hierarchy
+    for(int i = 0; i < tokens.size(); ++i){
+        auto built = rebuildTokenHierarchy({tokens[i]}, ' ', cursor);
+        if(cursor->error){
+            return CV::ProgramType(NULL);
+        }
+        for(int j = 0; j < built.size(); ++j){
+            root.push_back(built[j]);
+        }
+    }
+    
+    // std::cout << "total " << root.size() << std::endl;
+    // for(int i = 0; i < root.size(); ++i){
+    //     std::cout << "\"" << root[i]->str() << "\" " << root[i]->inner.size() << std::endl;
+    // }
+    // std::exit(1);
+
+    // Convert tokens into instructions
+    std::vector<CV::InsType> instructions;
+    for(int i = 0 ; i < root.size(); ++i){
+        auto ins = CV::Translate(root[i], program, program->rootContext, cursor);
+        if(cursor->error){
+            return CV::ProgramType(NULL);
+        }
+        instructions.push_back(ins);
+    }
+ 
+    // Order instructions
+    for(int i = 1; i < instructions.size(); ++i){
+        auto &current = instructions[i];
+        auto &previous = instructions[i-1];
+        previous->next = current->id;
+        current->prev = previous->id;
+    }
+
+    // Set entry point (should be first instruction in the list)
+    program->entrypointIns = instructions[0]->id;
+
+ 
+    return program;
+}
+
+std::shared_ptr<CV::Quant> CV::Execute(const CV::InsType &entry, const CV::ContextType &ctx, const CV::ProgramType &prog, const CV::CursorType &cursor){
+
+    auto solve = [prog, cursor](const CV::InsType &ins, const CV::ContextType &ctx){
+        switch(ins->type){
+            /*
+                PROXIES
+            */
+            case CV::InstructionType::STATIC_PROXY: {
+                auto ctxId = ins->data[0];
+                auto dataId = ins->data[1];
+                return prog->ctx[ctxId]->memory[dataId];
+            };
+            /*
+                CONSTRUCTORS        
+            */
+            case CV::InstructionType::CONSTRUCT_LIST: {
+                auto &cctx = prog->ctx[ins->data[0]];
+                auto list = cctx->buildList();
+                for(int i = 0; i < ins->params.size(); ++i){
+                    auto quant = CV::Execute(prog->instructions[ins->params[i]], cctx, prog, cursor);
+                    if(cursor->error){
+                        return ctx->buildNil();
+                    }
+                    list->v.push_back(quant);
+                }   
+                return std::static_pointer_cast<CV::Quant>(list);
+            };
+
+            /*
+                INVALID
+            */
+            default: {
+                return ctx->buildNil();
+            };
+        }
+    };
+
+    CV::InsType ins = entry;
+    std::shared_ptr<CV::Quant> result;
+    while(true){
+        result = solve(ins, ctx);
+        if(ins->next != CV::InstructionType::INVALID){
+            ins = prog->instructions[ins->next];
+            continue;
+        }
+        break;
+    }
+    if(cursor->error){
+        return ctx->buildNil();
+    }
+
+    return result;
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//  CONTEXT
+// 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+CV::Context::Context(){
+    this->id = GEN_ID();
+}
+
+CV::Context::Context(const std::shared_ptr<CV::Context> &head) : Context(){
+    this->head = head;
+}
+
+std::shared_ptr<CV::TypeNumber> CV::Context::buildNumber(number n){
+    auto t = std::make_shared<CV::TypeNumber>();
+    this->memory[t->id] = t;
+    t->v = n;
+    return t;
+}
+
+std::shared_ptr<CV::Quant> CV::Context::buildNil(){
+    auto t = std::make_shared<CV::Quant>();
+    this->memory[t->id] = t;
+    return t;
+}
+
+std::shared_ptr<CV::TypeString> CV::Context::buildString(const std::string &s){
+    auto t = std::make_shared<CV::TypeString>();
+    this->memory[t->id] = t;
+    t->v = s;
+    return t;
+}
+
+std::shared_ptr<CV::TypeList> CV::Context::buildList(const std::vector<std::shared_ptr<CV::Quant>> &list){
+    auto t = std::make_shared<TypeList>();
+    this->memory[t->id] = t;
+    for(int i = 0; i < list.size(); ++i){
+        t->v.push_back(list[i]);
+    }
+    return t;
+}
+
+std::shared_ptr<CV::Quant> CV::Context::get(int id){
+    return std::shared_ptr<CV::Quant>(NULL);
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//  PROGRAM
+// 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+CV::InsType CV::Program::createInstruction(unsigned type, const CV::TokenType &token){
+    auto ins = std::make_shared<CV::Instruction>();
+    ins->id = GEN_ID();
+    ins->type = type;
+    ins->token = token;
+    this->instructions[ins->id] = ins;
+    return ins;
+}
+
+std::shared_ptr<CV::Context> CV::Program::createContext(const std::shared_ptr<CV::Context> &head){
+    auto ctx = std::make_shared<CV::Context>(head);
+    this->ctx[ctx->id] = ctx;
+    return ctx;
+}
+
+bool CV::Program::deleteContext(int id){
+    if(this->ctx.count(id) > 0){
+        this->ctx.erase(id); // Careful!! TODO: Check
+        return true;
+    }
+    return false;
+}
+
+
+int main(){
+
+    auto cursor = std::make_shared<CV::Cursor>();
+    auto program = CV::Compile("[1 [4 'hola'] 3]", cursor);
+    if(cursor->error){
+        std::cout << cursor->getRaised() << std::endl;
+        std::exit(1);
+    }
+    auto &entrypoint = program->instructions[program->entrypointIns];
+    auto result = CV::Execute(entrypoint, program->rootContext, program, cursor);
+    if(cursor->error){
+        std::cout << cursor->getRaised() << std::endl;
+        std::exit(1);
+    }
+
+    std::cout << CV::QuantToText(result) << std::endl;
+
+    std::cout << "exit" << std::endl;
+
+    return 0;
+
+}
