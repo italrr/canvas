@@ -5,6 +5,7 @@
     #include <unordered_map>
     #include <memory>
     #include <string>
+    #include <functional>
     #include <mutex>
 
     #define CV_DEFAULT_NUMBER_TYPE double
@@ -13,6 +14,10 @@
     #define CV_RELEASE_DATE "Oct. 1st 2025"; 
 
     #define CV_ERROR_MSG_NOOP_NO_INSTRUCTIONS "Provided no instructions"
+    #define CV_ERROR_MSG_WRONG_TYPE "Provided wrong types"
+    #define CV_ERROR_MSG_INVALID_INSTRUCTION "Invalid Instruction Type"
+
+    #define CV_BINARY_FN_PARAMS const std::vector<std::shared_ptr<CV::Quant>> &, const std::string&, const CV::TokenType &, const CV::CursorType &, int, int, const std::shared_ptr<CV::Program> &
 
     namespace CV {
         ////////////////////////////
@@ -29,7 +34,9 @@
                 STRING,
                 LIST,
                 DICTIONARY,
-                PROTOTYPE
+                PROTOTYPE,
+                FUNCTION,
+                BINARY_FUNCTION
             };
             static std::string name(int t){
                 switch(t){
@@ -81,6 +88,21 @@
             virtual bool clear();
         };
 
+        struct TypeFunction : CV::Quant {
+            int entrypoint;
+            int ctxId;
+            std::string name;
+            TypeFunction();
+            virtual bool clear();
+        };        
+
+        struct Program;
+        struct TypeFunctionBinary : TypeFunction {
+            void *ref;
+            TypeFunctionBinary();
+            virtual bool clear();
+        };          
+
         ////////////////////////////
         //// PARSING
         ///////////////////////////
@@ -125,10 +147,10 @@
                 c->refresh();
                 return c;
             }
-            std::string str(int c = 0) const {
-                std::string out = "c"+std::to_string(c)+this->first + (this->inner.size() > 0  ? " " : "");
+            std::string str() const {
+                std::string out = this->first + (this->inner.size() > 0  ? " " : "");
                 for(int i = 0; i < this->inner.size(); ++i){
-                    out += inner[i]->inner.size() == 0 ? inner[i]->first : "["+inner[i]->str(c+1)+"]";
+                    out += inner[i]->inner.size() == 0 ? inner[i]->first : "["+inner[i]->str()+"]";
                     if(i < this->inner.size()-1){
                         out += " ";
                     }
@@ -146,23 +168,45 @@
         ///////////////////////////
 
         #define CV_INS_RANGE_TYPE_CONSTRUCTORS 100
+        #define CV_INS_RANGE_TYPE_CONTROL_FLOW 200
         #define CV_INS_RANGE_TYPE_PROXY 1000
 
         namespace InstructionType {
             enum InstructionType : int {
                 INVALID = 0,
-                NOOP,
+                NOOP = 10,
                 // CONSTRUCTORS
                 LET = CV_INS_RANGE_TYPE_CONSTRUCTORS,
                 MUT,
                 CONSTRUCT_LIST,
 
+                // CONTROL FLOW
+                CF_INT_YIELD = CV_INS_RANGE_TYPE_CONTROL_FLOW,
+                CF_INT_SKIP,
+                CF_INT_RETURN,
+                CF_LOOP_DO,
+                CF_LOOP_FOR,
+                CF_LOOP_ITER,            
+                CF_INVOKE_FUNCTION,
+                CF_INVOKE_BINARY_FUNCTION,                  // DATA[0] -> CTX_ID, DATA[1] -> DATA_ID(owner), DATA[2]-> N_ARGS DATA[3] -> TARGET_DATA_ID | PARAMS... -> ARG_INS...
+
                 // PROXIES
-                STATIC_PROXY = CV_INS_RANGE_TYPE_PROXY,  // DATA[0] -> CTX_ID, DATA[1] -> DATA_ID
+                STATIC_PROXY = CV_INS_RANGE_TYPE_PROXY,     // DATA[0] -> CTX_ID, DATA[1] -> DATA_ID
+                PROMISE_PROXY                               // DATA[0] -> CTX_ID, DATA[1] -> PROMISED_DATA_ID |  PARAM[0] -> TARGET_INS, 
 
             };
         }
 
+
+        namespace ControlFlowState {
+            enum ControlFlowState : int {
+                CONTINUE,
+                SKIP,
+                YIELD,
+                RETURN,
+                CRASH
+            };
+        }
 
         struct Instruction {
             int id;
@@ -184,14 +228,16 @@
         struct Context {
             int id;
             std::unordered_map<unsigned, std::shared_ptr<CV::Quant>> memory;
+            std::unordered_map<std::string, unsigned> names;
             std::shared_ptr<CV::Context> head;
             Context();
             Context(const std::shared_ptr<CV::Context> &head);
-            std::shared_ptr<CV::TypeNumber> buildNumber(number n);
+            std::shared_ptr<CV::TypeNumber> buildNumber(number n = 0);
             std::shared_ptr<CV::Quant> buildNil();
             std::shared_ptr<CV::TypeList> buildList(const std::vector<std::shared_ptr<CV::Quant>> &list = {});
-            std::shared_ptr<CV::TypeString> buildString(const std::string &s);
+            std::shared_ptr<CV::TypeString> buildString(const std::string &s = "");
             std::shared_ptr<CV::Quant> get(int id);
+            std::shared_ptr<TypeFunctionBinary> registerBinaryFuntion(const std::string &name, void *ref);
         };
 
         struct Program {
@@ -206,7 +252,20 @@
 
         struct ControlFlow {
             int state;
+            int ctx;
+            int ref;
+            int next;
+            int current;
+            int prev;
             std::shared_ptr<CV::Quant> payload;
+            ControlFlow(){
+                this->state = CV::ControlFlowState::CONTINUE;
+                this->ref = 0;
+                this->ctx = 0;
+                this->next = CV::InstructionType::INVALID;
+                this->current = CV::InstructionType::INVALID;
+                this->prev = CV::InstructionType::INVALID;                
+            }
         };
 
         typedef std::shared_ptr<CV::Instruction> InsType;
@@ -214,11 +273,13 @@
         typedef std::shared_ptr<CV::Program> ProgramType;
         typedef std::shared_ptr<CV::Token> TokenType;
         typedef std::shared_ptr<CV::Context> ContextType;
+        typedef std::shared_ptr<CV::ControlFlow> CFType;
 
 
+        bool unwrapLibrary(const std::function<bool(const CV::ProgramType &target)> &fn, const CV::ProgramType &target);
         std::string QuantToText(const std::shared_ptr<CV::Quant> &t);
         std::shared_ptr<CV::Quant> Execute(const CV::InsType &entry, const CV::ContextType &ctx, const CV::ProgramType &prog, const CV::CursorType &cursor);
-        CV::ProgramType Compile(const std::string &input, CV::CursorType &cursor);
+        void Compile(const std::string &input, const CV::ProgramType &prog, CV::CursorType &cursor);
         CV::InsType Translate(const CV::TokenType &token, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor);
 
     }

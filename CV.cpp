@@ -172,6 +172,24 @@ bool CV::TypeList::clear(){
     return true;
 }
 
+// Function
+CV::TypeFunction::TypeFunction() : CV::Quant(){
+    this->type = CV::QuantType::FUNCTION;
+}
+
+bool CV::TypeFunction::clear(){
+    return true;
+}
+
+// Binary Function
+CV::TypeFunctionBinary::TypeFunctionBinary(){
+    this->type = CV::QuantType::BINARY_FUNCTION;
+}
+
+bool CV::TypeFunctionBinary::clear(){
+    return true;
+}
+
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -532,6 +550,10 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
         return bListConstruct(origin, inners, ctx);
     };
 
+    auto isName = [](const std::string &name, const CV::ContextType &ctx){
+        return ctx->names.count(name) > 0;
+    };
+
     if(token->first.size() == 0 && token->inner.size() > 0){
         return bListConstruct(token, token->inner, ctx);
     }else{
@@ -563,17 +585,51 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                 ins->data.push_back(string->id);
                 return ins;
             }
+        }else
+        /*
+            IS NAME?        
+        */
+        if(isName(token->first, ctx)){
+            // TODO: Check for PROMISE names
+            // TODO: Add proper checking so this doesn't blow up
+            auto dataId = ctx->names[token->first];
+            auto &quant = ctx->memory[dataId];
+            switch(quant->type){
+                case CV::QuantType::BINARY_FUNCTION: {
+                    // Build invokation
+                    auto ins = prog->createInstruction(CV::InstructionType::CF_INVOKE_BINARY_FUNCTION, token);
+                    ins->data.push_back(ctx->id);
+                    ins->data.push_back(quant->id);
+                    ins->data.push_back(token->inner.size());
+                    for(int i = 0; i < token->inner.size(); ++i){
+                        auto &inc = token->inner[i];
+                        auto fetched = CV::Translate(inc, prog, ctx, cursor);
+                        if(cursor->error){
+                            return prog->createInstruction(CV::InstructionType::NOOP, token);
+                        }                        
+                        ins->params.push_back(fetched->id);
+                    }
+                    // Build Promise Proxy
+                    auto childIns = prog->createInstruction(CV::InstructionType::PROMISE_PROXY, token);
+                    auto targetData = ctx->buildNil();
+                    childIns->data.push_back(ctx->id);
+                    childIns->data.push_back(targetData->id);
+                    childIns->params.push_back(ins->id);
+                    // Tell invoke binary function who they're going to fulfill
+                    ins->data.push_back(targetData->id);
+                    return childIns;
+                };
+            }
         }
 
     }
     
+
     return prog->createInstruction(CV::InstructionType::NOOP, token);
 }
 
-CV::ProgramType CV::Compile(const std::string &input, CV::CursorType &cursor){
+void CV::Compile(const std::string &input, const CV::ProgramType &prog, CV::CursorType &cursor){
 
-    auto program = std::make_shared<CV::Program>();
-    program->rootContext = program->createContext();
 
     // Fix outter brackets (Input must always be accompained by brackets)
     auto fixedInput = input;
@@ -589,7 +645,7 @@ CV::ProgramType CV::Compile(const std::string &input, CV::CursorType &cursor){
     // Split basic tokens
     auto tokens = parseTokens(fixedInput, ' ', cursor);
     if(cursor->error){
-        return CV::ProgramType(NULL);
+        return;
     }
 
     std::vector<CV::TokenType> root;
@@ -597,7 +653,7 @@ CV::ProgramType CV::Compile(const std::string &input, CV::CursorType &cursor){
     for(int i = 0; i < tokens.size(); ++i){
         auto built = rebuildTokenHierarchy({tokens[i]}, ' ', cursor);
         if(cursor->error){
-            return CV::ProgramType(NULL);
+            return;
         }
         for(int j = 0; j < built.size(); ++j){
             root.push_back(built[j]);
@@ -613,9 +669,9 @@ CV::ProgramType CV::Compile(const std::string &input, CV::CursorType &cursor){
     // Convert tokens into instructions
     std::vector<CV::InsType> instructions;
     for(int i = 0 ; i < root.size(); ++i){
-        auto ins = CV::Translate(root[i], program, program->rootContext, cursor);
+        auto ins = CV::Translate(root[i], prog, prog->rootContext, cursor);
         if(cursor->error){
-            return CV::ProgramType(NULL);
+            return;
         }
         instructions.push_back(ins);
     }
@@ -629,59 +685,132 @@ CV::ProgramType CV::Compile(const std::string &input, CV::CursorType &cursor){
     }
 
     // Set entry point (should be first instruction in the list)
-    program->entrypointIns = instructions[0]->id;
+    prog->entrypointIns = instructions[0]->id;
 
- 
-    return program;
+}
+
+
+static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
+                                            const CV::ContextType &ctx,
+                                            const CV::ProgramType &prog,
+                                            const CV::CursorType &cursor,
+                                            const CV::CFType &st
+                                        ){
+    // Update control flow cursor
+    
+    st->prev = ins->prev;
+    st->current = ins->id;
+    st->next = ins->next;
+
+    switch(ins->type){
+        /*
+            PROXIES
+        */
+        case CV::InstructionType::STATIC_PROXY: {
+            auto ctxId = ins->data[0];
+            auto dataId = ins->data[1];
+            return prog->ctx[ctxId]->memory[dataId];
+        };
+        case CV::InstructionType::PROMISE_PROXY: {
+            auto cctx = prog->ctx[ins->data[0]];
+            auto targetDataId = ins->data[1];
+            // Execute (The instruction needs to fulfill the promise on its side)
+            auto &entrypoint = prog->instructions[ins->params[0]];
+
+            auto quant = CV::Execute(entrypoint, cctx, prog, cursor);
+            if(cursor->error){
+                st->state = CV::ControlFlowState::CRASH;
+                return cctx->memory[targetDataId];
+            }            
+            return cctx->memory[targetDataId];
+        };        
+
+
+        /*
+            CONSTRUCTORS        
+        */
+        case CV::InstructionType::CONSTRUCT_LIST: {
+            auto &cctx = prog->ctx[ins->data[0]];
+            auto list = cctx->buildList();
+            for(int i = 0; i < ins->params.size(); ++i){
+                auto quant = CV::Execute(prog->instructions[ins->params[i]], cctx, prog, cursor);
+                if(cursor->error){
+                    st->state = CV::ControlFlowState::CRASH;
+                    return ctx->buildNil();
+                }
+                list->v.push_back(quant);
+            }   
+            return std::static_pointer_cast<CV::Quant>(list);
+        };
+
+        /*
+            CONTROL FLOW        
+        */
+        case CV::InstructionType::CF_INVOKE_BINARY_FUNCTION: {
+            auto &cctx = prog->ctx[ins->data[0]];
+            auto &fnData = cctx->memory[ins->data[1]];
+            auto fn = std::static_pointer_cast<CV::TypeFunctionBinary>(fnData);
+            int nArgs = ins->data[2];
+            int targetDataId = ins->data[3];
+
+            std::vector<std::shared_ptr<CV::Quant>> arguments;
+
+            // Execute arguments
+            for(int i = 0; i < nArgs; ++i){
+                auto quant = CV::Execute(prog->instructions[ins->params[i]], cctx, prog, cursor);
+                if(cursor->error){
+                    st->state = CV::ControlFlowState::CRASH;
+                    return ctx->buildNil();
+                }                
+                arguments.push_back(quant);
+            }
+
+            // Cast ref into pointer function
+            void (*ref)(CV_BINARY_FN_PARAMS) = (void (*)(CV_BINARY_FN_PARAMS))fn->ref;
+
+            // Invoke it
+            ref(arguments, fn->name, ins->token, cursor, ins->data[0], targetDataId, prog);
+            if(cursor->error){
+                st->state = CV::ControlFlowState::CRASH;
+            }             
+
+            return std::shared_ptr<CV::Quant>(NULL);
+        };
+
+
+        /*
+            INVALID
+        */
+        default: {
+            cursor->setError(CV_ERROR_MSG_INVALID_INSTRUCTION, "Type '"+std::to_string(ins->type)+"' from token '"+ins->token->str()+"' is undefined/invalid", ins->token->line);
+            st->state = CV::ControlFlowState::CRASH;
+            return ctx->buildNil();
+        };
+    }
 }
 
 std::shared_ptr<CV::Quant> CV::Execute(const CV::InsType &entry, const CV::ContextType &ctx, const CV::ProgramType &prog, const CV::CursorType &cursor){
 
-    auto solve = [prog, cursor](const CV::InsType &ins, const CV::ContextType &ctx){
-        switch(ins->type){
-            /*
-                PROXIES
-            */
-            case CV::InstructionType::STATIC_PROXY: {
-                auto ctxId = ins->data[0];
-                auto dataId = ins->data[1];
-                return prog->ctx[ctxId]->memory[dataId];
-            };
-            /*
-                CONSTRUCTORS        
-            */
-            case CV::InstructionType::CONSTRUCT_LIST: {
-                auto &cctx = prog->ctx[ins->data[0]];
-                auto list = cctx->buildList();
-                for(int i = 0; i < ins->params.size(); ++i){
-                    auto quant = CV::Execute(prog->instructions[ins->params[i]], cctx, prog, cursor);
-                    if(cursor->error){
-                        return ctx->buildNil();
-                    }
-                    list->v.push_back(quant);
-                }   
-                return std::static_pointer_cast<CV::Quant>(list);
-            };
-
-            /*
-                INVALID
-            */
-            default: {
-                return ctx->buildNil();
-            };
-        }
-    };
-
     CV::InsType ins = entry;
     std::shared_ptr<CV::Quant> result;
+    auto st = std::make_shared<CV::ControlFlow>();
+
     while(true){
-        result = solve(ins, ctx);
+        result = __flow(ins, ctx, prog, cursor, st);
+        if( 
+            cursor->error ||
+            st->state == CV::ControlFlowState::CRASH ||
+            st->state == CV::ControlFlowState::RETURN
+        ){
+            return result;
+        }
         if(ins->next != CV::InstructionType::INVALID){
             ins = prog->instructions[ins->next];
             continue;
         }
         break;
     }
+    
     if(cursor->error){
         return ctx->buildNil();
     }
@@ -736,6 +865,16 @@ std::shared_ptr<CV::Quant> CV::Context::get(int id){
     return std::shared_ptr<CV::Quant>(NULL);
 }
 
+std::shared_ptr<CV::TypeFunctionBinary> CV::Context::registerBinaryFuntion(const std::string &name, void *ref){
+    auto fn = std::make_shared<CV::TypeFunctionBinary>();
+    fn->ref = ref;
+    fn->ctxId = this->id;
+    fn->name = name;
+    this->memory[fn->id] = fn;
+    this->names[name] = fn->id;
+    return fn;
+}
+
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //
 //  PROGRAM
@@ -743,7 +882,7 @@ std::shared_ptr<CV::Quant> CV::Context::get(int id){
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
-CV::InsType CV::Program::createInstruction(unsigned type, const CV::TokenType &token){
+CV::InsType CV::Program::createInstruction(unsigned type, const std::shared_ptr<CV::Token> &token){
     auto ins = std::make_shared<CV::Instruction>();
     ins->id = GEN_ID();
     ins->type = type;
@@ -766,11 +905,27 @@ bool CV::Program::deleteContext(int id){
     return false;
 }
 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//  API
+// 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+bool CV::unwrapLibrary(const std::function<bool(const CV::ProgramType &target)> &fn, const CV::ProgramType &target){
+    return fn(target);
+}
+
+void CVInitCore(const CV::ProgramType &prog);
 
 int main(){
 
     auto cursor = std::make_shared<CV::Cursor>();
-    auto program = CV::Compile("[1 [4 'hola'] 3]", cursor);
+    auto program = std::make_shared<CV::Program>();
+    program->rootContext = program->createContext();
+    
+    CVInitCore(program);
+
+    CV::Compile("+ 2 2", program, cursor);
     if(cursor->error){
         std::cout << cursor->getRaised() << std::endl;
         std::exit(1);
