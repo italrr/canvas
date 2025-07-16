@@ -17,8 +17,9 @@
     #define CV_ERROR_MSG_WRONG_TYPE "Provided wrong types"
     #define CV_ERROR_MSG_INVALID_INSTRUCTION "Invalid Instruction Type"
     #define CV_ERROR_MSG_MISUSED_IMPERATIVE "Misused Imperative"
+    #define CV_ERROR_MSG_UNDEFINED_IMPERATIVE "Undefined imperative or name within this context or above"
 
-    #define CV_BINARY_FN_PARAMS const std::vector<std::shared_ptr<CV::Instruction>> &, const std::string&, const CV::TokenType &, const CV::CursorType &, int, int, const std::shared_ptr<CV::Program> &
+    #define CV_BINARY_FN_PARAMS const std::vector<std::shared_ptr<CV::Instruction>> &, const std::string&, const CV::TokenType &, const CV::CursorType &, int, int, int, const std::shared_ptr<CV::Program> &
 
     namespace CV {
         ////////////////////////////
@@ -108,6 +109,7 @@
         //// PARSING
         ///////////////////////////
 
+        struct Token;
         struct Cursor {
             std::mutex accessMutex;
             std::string message;
@@ -115,15 +117,15 @@
             bool autoprint;
             bool error;
             unsigned line;
-            std::shared_ptr<Quant> subject;
+            std::shared_ptr<CV::Token> subject;
             bool shouldExit;
             bool used;
             Cursor();
             std::string getRaised();
             bool raise();
             void reset();
-            void setError(const std::string &title, const std::string &message, unsigned line);
-            void setError(const std::string &title, const std::string &message, unsigned line, std::shared_ptr<Quant> subject); 
+            void setError(const std::string &title, const std::string &message, const std::shared_ptr<CV::Token> &subject = NULL);
+            void setError(const std::string &title, const std::string &message, int line);
         };
 
         struct Token {
@@ -239,6 +241,7 @@
             std::shared_ptr<CV::TypeString> buildString(const std::string &s = "");
             std::shared_ptr<CV::Quant> get(int id);
             std::shared_ptr<TypeFunctionBinary> registerBinaryFuntion(const std::string &name, void *ref);
+            std::vector<int> getName(const std::string &name);
         };
 
         struct Program {

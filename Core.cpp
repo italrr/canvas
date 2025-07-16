@@ -15,14 +15,14 @@ namespace CV {
     namespace ErrorCheck {
         inline bool AllNumbers(const std::vector<std::shared_ptr<CV::Quant>> &args, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor){
             if(!CV::Test::areAllNumbers(args)){
-                cursor->setError(CV_ERROR_MSG_WRONG_TYPE, "Imperative '"+name+"' expects all operands to be numbers in '"+token->str()+"'", token->line);
+                cursor->setError(CV_ERROR_MSG_WRONG_TYPE, "Imperative '"+name+"' expects all operands to be numbers", token);
                 return false;
             }   
             return true;
         }
         inline bool ExpectsOperands(int prov, int exp, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor){
             if(prov < exp){
-                cursor->setError(CV_ERROR_MSG_WRONG_TYPE, "Imperative '"+name+"' expects ("+std::to_string(exp)+") operands but provided("+std::to_string(prov)+") in '"+token->str()+"'", token->line);
+                cursor->setError(CV_ERROR_MSG_WRONG_TYPE, "Imperative '"+name+"' expects ("+std::to_string(exp)+") operands but provided("+std::to_string(prov)+")", token);
                 return false;
             }   
             return true;
@@ -30,7 +30,7 @@ namespace CV {
 
         inline bool ExpectsNoMoreOperands(int prov, int max, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor){
             if(prov > max){
-                cursor->setError(CV_ERROR_MSG_WRONG_TYPE, "Imperative '"+name+"' expects no more than ("+std::to_string(max)+") operands but provided("+std::to_string(prov)+") in '"+token->str()+"'", token->line);
+                cursor->setError(CV_ERROR_MSG_WRONG_TYPE, "Imperative '"+name+"' expects no more than ("+std::to_string(max)+") operands but provided("+std::to_string(prov)+")", token);
                 return false;
             }   
             return true;
@@ -38,7 +38,7 @@ namespace CV {
 
         inline bool ExpectsExactlyOperands(int prov, int exp, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor){
             if(prov != exp){
-                cursor->setError(CV_ERROR_MSG_WRONG_TYPE, "Imperative '"+name+"' expects exactly ("+std::to_string(exp)+") operands but provided("+std::to_string(prov)+") in '"+token->str()+"'", token->line);
+                cursor->setError(CV_ERROR_MSG_WRONG_TYPE, "Imperative '"+name+"' expects exactly ("+std::to_string(exp)+") operands but provided("+std::to_string(prov)+")", token);
                 return false;
             }   
             return true;
@@ -51,33 +51,34 @@ namespace CV {
 //  ARITHMETIC
 // 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
+#include <iostream>
 static void __CV_CORE_ARITHMETIC_ADDITION(
     const std::vector<std::shared_ptr<CV::Instruction>> &args,
     const std::string &name,
     const CV::TokenType &token,
     const CV::CursorType &cursor,
+    int execCtxId,
     int ctxId,
     int dataId,
     const std::shared_ptr<CV::Program> &prog
 ){
     // Fetch context & data target
-    auto &ctx = prog->ctx[ctxId];
-    auto data = ctx->memory[dataId];
+    auto &dataCtx = prog->ctx[ctxId];
+    auto &execCtx = prog->ctx[execCtxId];
 
     if(!CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor)){
         return;
     }
 
     // Build result holder
-    auto result = ctx->buildNumber();
+    auto result = dataCtx->buildNumber();
 
     // Fulfill promise in context
-    ctx->memory[dataId] = result;
+    dataCtx->memory[dataId] = result;
 
     // Do the operation
     for(int i = 0; i < args.size(); ++i){
-        auto v = CV::Execute(args[i], ctx, prog, cursor);
+        auto v = CV::Execute(args[i], execCtx, prog, cursor);
         if(cursor->error){
             return;
         }           
@@ -93,25 +94,26 @@ static void __CV_CORE_ARITHMETIC_SUB(
     const std::string &name,
     const CV::TokenType &token,
     const CV::CursorType &cursor,
+    int execCtxId,
     int ctxId,
     int dataId,
     const std::shared_ptr<CV::Program> &prog
 ){
     // Fetch context & data target
-    auto &ctx = prog->ctx[ctxId];
-    auto data = ctx->memory[dataId];
+    auto &dataCtx = prog->ctx[ctxId];
+    auto &execCtx = prog->ctx[execCtxId];
 
     if(!CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor)){
         return;
     }    
 
     // Build result holder
-    auto result = ctx->buildNumber();
+    auto result = dataCtx->buildNumber();
 
     // Fulfill promise in context
-    ctx->memory[dataId] = result;
+    dataCtx->memory[dataId] = result;
 
-    auto fv = CV::Execute(args[0], ctx, prog, cursor);
+    auto fv = CV::Execute(args[0], execCtx, prog, cursor);
     if(cursor->error){
         return;
     }           
@@ -121,7 +123,7 @@ static void __CV_CORE_ARITHMETIC_SUB(
     result->v = std::static_pointer_cast<CV::TypeNumber>(fv)->v;
     // Do the operation
     for(int i = 1; i < args.size(); ++i){
-        auto v = CV::Execute(args[i], ctx, prog, cursor);
+        auto v = CV::Execute(args[i], execCtx, prog, cursor);
         if(cursor->error){
             return;
         }           
@@ -137,27 +139,29 @@ static void __CV_CORE_ARITHMETIC_MULT(
     const std::string &name,
     const CV::TokenType &token,
     const CV::CursorType &cursor,
+    int execCtxId,
     int ctxId,
     int dataId,
     const std::shared_ptr<CV::Program> &prog
 ){
     // Fetch context & data target
-    auto &ctx = prog->ctx[ctxId];
-    auto data = ctx->memory[dataId];
+    auto &dataCtx = prog->ctx[ctxId];
+    auto &execCtx = prog->ctx[execCtxId];
+
 
     if(!CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor)){
         return;
     }    
 
     // Build result holder
-    auto result = ctx->buildNumber();
+    auto result = dataCtx->buildNumber();
 
     // Fulfill promise in context
-    ctx->memory[dataId] = result;
+    dataCtx->memory[dataId] = result;
 
     // Do the operation
     for(int i = 0; i < args.size(); ++i){
-        auto v = CV::Execute(args[i], ctx, prog, cursor);
+        auto v = CV::Execute(args[i], execCtx, prog, cursor);
         if(cursor->error){
             return;
         }           
@@ -173,25 +177,26 @@ static void __CV_CORE_ARITHMETIC_DIV(
     const std::string &name,
     const CV::TokenType &token,
     const CV::CursorType &cursor,
+    int execCtxId,
     int ctxId,
     int dataId,
     const std::shared_ptr<CV::Program> &prog
 ){
     // Fetch context & data target
-    auto &ctx = prog->ctx[ctxId];
-    auto data = ctx->memory[dataId];
+    auto &dataCtx = prog->ctx[ctxId];
+    auto &execCtx = prog->ctx[execCtxId];
 
     if(!CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor)){
         return;
     }    
 
     // Build result holder
-    auto result = ctx->buildNumber();
+    auto result = dataCtx->buildNumber();
 
     // Fulfill promise in context
-    ctx->memory[dataId] = result;
+    dataCtx->memory[dataId] = result;
 
-    auto fv = CV::Execute(args[0], ctx, prog, cursor);
+    auto fv = CV::Execute(args[0], execCtx, prog, cursor);
     if(cursor->error){
         return;
     }           
@@ -201,7 +206,7 @@ static void __CV_CORE_ARITHMETIC_DIV(
     result->v = std::static_pointer_cast<CV::TypeNumber>(fv)->v;
     // Do the operation
     for(int i = 1; i < args.size(); ++i){
-        auto v = CV::Execute(args[i], ctx, prog, cursor);
+        auto v = CV::Execute(args[i], execCtx, prog, cursor);
         if(cursor->error){
             return;
         }           
@@ -223,28 +228,29 @@ static void __CV_CORE_BOOLEAN_AND(
     const std::string &name,
     const CV::TokenType &token,
     const CV::CursorType &cursor,
+    int execCtxId,
     int ctxId,
     int dataId,
     const std::shared_ptr<CV::Program> &prog
 ){
     // Fetch context & data target
-    auto &ctx = prog->ctx[ctxId];
-    auto data = ctx->memory[dataId];
+    auto &dataCtx = prog->ctx[ctxId];
+    auto &execCtx = prog->ctx[execCtxId];
 
     if(!CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor)){
         return;
     }
 
     // Build result holder
-    auto result = ctx->buildNumber();
+    auto result = dataCtx->buildNumber();
 
     // Fulfill promise in context
-    ctx->memory[dataId] = result;
+    dataCtx->memory[dataId] = result;
 
     // Do the operation
     result->v = 1;
     for(int i = 0; i < args.size(); ++i){
-        auto v = CV::Execute(args[i], ctx, prog, cursor);
+        auto v = CV::Execute(args[i], execCtx, prog, cursor);
         if(cursor->error){
             return;
         }        
@@ -260,28 +266,29 @@ static void __CV_CORE_BOOLEAN_OR(
     const std::string &name,
     const CV::TokenType &token,
     const CV::CursorType &cursor,
+    int execCtxId,
     int ctxId,
     int dataId,
     const std::shared_ptr<CV::Program> &prog
 ){
     // Fetch context & data target
-    auto &ctx = prog->ctx[ctxId];
-    auto data = ctx->memory[dataId];
+    auto &dataCtx = prog->ctx[ctxId];
+    auto &execCtx = prog->ctx[execCtxId];
 
     if(!CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor)){
         return;
     }
 
     // Build result holder
-    auto result = ctx->buildNumber();
+    auto result = dataCtx->buildNumber();
 
     // Fulfill promise in context
-    ctx->memory[dataId] = result;
+    dataCtx->memory[dataId] = result;
 
     // Do the operation
     result->v = 0;
     for(int i = 0; i < args.size(); ++i){
-        auto v = CV::Execute(args[i], ctx, prog, cursor);
+        auto v = CV::Execute(args[i], execCtx, prog, cursor);
         if(cursor->error){
             return;
         }        
@@ -297,26 +304,27 @@ static void __CV_CORE_BOOLEAN_NOT(
     const std::string &name,
     const CV::TokenType &token,
     const CV::CursorType &cursor,
+    int execCtxId,
     int ctxId,
     int dataId,
     const std::shared_ptr<CV::Program> &prog
 ){
     // Fetch context & data target
-    auto &ctx = prog->ctx[ctxId];
-    auto data = ctx->memory[dataId];
+    auto &dataCtx = prog->ctx[ctxId];
+    auto &execCtx = prog->ctx[execCtxId];
 
     if(!CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, token, cursor)){
         return;
     }
 
     // Build result holder
-    auto result = ctx->buildNumber();
+    auto result = dataCtx->buildNumber();
 
     // Fulfill promise in context
-    ctx->memory[dataId] = result;
+    dataCtx->memory[dataId] = result;
 
     // Do the operation
-    auto v = CV::Execute(args[0], ctx, prog, cursor);
+    auto v = CV::Execute(args[0], execCtx, prog, cursor);
     if(cursor->error){
         return;
     }     
@@ -337,13 +345,14 @@ static void __CV_CORE_CONDITIONAL_EQ(
     const std::string &name,
     const CV::TokenType &token,
     const CV::CursorType &cursor,
+    int execCtxId,
     int ctxId,
     int dataId,
     const std::shared_ptr<CV::Program> &prog
 ){
     // Fetch context & data target
-    auto &ctx = prog->ctx[ctxId];
-    auto data = ctx->memory[dataId];
+    auto &dataCtx = prog->ctx[ctxId];
+    auto &execCtx = prog->ctx[execCtxId];
 
     if( !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor) ||
         !CV::ErrorCheck::ExpectsNoMoreOperands(args.size(), 4, name, token, cursor)){
@@ -351,18 +360,18 @@ static void __CV_CORE_CONDITIONAL_EQ(
     }
 
     // Build result holder
-    auto result = ctx->buildNumber();
+    auto result = dataCtx->buildNumber();
 
     // Fulfill promise in context
-    ctx->memory[dataId] = result;
+    dataCtx->memory[dataId] = result;
 
     // Do the operation
-    auto ai = CV::Execute(args[0], ctx, prog, cursor);
+    auto ai = CV::Execute(args[0], execCtx, prog, cursor);
     if(cursor->error){
         return;
     }  
 
-    auto bi = CV::Execute(args[1], ctx, prog, cursor);
+    auto bi = CV::Execute(args[1], execCtx, prog, cursor);
     if(cursor->error){
         return;
     }      
@@ -377,18 +386,18 @@ static void __CV_CORE_CONDITIONAL_EQ(
     result->v = a == b;
 
     if(args.size() > 2 && result->v){
-        auto trueBranch = CV::Execute(args[2], ctx, prog, cursor);
+        auto trueBranch = CV::Execute(args[2], execCtx, prog, cursor);
         if(cursor->error){
             return;
         }
-        ctx->memory[dataId] = trueBranch;
+        dataCtx->memory[dataId] = trueBranch;
     }else
     if(args.size() > 3 && !result->v){
-        auto falseBranch = CV::Execute(args[3], ctx, prog, cursor);
+        auto falseBranch = CV::Execute(args[3], execCtx, prog, cursor);
         if(cursor->error){
             return;
         }
-        ctx->memory[dataId] = falseBranch;
+        dataCtx->memory[dataId] = falseBranch;
     }    
 }
 
@@ -397,13 +406,14 @@ static void __CV_CORE_CONDITIONAL_NEQ(
     const std::string &name,
     const CV::TokenType &token,
     const CV::CursorType &cursor,
+    int execCtxId,
     int ctxId,
     int dataId,
     const std::shared_ptr<CV::Program> &prog
 ){
     // Fetch context & data target
-    auto &ctx = prog->ctx[ctxId];
-    auto data = ctx->memory[dataId];
+    auto &dataCtx = prog->ctx[ctxId];
+    auto &execCtx = prog->ctx[execCtxId];
 
     if( !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor) ||
         !CV::ErrorCheck::ExpectsNoMoreOperands(args.size(), 4, name, token, cursor)){
@@ -411,18 +421,18 @@ static void __CV_CORE_CONDITIONAL_NEQ(
     }
 
     // Build result holder
-    auto result = ctx->buildNumber();
+    auto result = dataCtx->buildNumber();
 
     // Fulfill promise in context
-    ctx->memory[dataId] = result;
+    dataCtx->memory[dataId] = result;
 
     // Do the operation
-    auto ai = CV::Execute(args[0], ctx, prog, cursor);
+    auto ai = CV::Execute(args[0], execCtx, prog, cursor);
     if(cursor->error){
         return;
     }  
 
-    auto bi = CV::Execute(args[1], ctx, prog, cursor);
+    auto bi = CV::Execute(args[1], execCtx, prog, cursor);
     if(cursor->error){
         return;
     }      
@@ -436,19 +446,21 @@ static void __CV_CORE_CONDITIONAL_NEQ(
 
     result->v = a != b;
 
+    // TRUE BRANCH
     if(args.size() > 2 && result->v){
-        auto trueBranch = CV::Execute(args[2], ctx, prog, cursor);
+        auto trueBranch = CV::Execute(args[2], execCtx, prog, cursor);
         if(cursor->error){
             return;
         }
-        ctx->memory[dataId] = trueBranch;
+        dataCtx->memory[dataId] = trueBranch;
     }else
+    // FALSE BRANCH
     if(args.size() > 3 && !result->v){
-        auto falseBranch = CV::Execute(args[3], ctx, prog, cursor);
+        auto falseBranch = CV::Execute(args[3], execCtx, prog, cursor);
         if(cursor->error){
             return;
         }
-        ctx->memory[dataId] = falseBranch;
+        dataCtx->memory[dataId] = falseBranch;
     }    
 }
 
@@ -457,13 +469,14 @@ static void __CV_CORE_CONDITIONAL_IF(
     const std::string &name,
     const CV::TokenType &token,
     const CV::CursorType &cursor,
+    int execCtxId,
     int ctxId,
     int dataId,
     const std::shared_ptr<CV::Program> &prog
 ){
     // Fetch context & data target
-    auto &ctx = prog->ctx[ctxId];
-    auto data = ctx->memory[dataId];
+    auto &dataCtx = prog->ctx[ctxId];
+    auto &execCtx = prog->ctx[execCtxId];
 
     if( !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor) ||
         !CV::ErrorCheck::ExpectsNoMoreOperands(args.size(), 3, name, token, cursor)){
@@ -471,35 +484,37 @@ static void __CV_CORE_CONDITIONAL_IF(
     }
 
     // Build result holder
-    auto result = ctx->buildNumber();
+    auto result = dataCtx->buildNumber();
 
     // Fulfill promise in context
-    ctx->memory[dataId] = result;
+    dataCtx->memory[dataId] = result;
 
     // Do the operation
-    auto condi = CV::Execute(args[0], ctx, prog, cursor);
+    auto condi = CV::Execute(args[0], execCtx, prog, cursor);
     if(cursor->error){
         return;
     }
 
     result->v = CV::getBooleanValue(condi);
 
+    // TRUE BRANCH
     if(args.size() > 1 && result->v){
-        auto trueBranch = CV::Execute(args[1], ctx, prog, cursor);
+        auto trueBranch = CV::Execute(args[1], execCtx, prog, cursor);
         if(cursor->error){
             return;
         }
-        ctx->memory[dataId] = trueBranch;
+        dataCtx->memory[dataId] = trueBranch;
     }else
     if(args.size() == 2 && !result->v){
-        ctx->memory[dataId] = ctx->buildNil();
+        dataCtx->memory[dataId] = dataCtx->buildNil();
     }else
+    // FALSE BRANCH
     if(args.size() > 2 && !result->v){
-        auto falseBranch = CV::Execute(args[2], ctx, prog, cursor);
+        auto falseBranch = CV::Execute(args[2], execCtx, prog, cursor);
         if(cursor->error){
             return;
         }
-        ctx->memory[dataId] = falseBranch;
+        dataCtx->memory[dataId] = falseBranch;
     }    
 }
 
@@ -532,9 +547,9 @@ void CVInitCore(const CV::ProgramType &prog){
 
     */
     CV::unwrapLibrary([](const CV::ProgramType &target){
-        target->rootContext->registerBinaryFuntion("and", (void*)__CV_CORE_BOOLEAN_AND);
-        target->rootContext->registerBinaryFuntion("or", (void*)__CV_CORE_BOOLEAN_OR);
-        target->rootContext->registerBinaryFuntion("not", (void*)__CV_CORE_BOOLEAN_NOT);
+        target->rootContext->registerBinaryFuntion("&", (void*)__CV_CORE_BOOLEAN_AND);
+        target->rootContext->registerBinaryFuntion("|", (void*)__CV_CORE_BOOLEAN_OR);
+        target->rootContext->registerBinaryFuntion("!", (void*)__CV_CORE_BOOLEAN_NOT);
         return true;
     }, prog);   
     
@@ -545,8 +560,8 @@ void CVInitCore(const CV::ProgramType &prog){
 
     */
    CV::unwrapLibrary([](const CV::ProgramType &target){
-        target->rootContext->registerBinaryFuntion("eq", (void*)__CV_CORE_CONDITIONAL_EQ);
-        target->rootContext->registerBinaryFuntion("neq", (void*)__CV_CORE_CONDITIONAL_NEQ);
+        target->rootContext->registerBinaryFuntion("=", (void*)__CV_CORE_CONDITIONAL_EQ);
+        target->rootContext->registerBinaryFuntion("!=", (void*)__CV_CORE_CONDITIONAL_NEQ);
         target->rootContext->registerBinaryFuntion("if", (void*)__CV_CORE_CONDITIONAL_IF);
         return true;
     }, prog);    
