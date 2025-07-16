@@ -16,8 +16,9 @@
     #define CV_ERROR_MSG_NOOP_NO_INSTRUCTIONS "Provided no instructions"
     #define CV_ERROR_MSG_WRONG_TYPE "Provided wrong types"
     #define CV_ERROR_MSG_INVALID_INSTRUCTION "Invalid Instruction Type"
+    #define CV_ERROR_MSG_MISUSED_IMPERATIVE "Misused Imperative"
 
-    #define CV_BINARY_FN_PARAMS const std::vector<std::shared_ptr<CV::Quant>> &, const std::string&, const CV::TokenType &, const CV::CursorType &, int, int, const std::shared_ptr<CV::Program> &
+    #define CV_BINARY_FN_PARAMS const std::vector<std::shared_ptr<CV::Instruction>> &, const std::string&, const CV::TokenType &, const CV::CursorType &, int, int, const std::shared_ptr<CV::Program> &
 
     namespace CV {
         ////////////////////////////
@@ -275,7 +276,7 @@
         typedef std::shared_ptr<CV::Context> ContextType;
         typedef std::shared_ptr<CV::ControlFlow> CFType;
 
-
+        bool getBooleanValue(const std::shared_ptr<CV::Quant> &data);
         bool unwrapLibrary(const std::function<bool(const CV::ProgramType &target)> &fn, const CV::ProgramType &target);
         std::string QuantToText(const std::shared_ptr<CV::Quant> &t);
         std::shared_ptr<CV::Quant> Execute(const CV::InsType &entry, const CV::ContextType &ctx, const CV::ProgramType &prog, const CV::CursorType &cursor);

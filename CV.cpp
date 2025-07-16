@@ -50,6 +50,13 @@ namespace CV {
             return false;
         }     
 
+        static bool isValidVarName(const std::string &name){
+            if(name.size() == 0){
+                return false;
+            }
+            return !isNumber(std::string("")+name[0]);
+        }
+
         static std::string removeTrailingZeros(double d){
             size_t len = std::snprintf(0, 0, "%.8f", d);
             std::string s(len+1, 0);
@@ -558,6 +565,45 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
         return bListConstruct(token, token->inner, ctx);
     }else{
         /*
+            LET
+        */
+        if(token->first == "let"){
+            if(token->inner.size() != 2){
+                cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "'"+token->first+"' expects exactly 3 tokens (let NAME VALUE)", token->line);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
+
+            auto &nameToken = token->inner[0];
+            auto &insToken = token->inner[1];
+
+            if(nameToken->inner.size() != 0){
+                cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "'"+token->first+"' expects NAME as second operand", token->line);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);                
+            }
+            auto &name = nameToken->first;
+            if(!CV::Tools::isValidVarName(name)){
+                cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "'"+token->first+"' second operand is an invalid name", token->line);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);                   
+            }
+
+            auto target = CV::Translate(insToken, prog, ctx, cursor);
+            if(cursor->error){
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }         
+
+            auto targetData = ctx->buildNil();
+
+            auto ins = prog->createInstruction(CV::InstructionType::LET, token);
+            ins->literal.push_back(name);
+            ins->data.push_back(ctx->id);
+            ins->data.push_back(targetData->id);
+            ins->params.push_back(target->id);
+
+            ctx->names[name] = targetData->id;  
+
+            return ins;
+        }else
+        /*
             NUMBER
         */
         if(CV::Tools::isNumber(token->first)){
@@ -619,6 +665,12 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                     ins->data.push_back(targetData->id);
                     return childIns;
                 };
+                default: {
+                    auto ins = prog->createInstruction(CV::InstructionType::STATIC_PROXY, token);
+                    ins->data.push_back(ctx->id);
+                    ins->data.push_back(dataId);
+                    return ins;
+                };
             }
         }
 
@@ -633,11 +685,8 @@ void CV::Compile(const std::string &input, const CV::ProgramType &prog, CV::Curs
 
     // Fix outter brackets (Input must always be accompained by brackets)
     auto fixedInput = input;
-    if(fixedInput[0] != '['){
-        fixedInput = "["+fixedInput;
-    }
-    if(fixedInput[fixedInput.size()-1] != ']'){
-        fixedInput = fixedInput+"]";
+    if(fixedInput[0] != '[' || fixedInput[fixedInput.size()-1] != ']'){
+        fixedInput = "["+fixedInput+"]";
     }
     fixedInput = "["+fixedInput+"]";
 
@@ -743,6 +792,21 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
             return std::static_pointer_cast<CV::Quant>(list);
         };
 
+        case CV::InstructionType::LET: {
+            auto &cctx = prog->ctx[ins->data[0]];
+            auto targetDataID = ins->data[1];
+            auto &name = ins->literal[0];
+            auto &entrypoint = prog->instructions[ins->params[0]];
+
+            auto v = CV::Execute(entrypoint, cctx, prog, cursor);
+            if(cursor->error){
+                st->state = CV::ControlFlowState::CRASH;
+                return v;
+            }
+            cctx->memory[targetDataID] = v;
+            return v;
+        };
+        
         /*
             CONTROL FLOW        
         */
@@ -753,16 +817,11 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
             int nArgs = ins->data[2];
             int targetDataId = ins->data[3];
 
-            std::vector<std::shared_ptr<CV::Quant>> arguments;
+            std::vector<std::shared_ptr<CV::Instruction>> arguments;
 
             // Execute arguments
             for(int i = 0; i < nArgs; ++i){
-                auto quant = CV::Execute(prog->instructions[ins->params[i]], cctx, prog, cursor);
-                if(cursor->error){
-                    st->state = CV::ControlFlowState::CRASH;
-                    return ctx->buildNil();
-                }                
-                arguments.push_back(quant);
+                arguments.push_back(prog->instructions[ins->params[i]]);
             }
 
             // Cast ref into pointer function
@@ -777,7 +836,13 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
             return std::shared_ptr<CV::Quant>(NULL);
         };
 
-
+        /*
+            NOOP
+        */
+        case CV::InstructionType::NOOP: {
+            st->state = CV::ControlFlowState::CRASH;
+            return ctx->buildNil();            
+        } break;
         /*
             INVALID
         */
@@ -915,6 +980,19 @@ bool CV::unwrapLibrary(const std::function<bool(const CV::ProgramType &target)> 
     return fn(target);
 }
 
+bool CV::getBooleanValue(const std::shared_ptr<CV::Quant> &data){
+    switch(data->type){
+        case CV::QuantType::NUMBER: {
+            auto v = std::static_pointer_cast<CV::TypeNumber>(data);
+            return v->v != 0;
+        };
+        default:
+        case CV::QuantType::NIL: {
+            return false;
+        };
+    }
+}
+
 void CVInitCore(const CV::ProgramType &prog);
 
 int main(){
@@ -925,7 +1003,7 @@ int main(){
     
     CVInitCore(program);
 
-    CV::Compile("+ 2 2", program, cursor);
+    CV::Compile("if [not 1] 5 15", program, cursor);
     if(cursor->error){
         std::cout << cursor->getRaised() << std::endl;
         std::exit(1);
