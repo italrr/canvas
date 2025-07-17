@@ -128,12 +128,25 @@
             void setError(const std::string &title, const std::string &message, int line);
         };
 
+        struct Specifier {
+            std::string type;
+            std::string value;
+            Specifier(){
+
+            }
+            Specifier(const std::string &type, const std::string &value){
+                this->type = type;
+                this->value = value;
+            }
+        };
+
         struct Token {
             std::string first;
             unsigned line;
             bool solved;
             bool complex;
             std::vector<std::shared_ptr<Token>> inner;
+            std::vector<CV::Specifier> spec;
             Token(){
                 solved = false;
                 complex = false;
@@ -151,7 +164,7 @@
                 return c;
             }
             std::string str() const {
-                std::string out = this->first + (this->inner.size() > 0  ? " " : "");
+                std::string out = this->first + (this->first.size() > 0 && this->inner.size() > 0  ? " " : "");
                 for(int i = 0; i < this->inner.size(); ++i){
                     out += inner[i]->inner.size() == 0 ? inner[i]->first : "["+inner[i]->str()+"]";
                     if(i < this->inner.size()-1){

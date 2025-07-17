@@ -519,6 +519,295 @@ static void __CV_CORE_CONDITIONAL_IF(
 }
 
 
+
+static void __CV_CORE_CONDITIONAL_MORE_THAN(
+    const std::vector<std::shared_ptr<CV::Instruction>> &args,
+    const std::string &name,
+    const CV::TokenType &token,
+    const CV::CursorType &cursor,
+    int execCtxId,
+    int ctxId,
+    int dataId,
+    const std::shared_ptr<CV::Program> &prog
+){
+    // Fetch context & data target
+    auto &dataCtx = prog->ctx[ctxId];
+    auto &execCtx = prog->ctx[execCtxId];
+
+    if( !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor) ||
+        !CV::ErrorCheck::ExpectsNoMoreOperands(args.size(), 4, name, token, cursor)){
+        return;
+    }
+
+    // Build result holder
+    auto result = dataCtx->buildNumber();
+
+    // Fulfill promise in context
+    dataCtx->memory[dataId] = result;
+
+    // Do the operation
+    auto ai = CV::Execute(args[0], execCtx, prog, cursor);
+    if(cursor->error){
+        return;
+    }  
+
+    auto bi = CV::Execute(args[1], execCtx, prog, cursor);
+    if(cursor->error){
+        return;
+    }      
+
+    if(!CV::ErrorCheck::AllNumbers({ai, bi}, name, token, cursor)){
+        return;
+    }    
+
+    auto a = std::static_pointer_cast<CV::TypeNumber>(ai)->v;
+    auto b = std::static_pointer_cast<CV::TypeNumber>(bi)->v;
+
+    result->v = a > b;
+
+    if(args.size() > 2 && result->v){
+        auto trueBranch = CV::Execute(args[2], execCtx, prog, cursor);
+        if(cursor->error){
+            return;
+        }
+        dataCtx->memory[dataId] = trueBranch;
+    }else
+    if(args.size() > 3 && !result->v){
+        auto falseBranch = CV::Execute(args[3], execCtx, prog, cursor);
+        if(cursor->error){
+            return;
+        }
+        dataCtx->memory[dataId] = falseBranch;
+    }    
+}
+
+static void __CV_CORE_CONDITIONAL_MORE_OR_EQ(
+    const std::vector<std::shared_ptr<CV::Instruction>> &args,
+    const std::string &name,
+    const CV::TokenType &token,
+    const CV::CursorType &cursor,
+    int execCtxId,
+    int ctxId,
+    int dataId,
+    const std::shared_ptr<CV::Program> &prog
+){
+    // Fetch context & data target
+    auto &dataCtx = prog->ctx[ctxId];
+    auto &execCtx = prog->ctx[execCtxId];
+
+    if( !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor) ||
+        !CV::ErrorCheck::ExpectsNoMoreOperands(args.size(), 4, name, token, cursor)){
+        return;
+    }
+
+    // Build result holder
+    auto result = dataCtx->buildNumber();
+
+    // Fulfill promise in context
+    dataCtx->memory[dataId] = result;
+
+    // Do the operation
+    auto ai = CV::Execute(args[0], execCtx, prog, cursor);
+    if(cursor->error){
+        return;
+    }  
+
+    auto bi = CV::Execute(args[1], execCtx, prog, cursor);
+    if(cursor->error){
+        return;
+    }      
+
+    if(!CV::ErrorCheck::AllNumbers({ai, bi}, name, token, cursor)){
+        return;
+    }    
+
+    auto a = std::static_pointer_cast<CV::TypeNumber>(ai)->v;
+    auto b = std::static_pointer_cast<CV::TypeNumber>(bi)->v;
+
+    result->v = a >= b;
+
+    if(args.size() > 2 && result->v){
+        auto trueBranch = CV::Execute(args[2], execCtx, prog, cursor);
+        if(cursor->error){
+            return;
+        }
+        dataCtx->memory[dataId] = trueBranch;
+    }else
+    if(args.size() > 3 && !result->v){
+        auto falseBranch = CV::Execute(args[3], execCtx, prog, cursor);
+        if(cursor->error){
+            return;
+        }
+        dataCtx->memory[dataId] = falseBranch;
+    }    
+}
+
+
+static void __CV_CORE_CONDITIONAL_LESS_THAN(
+    const std::vector<std::shared_ptr<CV::Instruction>> &args,
+    const std::string &name,
+    const CV::TokenType &token,
+    const CV::CursorType &cursor,
+    int execCtxId,
+    int ctxId,
+    int dataId,
+    const std::shared_ptr<CV::Program> &prog
+){
+    // Fetch context & data target
+    auto &dataCtx = prog->ctx[ctxId];
+    auto &execCtx = prog->ctx[execCtxId];
+
+    if( !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor) ||
+        !CV::ErrorCheck::ExpectsNoMoreOperands(args.size(), 4, name, token, cursor)){
+        return;
+    }
+
+    // Build result holder
+    auto result = dataCtx->buildNumber();
+
+    // Fulfill promise in context
+    dataCtx->memory[dataId] = result;
+
+    // Do the operation
+    auto ai = CV::Execute(args[0], execCtx, prog, cursor);
+    if(cursor->error){
+        return;
+    }  
+
+    auto bi = CV::Execute(args[1], execCtx, prog, cursor);
+    if(cursor->error){
+        return;
+    }      
+
+    if(!CV::ErrorCheck::AllNumbers({ai, bi}, name, token, cursor)){
+        return;
+    }    
+
+    auto a = std::static_pointer_cast<CV::TypeNumber>(ai)->v;
+    auto b = std::static_pointer_cast<CV::TypeNumber>(bi)->v;
+
+    result->v = a < b;
+
+    if(args.size() > 2 && result->v){
+        auto trueBranch = CV::Execute(args[2], execCtx, prog, cursor);
+        if(cursor->error){
+            return;
+        }
+        dataCtx->memory[dataId] = trueBranch;
+    }else
+    if(args.size() > 3 && !result->v){
+        auto falseBranch = CV::Execute(args[3], execCtx, prog, cursor);
+        if(cursor->error){
+            return;
+        }
+        dataCtx->memory[dataId] = falseBranch;
+    }    
+}
+
+static void __CV_CORE_CONDITIONAL_LESS_OR_EQUAL(
+    const std::vector<std::shared_ptr<CV::Instruction>> &args,
+    const std::string &name,
+    const CV::TokenType &token,
+    const CV::CursorType &cursor,
+    int execCtxId,
+    int ctxId,
+    int dataId,
+    const std::shared_ptr<CV::Program> &prog
+){
+    // Fetch context & data target
+    auto &dataCtx = prog->ctx[ctxId];
+    auto &execCtx = prog->ctx[execCtxId];
+
+    if( !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor) ||
+        !CV::ErrorCheck::ExpectsNoMoreOperands(args.size(), 4, name, token, cursor)){
+        return;
+    }
+
+    // Build result holder
+    auto result = dataCtx->buildNumber();
+
+    // Fulfill promise in context
+    dataCtx->memory[dataId] = result;
+
+    // Do the operation
+    auto ai = CV::Execute(args[0], execCtx, prog, cursor);
+    if(cursor->error){
+        return;
+    }  
+
+    auto bi = CV::Execute(args[1], execCtx, prog, cursor);
+    if(cursor->error){
+        return;
+    }      
+
+    if(!CV::ErrorCheck::AllNumbers({ai, bi}, name, token, cursor)){
+        return;
+    }    
+
+    auto a = std::static_pointer_cast<CV::TypeNumber>(ai)->v;
+    auto b = std::static_pointer_cast<CV::TypeNumber>(bi)->v;
+
+    result->v = a <= b;
+
+    if(args.size() > 2 && result->v){
+        auto trueBranch = CV::Execute(args[2], execCtx, prog, cursor);
+        if(cursor->error){
+            return;
+        }
+        dataCtx->memory[dataId] = trueBranch;
+    }else
+    if(args.size() > 3 && !result->v){
+        auto falseBranch = CV::Execute(args[3], execCtx, prog, cursor);
+        if(cursor->error){
+            return;
+        }
+        dataCtx->memory[dataId] = falseBranch;
+    }    
+}
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//  LIST TOOLS
+// 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// static void __CV_CORE_LIST_NTH(
+//     const std::vector<std::shared_ptr<CV::Instruction>> &args,
+//     const std::string &name,
+//     const CV::TokenType &token,
+//     const CV::CursorType &cursor,
+//     int execCtxId,
+//     int ctxId,
+//     int dataId,
+//     const std::shared_ptr<CV::Program> &prog
+// ){
+//     // Fetch context & data target
+//     auto &dataCtx = prog->ctx[ctxId];
+//     auto &execCtx = prog->ctx[execCtxId];
+
+//     if(!CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, token, cursor)){
+//         return;
+//     }
+
+//     // Build result holder
+//     auto result = dataCtx->buildNumber();
+
+//     // Fulfill promise in context
+//     dataCtx->memory[dataId] = result;
+
+//     // Do the operation
+//     auto v = CV::Execute(args[0], execCtx, prog, cursor);
+//     if(cursor->error){
+//         return;
+//     }     
+//     if(!CV::ErrorCheck::AllNumbers({v}, name, token, cursor)){
+//         return;
+//     }    
+//     result->v = !std::static_pointer_cast<CV::TypeNumber>(v)->v;
+// }
+
+
 /*
 
 
@@ -530,7 +819,7 @@ void CVInitCore(const CV::ProgramType &prog){
 
     /*
 
-        REGISTER ARITHMETIC OPERATORS
+        ARITHMETIC OPERATORS
 
     */
     CV::unwrapLibrary([](const CV::ProgramType &target){
@@ -543,7 +832,7 @@ void CVInitCore(const CV::ProgramType &prog){
 
     /*
 
-        REGISTER BOOLEAN OPERATORS
+        BOOLEAN OPERATORS
 
     */
     CV::unwrapLibrary([](const CV::ProgramType &target){
@@ -556,15 +845,29 @@ void CVInitCore(const CV::ProgramType &prog){
     
     /*
 
-        REGISTER CONDITIONAL OPERATORS
+        CONDITIONAL OPERATORS
 
     */
-   CV::unwrapLibrary([](const CV::ProgramType &target){
+    CV::unwrapLibrary([](const CV::ProgramType &target){
         target->rootContext->registerBinaryFuntion("=", (void*)__CV_CORE_CONDITIONAL_EQ);
         target->rootContext->registerBinaryFuntion("!=", (void*)__CV_CORE_CONDITIONAL_NEQ);
         target->rootContext->registerBinaryFuntion("if", (void*)__CV_CORE_CONDITIONAL_IF);
+        target->rootContext->registerBinaryFuntion(">", (void*)__CV_CORE_CONDITIONAL_MORE_THAN);
+        target->rootContext->registerBinaryFuntion(">=", (void*)__CV_CORE_CONDITIONAL_MORE_OR_EQ);
+        target->rootContext->registerBinaryFuntion("<", (void*)__CV_CORE_CONDITIONAL_LESS_THAN);
+        target->rootContext->registerBinaryFuntion("<=", (void*)__CV_CORE_CONDITIONAL_LESS_OR_EQUAL);
         return true;
     }, prog);    
+
+    /*
+
+        LIST TOOLS
+
+    */
+    CV::unwrapLibrary([](const CV::ProgramType &target){
+
+        return true;
+    }, prog); 
 
 }
 

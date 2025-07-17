@@ -495,17 +495,52 @@ static std::vector<CV::TokenType> rebuildTokenHierarchy(const std::vector<CV::To
             return CV::TokenType(NULL);
         }
         auto target = innerTokens[0];
-
+        
+        // Collect specifiers
+        auto cpy = std::vector<CV::TokenType>( innerTokens.begin() + 1, innerTokens.end() );
+        innerTokens.clear();
+        for(int i = 0; i < cpy.size(); ++i){
+            auto &c = cpy[i];
+            if(c->first[0] == ':'){
+                auto sp = CV::Specifier(std::string()+c->first[0], std::string({c->first.begin() + 1, c->first.end()}) );
+                target->spec.push_back(sp);
+            }else{
+                innerTokens.push_back(c);
+            }
+        }
+        // Solve it if needed
         if(!target->solved){
             target->inner.push_back(unwrap(target));
             target->first = "";
             if(cursor->error){
                 return CV::TokenType(NULL);
             }
+        }else{
+            // Are there specifiers?
+            std::string v = target->first;
+            while(true) {
+                int i = v.find(":");
+                if(i == -1){
+                    break;
+                }
+                int e = v.find(":", i);
+                if(e == -1){
+                    e = v.length();
+                }else{
+                    e += 1;
+                }
+                std::string spec(v.begin()+i, v.begin()+i+e);
+                v = std::string(v.begin(), v.begin() + i)+std::string(v.begin()+i+e, v.end());
+                auto sp = CV::Specifier(std::string()+spec[0], std::string({spec.begin() + 1, spec.end()}) );
+            }
         }
-        for(int i = 1; i < innerTokens.size(); ++i){
-            target->inner.push_back(unwrap(innerTokens[i]));
+
+        // Append inners
+        for(int i = 0; i < innerTokens.size(); ++i){
+            auto it = unwrap(innerTokens[i]);
+            target->inner.push_back(it);
         }
+        // Refresh stats
         target->refresh();
         return target;
     };
@@ -725,11 +760,12 @@ void CV::Compile(const std::string &input, const CV::ProgramType &prog, CV::Curs
         }
     }
     
-    // std::cout << "total " << root.size() << std::endl;
-    // for(int i = 0; i < root.size(); ++i){
-    //     std::cout << "\"" << root[i]->str() << "\" " << root[i]->inner.size() << std::endl;
-    // }
-    // std::exit(1);
+    
+    std::cout << "total " << root.size() << std::endl;
+    for(int i = 0; i < root.size(); ++i){
+        std::cout << "\"" << root[i]->str() << "\" " << root[i]->inner.size() << std::endl;
+    }
+    std::exit(1);
 
     // Convert tokens into instructions
     std::vector<CV::InsType> instructions;
@@ -1028,7 +1064,7 @@ int main(){
     
     CVInitCore(program);
 
-    CV::Compile("[let n 5][if 5 [+ 2 n]][+ n n]", program, cursor);
+    CV::Compile("a:5:7", program, cursor);
     if(cursor->error){
         std::cout << cursor->getRaised() << std::endl;
         std::exit(1);
