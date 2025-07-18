@@ -17,7 +17,9 @@
     #define CV_ERROR_MSG_WRONG_TYPE "Provided wrong types"
     #define CV_ERROR_MSG_INVALID_INSTRUCTION "Invalid Instruction Type"
     #define CV_ERROR_MSG_MISUSED_IMPERATIVE "Misused Imperative"
-    #define CV_ERROR_MSG_UNDEFINED_IMPERATIVE "Undefined imperative or name within this context or above"
+    #define CV_ERROR_MSG_UNDEFINED_IMPERATIVE "Undefined imperative, name or constructor within this context or above"
+    #define CV_ERROR_MSG_MISUSED_CONSTRUCTOR "Misused Constructor"
+    #define CV_ERROR_MSG_INVALID_ACCESOR "Invalid Accessor"
 
     #define CV_BINARY_FN_PARAMS const std::vector<std::shared_ptr<CV::Instruction>> &, const std::string&, const CV::TokenType &, const CV::CursorType &, int, int, int, const std::shared_ptr<CV::Program> &
 
@@ -35,7 +37,7 @@
                 NUMBER,
                 STRING,
                 LIST,
-                DICTIONARY,
+                STORE,
                 PROTOTYPE,
                 FUNCTION,
                 BINARY_FUNCTION
@@ -51,8 +53,8 @@
                     case QuantType::LIST: {
                         return "LIST";
                     };
-                    case QuantType::DICTIONARY: {
-                        return "DICTIONARY";
+                    case QuantType::STORE: {
+                        return "STORE";
                     };
                     case QuantType::PROTOTYPE: {
                         return "PROTOTYPE";
@@ -68,6 +70,9 @@
             int type;
             Quant();
             virtual bool clear(){
+                return true;
+            }
+            virtual bool isInit(){
                 return true;
             }
         };
@@ -87,8 +92,16 @@
         struct TypeList : CV::Quant {
             std::vector<std::shared_ptr<CV::Quant>> v;
             TypeList();
+            virtual bool isInit();        
             virtual bool clear();
         };
+
+        struct TypeStore : CV::Quant {
+            std::unordered_map<std::string, std::shared_ptr<CV::Quant>> v;
+            TypeStore();
+            virtual bool isInit();    
+            virtual bool clear();
+        };        
 
         struct TypeFunction : CV::Quant {
             int entrypoint;
@@ -138,6 +151,9 @@
                 this->type = type;
                 this->value = value;
             }
+            std::string str() const {
+                return this->type+this->value;
+            }
         };
 
         struct Token {
@@ -160,18 +176,29 @@
                 auto c = std::make_shared<CV::Token>();
                 c->first = this->first;
                 c->line = this->line;
+                c->spec = this->spec;
                 c->refresh();
                 return c;
             }
             std::string str() const {
-                std::string out = this->first + (this->first.size() > 0 && this->inner.size() > 0  ? " " : "");
+                auto f = this->first;
+                std::string specAddedum = "";
+                if(this->first.size() > 0 && this->spec.size() > 0){
+                    for(int i = 0; i < this->spec.size(); ++i){
+                        specAddedum += this->spec[this->spec.size()-1-i].str();
+                    }
+                    if(this->inner.size() == 0){
+                        f += specAddedum;
+                    }
+                }
+                std::string out = f + (this->first.size() > 0 && this->inner.size() > 0  ? " " : "");
                 for(int i = 0; i < this->inner.size(); ++i){
                     out += inner[i]->inner.size() == 0 ? inner[i]->first : "["+inner[i]->str()+"]";
                     if(i < this->inner.size()-1){
                         out += " ";
                     }
                 }
-                return out;
+                return this->inner.size() > 0 ? "[" + out + "]"+specAddedum : out;
             }
             void refresh(){
                 complex = this->inner.size() > 0;
@@ -195,6 +222,7 @@
                 LET = CV_INS_RANGE_TYPE_CONSTRUCTORS,
                 MUT,
                 CONSTRUCT_LIST,
+                CONSTRUCT_STORE,
 
                 // CONTROL FLOW
                 CF_INT_YIELD = CV_INS_RANGE_TYPE_CONTROL_FLOW,
@@ -208,7 +236,8 @@
 
                 // PROXIES
                 STATIC_PROXY = CV_INS_RANGE_TYPE_PROXY,     // DATA[0] -> CTX_ID, DATA[1] -> DATA_ID
-                PROMISE_PROXY                               // DATA[0] -> CTX_ID, DATA[1] -> PROMISED_DATA_ID |  PARAM[0] -> TARGET_INS, 
+                PROMISE_PROXY,                              // DATA[0] -> CTX_ID, DATA[1] -> PROMISED_DATA_ID |  PARAM[0] -> TARGET_INS, 
+                DYNAMIC_PROXY                              // DATA[0] -> CTX_ID, DATA[1] -> DATA_ID, DATA[n] -> ...LITERAL, OPTIONAL: PARAM[0] -> preprocess
 
             };
         }
@@ -251,6 +280,7 @@
             std::shared_ptr<CV::TypeNumber> buildNumber(number n = 0);
             std::shared_ptr<CV::Quant> buildNil();
             std::shared_ptr<CV::TypeList> buildList(const std::vector<std::shared_ptr<CV::Quant>> &list = {});
+            std::shared_ptr<CV::TypeStore> buildStore(const std::unordered_map<std::string, std::shared_ptr<CV::Quant>> &list = {});
             std::shared_ptr<CV::TypeString> buildString(const std::string &s = "");
             std::shared_ptr<CV::Quant> get(int id);
             std::shared_ptr<TypeFunctionBinary> registerBinaryFuntion(const std::string &name, void *ref);

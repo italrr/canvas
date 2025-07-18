@@ -57,6 +57,18 @@ namespace CV {
             return !isNumber(std::string("")+name[0]);
         }
 
+        static bool isReservedWord(const std::string &name){
+            static const std::vector<std::string> reserved {
+                "let", "bring", "~"
+            };
+            for(int i = 0; i < reserved.size(); ++i){
+                if(reserved[i] == name){
+                    return true;
+                }
+            }
+            return false;
+        }
+
         static std::string removeTrailingZeros(double d){
             size_t len = std::snprintf(0, 0, "%.8f", d);
             std::string s(len+1, 0);
@@ -178,8 +190,35 @@ bool CV::TypeList::clear(){
     v.clear();
     return true;
 }
+bool CV::TypeList::isInit(){
+    for(int i = 0; i < this->v.size(); ++i){
+        if(v[i].get() == NULL){
+            return false;
+        }
+    }
+    return true;
+}
 
-// Function
+// STORE
+CV::TypeStore::TypeStore(){
+    this->type = CV::QuantType::STORE;
+}
+
+bool CV::TypeStore::clear(){
+    v.clear();
+    return true;
+}
+
+bool CV::TypeStore::isInit(){
+    for(auto &it : this->v){
+        if(it.second.get() == NULL){
+            return false;
+        }
+    }
+    return true;
+}
+
+// FUNCTION
 CV::TypeFunction::TypeFunction() : CV::Quant(){
     this->type = CV::QuantType::FUNCTION;
 }
@@ -188,7 +227,7 @@ bool CV::TypeFunction::clear(){
     return true;
 }
 
-// Binary Function
+// BINARY FUNCTION
 CV::TypeFunctionBinary::TypeFunctionBinary(){
     this->type = CV::QuantType::BINARY_FUNCTION;
 }
@@ -344,6 +383,34 @@ std::string CV::QuantToText(const std::shared_ptr<CV::Quant> &t){
             // return output + Tools::setTextColor(Tools::Color::MAGENTA)+"]"+Tools::setTextColor(Tools::Color::RESET);
             return output + "]";
         };
+
+        case CV::QuantType::STORE: {
+            // std::string output = Tools::setTextColor(Tools::Color::MAGENTA)+"["+Tools::setTextColor(Tools::Color::RESET);
+            std::string output = "[";
+
+            auto store = std::static_pointer_cast<CV::TypeStore>(t);
+
+            int total = store->v.size();
+            int limit = total > 30 ? 10 : total;
+            int i = 0;
+            for(auto &it : store->v){
+                auto &q = it.second;
+                output += CV::QuantToText(q)+":"+it.first;
+                if(i < store->v.size()-1){
+                    output += " ";
+                }
+                ++i;
+            }
+            if(limit != total){
+                // output += Tools::setTextColor(Tools::Color::YELLOW)+"...("+std::to_string(total-limit)+" hidden)"+Tools::setTextColor(Tools::Color::RESET);
+
+                output += "...("+std::to_string(total-limit)+" hidden)";
+
+            }
+                        
+            // return output + Tools::setTextColor(Tools::Color::MAGENTA)+"]"+Tools::setTextColor(Tools::Color::RESET);
+            return output + "]";
+        };        
 
     }
 }
@@ -508,6 +575,7 @@ static std::vector<CV::TokenType> rebuildTokenHierarchy(const std::vector<CV::To
                 innerTokens.push_back(c);
             }
         }
+
         // Solve it if needed
         if(!target->solved){
             target->inner.push_back(unwrap(target));
@@ -519,20 +587,16 @@ static std::vector<CV::TokenType> rebuildTokenHierarchy(const std::vector<CV::To
             // Are there specifiers?
             std::string v = target->first;
             while(true) {
-                int i = v.find(":");
+                int i = v.rfind(":");
                 if(i == -1){
                     break;
                 }
-                int e = v.find(":", i);
-                if(e == -1){
-                    e = v.length();
-                }else{
-                    e += 1;
-                }
-                std::string spec(v.begin()+i, v.begin()+i+e);
-                v = std::string(v.begin(), v.begin() + i)+std::string(v.begin()+i+e, v.end());
-                auto sp = CV::Specifier(std::string()+spec[0], std::string({spec.begin() + 1, spec.end()}) );
+                std::string piece { v.begin() + i, v.end() };
+                v = std::string(v.begin(), v.begin() + i);
+                auto spec = CV::Specifier(std::string()+piece[0], std::string({piece.begin() + 1, piece.end()}) );
+                target->spec.push_back(spec);  
             }
+            target->first = v;
         }
 
         // Append inners
@@ -575,7 +639,9 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
 
     auto bListConstruct = [prog, cursor](const CV::TokenType &origin, std::vector<CV::TokenType> &tokens, const CV::ContextType &ctx){
         auto ins = prog->createInstruction(CV::InstructionType::CONSTRUCT_LIST, origin);
+        auto list = ctx->buildList();
         ins->data.push_back(ctx->id);
+        ins->data.push_back(list->id);
         for(int i = 0; i < tokens.size(); ++i){
             auto &inc = tokens[i];
             auto fetched = CV::Translate(inc, prog, ctx, cursor);
@@ -584,7 +650,18 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                 return prog->createInstruction(CV::InstructionType::NOOP, origin);
             }
             ins->params.push_back(fetched->id);
+            list->v.push_back(std::shared_ptr<CV::Quant>(NULL));
         }
+        if(origin->spec.size() > 0){
+            auto pins = prog->createInstruction(CV::InstructionType::DYNAMIC_PROXY, origin);
+            pins->data.push_back(ctx->id);
+            pins->data.push_back(list->id);
+            for(int i = 0; i < origin->spec.size(); ++i){
+                pins->literal.push_back(origin->spec[i].value);
+            }
+            pins->params.push_back(ins->id);
+            return pins;             
+        }        
         return ins;
     };
 
@@ -597,9 +674,123 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
         return bListConstruct(origin, inners, ctx);
     };
 
-    if(token->first.size() == 0 && token->inner.size() > 0){
+    auto bStoreConstruct = [prog, cursor](const CV::TokenType &origin, std::vector<CV::TokenType> &tokens, const CV::ContextType &ctx){
+        auto ins = prog->createInstruction(CV::InstructionType::CONSTRUCT_STORE, origin);
+        auto store = ctx->buildStore();
+        ins->data.push_back(ctx->id);
+        ins->data.push_back(store->id);
+        for(int i = 0; i < tokens.size(); ++i){
+            auto &inc = tokens[i];
+            if(inc->spec.size() > 1){
+                cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "Inferred construct's member '"+inc->str()+"' provided more than one specifier. Only one is expected and it's the name of it.", origin);
+                return prog->createInstruction(CV::InstructionType::NOOP, origin);
+            }
+            auto name = inc->spec.size() > 0 ? inc->spec[0].value : "m"+std::to_string(i);
+            if(!CV::Tools::isValidVarName(name)){
+                cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "Inferred construct's member '"+inc->str()+"' specified name '"+name+"' is an invalid", origin);
+                return prog->createInstruction(CV::InstructionType::NOOP, origin);                 
+            }
+            if(CV::Tools::isReservedWord(name)){
+                cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "Inferred construct's member '"+inc->str()+"' specified name '"+name+"' is the name of native constructor which cannot be overriden", origin);
+                return prog->createInstruction(CV::InstructionType::NOOP, origin);                
+            }            
+            auto fetched = CV::Translate(inc, prog, ctx, cursor);
+            if(cursor->error){
+                cursor->subject = origin;
+                return prog->createInstruction(CV::InstructionType::NOOP, origin);
+            }
+            ins->params.push_back(fetched->id);
+            ins->literal.push_back(name);
+            store->v[name] = std::shared_ptr<CV::Quant>(NULL);
+        }
+        if(origin->spec.size() > 0){
+            auto pins = prog->createInstruction(CV::InstructionType::DYNAMIC_PROXY, origin);
+            pins->data.push_back(ctx->id);
+            pins->data.push_back(store->id);
+            for(int i = 0; i < origin->spec.size(); ++i){
+                pins->literal.push_back(origin->spec[i].value);
+            }
+            pins->params.push_back(ins->id);
+            return pins;             
+        }
+        return ins;
+    };
+
+    auto bStoreConstructFromToken = [bStoreConstruct, prog, cursor](const CV::TokenType &origin, const CV::ContextType &ctx){
+        auto cpy = origin->emptyCopy();
+        std::vector<CV::TokenType> inners { cpy };
+        for(int i = 0; i < origin->inner.size(); ++i){
+            inners.push_back(origin->inner[i]);
+        }
+        return bStoreConstruct(origin, inners, ctx);
+    };
+
+    auto areThereSpecs = [](const CV::TokenType &token){
+        for(int i = 0; i < token->inner.size(); ++i){
+            if(token->inner[i]->spec.size() > 0){
+                return true;
+            }
+        }
+        return false;
+    };
+
+    auto nameDirectProxy = [prog,bListConstructFromToken](const CV::TokenType &token, const CV::ContextType &ctx, int dataId){
+        if(token->spec.size() > 0){
+            auto ins = prog->createInstruction(CV::InstructionType::DYNAMIC_PROXY, token);
+            ins->data.push_back(ctx->id);
+            ins->data.push_back(dataId);
+            for(int i = 0; i < token->spec.size(); ++i){
+                ins->literal.push_back(token->spec[i].value);
+            }
+            return ins;  
+        }else{
+            if(token->inner.size() > 0){
+                return bListConstructFromToken(token, ctx);
+            }else{  
+                auto ins = prog->createInstruction(CV::InstructionType::STATIC_PROXY, token);
+                ins->data.push_back(ctx->id);
+                ins->data.push_back(dataId);
+                return ins;
+            }
+        }
+    };
+
+    auto isName = [](const CV::TokenType &token, const CV::ContextType &ctx){
+        return ctx->getName(token->first).size() > 0;
+    };
+    
+    auto isNameFunction = [prog](const CV::TokenType &token, const CV::ContextType &ctx){
+        if(!token->solved){
+            return false;
+        }
+        if(CV::Tools::isReservedWord(token->first)){
+            return true;
+        }
+        auto nameRef = ctx->getName(token->first);
+        if(nameRef.size() == 0){
+            return false;
+        }
+        auto &cctx = prog->ctx[nameRef[0]];
+        auto &quant = cctx->memory[nameRef[1]];  
+        return quant->type == CV::QuantType::FUNCTION || quant->type == CV::QuantType::BINARY_FUNCTION;
+    };    
+
+    if(token->first.size() == 0 && token->inner.size() > 0 && !isNameFunction(token->inner[0], ctx)){
         return bListConstruct(token, token->inner, ctx);
     }else{
+        /*
+            Solve ambiguous list (ie first inner token is a named function)
+        */
+        if(token->first.size() == 0 && token->inner.size() > 0 && isNameFunction(token->inner[0], ctx)){
+            token->first = token->inner[0]->first;   
+            token->inner = (token->inner[0]->inner);
+        }
+        /*
+            STORE(~)
+        */
+        if(token->first == "~"){
+            return bStoreConstruct(token, token->inner, ctx);
+        }else
         /*
             LET
         */
@@ -618,9 +809,13 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
             }
             auto &name = nameToken->first;
             if(!CV::Tools::isValidVarName(name)){
-                cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "'"+token->first+"' second operand is an invalid name", token);
+                cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "'"+token->first+"' second operand '"+name+"' is an invalid name", token);
                 return prog->createInstruction(CV::InstructionType::NOOP, token);                   
             }
+            if(CV::Tools::isReservedWord(name)){
+                cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "'"+token->first+"' second operand '"+name+"' is a name of native constructor which cannot be overriden", token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);                
+            }            
 
             auto target = CV::Translate(insToken, prog, ctx, cursor);
             if(cursor->error){
@@ -677,7 +872,8 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                 // TODO: Check for PROMISE names
                 auto ctx = prog->ctx[nameRef[0]];
                 auto &dataId = nameRef[1];
-                auto &quant = ctx->memory[dataId];
+                auto &quant = ctx->memory[dataId];     
+
                 switch(quant->type){
                     case CV::QuantType::BINARY_FUNCTION: {
                         // Build invokation
@@ -708,12 +904,9 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                         ins->data.push_back(ctx->id);
                         ins->data.push_back(targetData->id);
                         return childIns;
-                    };
+                    };                 
                     default: {
-                        auto ins = prog->createInstruction(CV::InstructionType::STATIC_PROXY, token);
-                        ins->data.push_back(ctx->id);
-                        ins->data.push_back(dataId);
-                        return ins;
+                        return nameDirectProxy(token, ctx, dataId);
                     };
                 }
             }else{
@@ -761,11 +954,11 @@ void CV::Compile(const std::string &input, const CV::ProgramType &prog, CV::Curs
     }
     
     
-    std::cout << "total " << root.size() << std::endl;
-    for(int i = 0; i < root.size(); ++i){
-        std::cout << "\"" << root[i]->str() << "\" " << root[i]->inner.size() << std::endl;
-    }
-    std::exit(1);
+    // std::cout << "total " << root.size() << std::endl;
+    // for(int i = 0; i < root.size(); ++i){
+    //     std::cout << "\"" << root[i]->str() << "\" " << root[i]->inner.size() << std::endl;
+    // }
+    // std::exit(1);
 
     // Convert tokens into instructions
     std::vector<CV::InsType> instructions;
@@ -824,6 +1017,58 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
             }            
             return cctx->memory[targetDataId];
         };        
+        case CV::InstructionType::DYNAMIC_PROXY: { // Slow as hell
+            auto cctx = prog->ctx[ins->data[0]];
+            auto v = cctx->memory[ins->data[1]];
+            auto target = v;
+
+            // Optional ins
+            if(ins->params.size() > 0 && (v.get() == NULL || !v->isInit())){
+                auto quant = CV::Execute(prog->instructions[ins->params[0]], cctx, prog, cursor);
+                if(cursor->error){
+                    st->state = CV::ControlFlowState::CRASH;
+                    return cctx->buildNil();
+                }  
+                v = cctx->memory[ins->data[1]];
+                target = v;                                  
+            }
+
+            for(int i = 0; i < ins->literal.size(); ++i){
+                auto &c = ins->literal[i];
+                switch(target->type){
+                    case CV::QuantType::LIST:{
+                        auto list = std::static_pointer_cast<CV::TypeList>(target);
+                        if(!CV::Tools::isNumber(c)){
+                            st->state = CV::ControlFlowState::CRASH;
+                            cursor->setError(CV_ERROR_MSG_INVALID_ACCESOR, "Accessing LIST using non-numerical specifier '"+c+"'", ins->token);
+                            return ctx->buildNil();
+                        }
+                        auto index = std::stoi(c);
+                        if(index < 0){
+                            st->state = CV::ControlFlowState::CRASH;
+                            cursor->setError(CV_ERROR_MSG_INVALID_ACCESOR, "Accessing LIST using negative specifier '"+c+"'", ins->token);
+                            return ctx->buildNil();                            
+                        }
+                        if(index >= list->v.size()){
+                            st->state = CV::ControlFlowState::CRASH;
+                            cursor->setError(CV_ERROR_MSG_INVALID_ACCESOR, "Accessing LIST using out-bounds specifier '"+c+"' while LIST size is "+std::to_string(list->v.size()), ins->token);
+                            return ctx->buildNil();                              
+                        }
+                        target = list->v[index];
+                    };
+                    case CV::QuantType::STORE:{
+                        auto store = std::static_pointer_cast<CV::TypeStore>(target);
+                        if(store->v.count(c) == 0){
+                            st->state = CV::ControlFlowState::CRASH;
+                            cursor->setError(CV_ERROR_MSG_INVALID_ACCESOR, "Accessing STORE using a non-existing member name '"+c+"'", ins->token);
+                            return ctx->buildNil();     
+                        }
+                        target = store->v[c];
+                    };
+                }
+            }
+            return target;
+        };            
 
 
         /*
@@ -831,17 +1076,33 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
         */
         case CV::InstructionType::CONSTRUCT_LIST: {
             auto &cctx = prog->ctx[ins->data[0]];
-            auto list = cctx->buildList();
+            auto &qlist = cctx->memory[ins->data[1]];
+            auto list = std::static_pointer_cast<CV::TypeList>(qlist);
             for(int i = 0; i < ins->params.size(); ++i){
                 auto quant = CV::Execute(prog->instructions[ins->params[i]], cctx, prog, cursor);
                 if(cursor->error){
                     st->state = CV::ControlFlowState::CRASH;
                     return ctx->buildNil();
                 }
-                list->v.push_back(quant);
+                list->v[i] = quant;
             }   
             return std::static_pointer_cast<CV::Quant>(list);
         };
+        case CV::InstructionType::CONSTRUCT_STORE: {
+            auto &cctx = prog->ctx[ins->data[0]];
+            auto &qstore = cctx->memory[ins->data[1]];
+            auto store = std::static_pointer_cast<CV::TypeStore>(qstore);
+            for(int i = 0; i < ins->params.size(); ++i){
+                auto quant = CV::Execute(prog->instructions[ins->params[i]], cctx, prog, cursor);
+                if(cursor->error){
+                    st->state = CV::ControlFlowState::CRASH;
+                    return ctx->buildNil();
+                }
+                store->v[ins->literal[i]] = quant;
+            }   
+            return std::static_pointer_cast<CV::Quant>(store);
+        };
+
 
         case CV::InstructionType::LET: {
             auto &cctx = prog->ctx[ins->data[0]];
@@ -982,6 +1243,15 @@ std::shared_ptr<CV::TypeList> CV::Context::buildList(const std::vector<std::shar
     return t;
 }
 
+std::shared_ptr<CV::TypeStore> CV::Context::buildStore(const std::unordered_map<std::string, std::shared_ptr<CV::Quant>> &store){
+    auto t = std::make_shared<TypeStore>();
+    this->memory[t->id] = t;
+    for(auto &it : store){
+        t->v[it.first] = it.second;
+    }
+    return t;
+}
+
 std::shared_ptr<CV::Quant> CV::Context::get(int id){
     return std::shared_ptr<CV::Quant>(NULL);
 }
@@ -1064,7 +1334,7 @@ int main(){
     
     CVInitCore(program);
 
-    CV::Compile("a:5:7", program, cursor);
+    CV::Compile("[1 2 3]:0", program, cursor);
     if(cursor->error){
         std::cout << cursor->getRaised() << std::endl;
         std::exit(1);

@@ -14,10 +14,12 @@ namespace CV {
 
     namespace ErrorCheck {
         inline bool AllNumbers(const std::vector<std::shared_ptr<CV::Quant>> &args, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor){
-            if(!CV::Test::areAllNumbers(args)){
-                cursor->setError(CV_ERROR_MSG_WRONG_TYPE, "Imperative '"+name+"' expects all operands to be numbers", token);
-                return false;
-            }   
+            for(int i = 0; i < args.size(); ++i){
+                if(args[i]->type != CV::QuantType::NUMBER){
+                    cursor->setError(CV_ERROR_MSG_WRONG_TYPE, "Imperative '"+name+"' expects all operands to be numbers: operand "+std::to_string(i)+" is "+CV::QuantType::name(args[i]->type), token);
+                    return false;
+                }
+            }            
             return true;
         }
         inline bool ExpectsOperands(int prov, int exp, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor){
