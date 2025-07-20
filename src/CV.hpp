@@ -20,6 +20,11 @@
     #define CV_ERROR_MSG_UNDEFINED_IMPERATIVE "Undefined imperative, name or constructor within this context or above"
     #define CV_ERROR_MSG_MISUSED_CONSTRUCTOR "Misused Constructor"
     #define CV_ERROR_MSG_INVALID_ACCESOR "Invalid Accessor"
+    #define CV_ERROR_MSG_INVALID_INDEX "Invalid Index"
+    #define CV_ERROR_MSG_MISUSED_PREFIX "Misused Prefix" 
+    #define CV_ERROR_MSG_ILLEGAL_PREFIXER "Illegal Prefixer" 
+
+
 
     #define CV_BINARY_FN_PARAMS const std::vector<std::shared_ptr<CV::Instruction>> &, const std::string&, const CV::TokenType &, const CV::CursorType &, int, int, int, const std::shared_ptr<CV::Program> &
 
@@ -122,6 +127,24 @@
         //// PARSING
         ///////////////////////////
 
+        namespace Prefixer {
+            enum Prefixer : int {
+                UNDEFINED,
+                POSITIONAL
+            };
+            static std::string name(int v){
+                switch(v){
+                    case CV::Prefixer::POSITIONAL: {
+                        return "POSITIONAL";
+                    };
+                    case CV::Prefixer::UNDEFINED:
+                    default: {
+                        return "UNDEFINED";
+                    };
+                }
+            }
+        }
+
         struct Token;
         struct Cursor {
             std::mutex accessMutex;
@@ -195,6 +218,7 @@
         #define CV_INS_RANGE_TYPE_CONSTRUCTORS 100
         #define CV_INS_RANGE_TYPE_CONTROL_FLOW 200
         #define CV_INS_RANGE_TYPE_PROXY 1000
+        #define CV_INS_PREFIXER_IDENFIER_INSTRUCTION 4000000
 
         namespace InstructionType {
             enum InstructionType : int {
@@ -219,8 +243,8 @@
                 // PROXIES
                 STATIC_PROXY = CV_INS_RANGE_TYPE_PROXY,     // DATA[0] -> CTX_ID, DATA[1] -> DATA_ID
                 PROMISE_PROXY,                              // DATA[0] -> CTX_ID, DATA[1] -> PROMISED_DATA_ID |  PARAM[0] -> TARGET_INS, 
-                DYNAMIC_PROXY                              // DATA[0] -> CTX_ID, DATA[1] -> DATA_ID, DATA[n] -> ...LITERAL, OPTIONAL: PARAM[0] -> preprocess
-
+                DYNAMIC_PROXY,                              // DATA[0] -> CTX_ID, DATA[1] -> DATA_ID, DATA[n] -> ...LITERAL, OPTIONAL: PARAM[0] -> preprocess
+                POSITIONAL_PROXY,                           // PARAM[0] -> TARGET_INS | LITERAL[0] -> NAME                            
             };
         }
 

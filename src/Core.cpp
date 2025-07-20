@@ -56,6 +56,15 @@ namespace CV {
                 return false;
             }   
             return true;
+        }
+        inline bool ExpectNoPrefixer(const std::string &name, const std::vector<std::shared_ptr<CV::Instruction>> &args, const CV::TokenType &token, const CV::CursorType &cursor){
+            for(int i = 0; i < args.size(); ++i){
+                if(args[i]->data.size() >= 2 && args[i]->data[0] == CV_INS_PREFIXER_IDENFIER_INSTRUCTION){
+                    cursor->setError(CV_ERROR_MSG_ILLEGAL_PREFIXER, "Imperative '"+name+"' does not accept any prefixers: operand at "+std::to_string(i)+" is "+CV::Prefixer::name(args[i]->data[1])+"("+args[i]->token->str()+")", token);
+                    return false;
+                }
+            }
+            return true;
         }        
     }
 }
@@ -80,7 +89,8 @@ static void __CV_CORE_ARITHMETIC_ADDITION(
     auto &dataCtx = prog->ctx[ctxId];
     auto &execCtx = prog->ctx[execCtxId];
 
-    if(!CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor)){
+    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
+        !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor)){
         return;
     }
 
@@ -117,7 +127,8 @@ static void __CV_CORE_ARITHMETIC_SUB(
     auto &dataCtx = prog->ctx[ctxId];
     auto &execCtx = prog->ctx[execCtxId];
 
-    if(!CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor)){
+    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
+        !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor)){
         return;
     }    
 
@@ -162,8 +173,8 @@ static void __CV_CORE_ARITHMETIC_MULT(
     auto &dataCtx = prog->ctx[ctxId];
     auto &execCtx = prog->ctx[execCtxId];
 
-
-    if(!CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor)){
+    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
+        !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor)){
         return;
     }    
 
@@ -200,7 +211,8 @@ static void __CV_CORE_ARITHMETIC_DIV(
     auto &dataCtx = prog->ctx[ctxId];
     auto &execCtx = prog->ctx[execCtxId];
 
-    if(!CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor)){
+    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
+        !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor)){
         return;
     }    
 
@@ -251,7 +263,8 @@ static void __CV_CORE_BOOLEAN_AND(
     auto &dataCtx = prog->ctx[ctxId];
     auto &execCtx = prog->ctx[execCtxId];
 
-    if(!CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor)){
+    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
+        !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor)){
         return;
     }
 
@@ -288,8 +301,9 @@ static void __CV_CORE_BOOLEAN_OR(
     // Fetch context & data target
     auto &dataCtx = prog->ctx[ctxId];
     auto &execCtx = prog->ctx[execCtxId];
-
-    if(!CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor)){
+    
+    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
+        !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor)){
         return;
     }
 
@@ -327,7 +341,8 @@ static void __CV_CORE_BOOLEAN_NOT(
     auto &dataCtx = prog->ctx[ctxId];
     auto &execCtx = prog->ctx[execCtxId];
 
-    if(!CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, token, cursor)){
+    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
+        !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, token, cursor)){
         return;
     }
 
@@ -368,7 +383,8 @@ static void __CV_CORE_CONDITIONAL_EQ(
     auto &dataCtx = prog->ctx[ctxId];
     auto &execCtx = prog->ctx[execCtxId];
 
-    if( !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor) ||
+    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
+        !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor) ||
         !CV::ErrorCheck::ExpectsNoMoreOperands(args.size(), 4, name, token, cursor)){
         return;
     }
@@ -429,7 +445,8 @@ static void __CV_CORE_CONDITIONAL_NEQ(
     auto &dataCtx = prog->ctx[ctxId];
     auto &execCtx = prog->ctx[execCtxId];
 
-    if( !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor) ||
+    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
+        !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor) ||
         !CV::ErrorCheck::ExpectsNoMoreOperands(args.size(), 4, name, token, cursor)){
         return;
     }
@@ -492,7 +509,8 @@ static void __CV_CORE_CONDITIONAL_IF(
     auto &dataCtx = prog->ctx[ctxId];
     auto &execCtx = prog->ctx[execCtxId];
 
-    if( !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor) ||
+    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
+        !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor) ||
         !CV::ErrorCheck::ExpectsNoMoreOperands(args.size(), 3, name, token, cursor)){
         return;
     }
@@ -548,7 +566,8 @@ static void __CV_CORE_CONDITIONAL_MORE_THAN(
     auto &dataCtx = prog->ctx[ctxId];
     auto &execCtx = prog->ctx[execCtxId];
 
-    if( !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor) ||
+    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
+        !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor) ||
         !CV::ErrorCheck::ExpectsNoMoreOperands(args.size(), 4, name, token, cursor)){
         return;
     }
@@ -609,7 +628,8 @@ static void __CV_CORE_CONDITIONAL_MORE_OR_EQ(
     auto &dataCtx = prog->ctx[ctxId];
     auto &execCtx = prog->ctx[execCtxId];
 
-    if( !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor) ||
+    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
+        !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor) ||
         !CV::ErrorCheck::ExpectsNoMoreOperands(args.size(), 4, name, token, cursor)){
         return;
     }
@@ -671,7 +691,8 @@ static void __CV_CORE_CONDITIONAL_LESS_THAN(
     auto &dataCtx = prog->ctx[ctxId];
     auto &execCtx = prog->ctx[execCtxId];
 
-    if( !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor) ||
+    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
+        !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor) ||
         !CV::ErrorCheck::ExpectsNoMoreOperands(args.size(), 4, name, token, cursor)){
         return;
     }
@@ -732,7 +753,8 @@ static void __CV_CORE_CONDITIONAL_LESS_OR_EQUAL(
     auto &dataCtx = prog->ctx[ctxId];
     auto &execCtx = prog->ctx[execCtxId];
 
-    if( !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor) ||
+    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
+        !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor) ||
         !CV::ErrorCheck::ExpectsNoMoreOperands(args.size(), 4, name, token, cursor)){
         return;
     }
@@ -800,37 +822,160 @@ static void __CV_CORE_LIST_NTH(
     auto &dataCtx = prog->ctx[ctxId];
     auto &execCtx = prog->ctx[execCtxId];
 
-    if(!CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 2, name, token, cursor)){
+    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
+        !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 2, name, token, cursor)){
         return;
     }
 
     // Get Index
-    if(!CV::ErrorCheck::ExpectsTypeAt(args[0]->type, CV::QuantType::NUMBER, 0, name, token, cursor)){
+    auto indexBranch = CV::Execute(args[0], execCtx, prog, cursor);
+    if(cursor->error){
         return;
     }
-    int index = std::round(std::static_pointer_cast<CV::TypeNumber>(args[0])->v);
+    if(!CV::ErrorCheck::ExpectsTypeAt(indexBranch->type, CV::QuantType::NUMBER, 0, name, token, cursor)){
+        return;
+    }
+    int index = std::round(std::static_pointer_cast<CV::TypeNumber>(indexBranch)->v);
 
     // Get target
-    if(!CV::ErrorCheck::ExpectsTypeAt(args[0]->type, CV::QuantType::LIST, 0, name, token, cursor)){
+    auto listBranch = CV::Execute(args[1], execCtx, prog, cursor);
+    if(cursor->error){
         return;
     }
-    auto list = std::static_pointer_cast<CV::TypeList>(args[1]);
+    if(!CV::ErrorCheck::ExpectsTypeAt(listBranch->type, CV::QuantType::LIST, 0, name, token, cursor)){
+        return;
+    }
+    auto list = std::static_pointer_cast<CV::TypeList>(listBranch);
 
+    // Bound check
     if(index < 0){
-        cursor->setError(CV_ERROR_MSG_WRONG_TYPE, "Imperative '"+name+"' expects non-negative index number at operand 0: operand is"+std::to_string(index), token);
+        cursor->setError(CV_ERROR_MSG_INVALID_INDEX, "Imperative '"+name+"' expects non-negative index number at operand 0: operand is "+std::to_string(index), token);
         return;
     }
     if(index >= list->v.size()){
-        cursor->setError(CV_ERROR_MSG_WRONG_TYPE, "Imperative '"+name+"' expects index number within bounds (size:"+std::to_string(list->v.size())+"): operand is "+std::to_string(index), token);
+        cursor->setError(CV_ERROR_MSG_INVALID_INDEX, "Imperative '"+name+"' expects index number within bounds (size:"+std::to_string(list->v.size())+"): operand is "+std::to_string(index), token);
         return;
     }
 
+    // Fetch
     auto &subject = list->v[index];
 
     // Fulfill promise in context
     dataCtx->memory[dataId] = subject;
 }
 
+static void __CV_CORE_LIST_LENGTH(
+    const std::vector<std::shared_ptr<CV::Instruction>> &args,
+    const std::string &name,
+    const CV::TokenType &token,
+    const CV::CursorType &cursor,
+    int execCtxId,
+    int ctxId,
+    int dataId,
+    const std::shared_ptr<CV::Program> &prog
+){
+    // Fetch context & data target
+    auto &dataCtx = prog->ctx[ctxId];
+    auto &execCtx = prog->ctx[execCtxId];
+
+    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
+        !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, token, cursor)){
+        return;
+    }
+
+    // Get target
+    auto listBranch = CV::Execute(args[0], execCtx, prog, cursor);
+    if(cursor->error){
+        return;
+    }
+    if(!CV::ErrorCheck::ExpectsTypeAt(listBranch->type, CV::QuantType::LIST, 0, name, token, cursor)){
+        return;
+    }
+    auto list = std::static_pointer_cast<CV::TypeList>(listBranch);
+
+    // Fulfill promise in context
+    auto result = dataCtx->buildNumber(list->v.size());
+
+    // Fulfill promise in context
+    dataCtx->memory[dataId] = result;
+
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//  LIST TOOLS
+// 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+static void __CV_CORE_MUT_PLUSPLUS(
+    const std::vector<std::shared_ptr<CV::Instruction>> &args,
+    const std::string &name,
+    const CV::TokenType &token,
+    const CV::CursorType &cursor,
+    int execCtxId,
+    int ctxId,
+    int dataId,
+    const std::shared_ptr<CV::Program> &prog
+){
+    // Fetch context & data target
+    auto &dataCtx = prog->ctx[ctxId];
+    auto &execCtx = prog->ctx[execCtxId];
+
+    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
+        !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, token, cursor)){
+        return;
+    }
+
+    // Get subject
+    auto subjectBranch = CV::Execute(args[0], execCtx, prog, cursor);
+    if(cursor->error){
+        return;
+    }
+    if(!CV::ErrorCheck::ExpectsTypeAt(subjectBranch->type, CV::QuantType::NUMBER, 0, name, token, cursor)){
+        return;
+    }
+    
+    // Add
+    ++std::static_pointer_cast<CV::TypeNumber>(subjectBranch)->v;
+
+    // Fulfill promise in context
+    dataCtx->memory[dataId] = subjectBranch;
+}
+
+static void __CV_CORE_MUT_MINUSMINUS(
+    const std::vector<std::shared_ptr<CV::Instruction>> &args,
+    const std::string &name,
+    const CV::TokenType &token,
+    const CV::CursorType &cursor,
+    int execCtxId,
+    int ctxId,
+    int dataId,
+    const std::shared_ptr<CV::Program> &prog
+){
+    // Fetch context & data target
+    auto &dataCtx = prog->ctx[ctxId];
+    auto &execCtx = prog->ctx[execCtxId];
+
+    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
+        !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, token, cursor)){
+        return;
+    }
+
+    // Get subject
+    auto subjectBranch = CV::Execute(args[0], execCtx, prog, cursor);
+    if(cursor->error){
+        return;
+    }
+    if(!CV::ErrorCheck::ExpectsTypeAt(subjectBranch->type, CV::QuantType::NUMBER, 0, name, token, cursor)){
+        return;
+    }
+    
+    // Subtract
+    --std::static_pointer_cast<CV::TypeNumber>(subjectBranch)->v;
+
+    // Fulfill promise in context
+    dataCtx->memory[dataId] = subjectBranch;
+}
 
 /*
 
@@ -890,6 +1035,18 @@ void CVInitCore(const CV::ProgramType &prog){
     */
     CV::unwrapLibrary([](const CV::ProgramType &target){
         target->rootContext->registerBinaryFuntion("nth", (void*)__CV_CORE_LIST_NTH);
+        target->rootContext->registerBinaryFuntion("len", (void*)__CV_CORE_LIST_LENGTH);
+        return true;
+    }, prog); 
+
+    /*
+
+        MUTATORS
+
+    */
+    CV::unwrapLibrary([](const CV::ProgramType &target){
+        target->rootContext->registerBinaryFuntion("++", (void*)__CV_CORE_MUT_PLUSPLUS);
+        target->rootContext->registerBinaryFuntion("--", (void*)__CV_CORE_MUT_MINUSMINUS);
         return true;
     }, prog); 
 

@@ -54,7 +54,7 @@ namespace CV {
             if(name.size() == 0){
                 return false;
             }
-            return !isNumber(std::string("")+name[0]);
+            return !isNumber(std::string("")+name[0]) && name[0] != ':';
         }
 
         static bool isReservedWord(const std::string &name){
@@ -421,7 +421,7 @@ std::string CV::QuantToText(const std::shared_ptr<CV::Quant> &t){
 // 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-static std::vector<CV::TokenType> parseTokens(std::string input, char sep, std::shared_ptr<CV::Cursor> &cursor){
+static std::vector<CV::TokenType> parseTokens(std::string input, char sep, const std::shared_ptr<CV::Cursor> &cursor){
     std::vector<std::shared_ptr<CV::Token>> tokens; 
     std::string buffer;
     int open = 0;
@@ -727,6 +727,55 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                 ins->data.push_back(string->id);
                 return ins;
             }
+        }else
+        // EXPANDER
+        // POSITIONAL PROXY
+        if(token->first[0] == ':'){
+            if(token->first.size() == 1){
+                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "'"+token->first+"' prefixers expect a name", token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);                                   
+            }
+            auto name = std::string(token->first.begin()+1, token->first.end());
+
+            // Test if the first field (name) is a complex token
+            auto testSplit = parseTokens(name, ' ', cursor);
+            if(cursor->error){
+                return prog->createInstruction(CV::InstructionType::NOOP, token);                   
+            }
+            if(testSplit.size() > 1){
+                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "Position Prefix '"+token->first+"' cannot take any complex token", token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);            
+            }
+            // Is it a valid name?
+            if(!CV::Tools::isValidVarName(name)){
+                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "'"+token->first+"' prefixer '"+name+"' is an invalid name", token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);                   
+            }
+            // Is it a reserved word?
+            if(CV::Tools::isReservedWord(name)){
+                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "'"+token->first+"' prefixer '"+name+"' is a name of native constructor which cannot be overriden", token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);                
+            }
+            // Only expects a single value
+            if(token->inner.size() != 1){
+                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "Positional Prefix '"+token->first+"' expects exactly 1 value. Provided "+std::to_string(token->inner.size()), token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);                
+            }
+            // Build position proxy instruction
+            auto ins = prog->createInstruction(CV::InstructionType::POSITIONAL_PROXY, token);
+            ins->literal.push_back(name);
+            ins->data.push_back(CV_INS_PREFIXER_IDENFIER_INSTRUCTION);
+            ins->data.push_back(CV::Prefixer::POSITIONAL);
+            // Build referred instruction
+            auto &inc = token->inner[0];
+            auto fetched = CV::Translate(inc, prog, ctx, cursor);
+            if(cursor->error){
+                cursor->subject = token;
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }                        
+
+            ins->params.push_back(fetched->id);
+            return ins;
         }else{
             /*
                 IS NAME?        
@@ -872,6 +921,15 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
         /*
             PROXIES
         */
+        case CV::InstructionType::POSITIONAL_PROXY: {
+            auto &entrypoint = prog->instructions[ins->params[0]];
+            auto quant = CV::Execute(entrypoint, ctx, prog, cursor);
+            if(cursor->error){
+                st->state = CV::ControlFlowState::CRASH;
+                return ctx->buildNil();
+            }  
+            return quant;
+        };
         case CV::InstructionType::STATIC_PROXY: {
             auto ctxId = ins->data[0];
             auto dataId = ins->data[1];
@@ -1227,7 +1285,7 @@ int main(){
     
     CVInitCore(program);
 
-    CV::Compile("nth 0 [1 2 3]", program, cursor);
+    CV::Compile("[1 2 3 [:abc 10]]", program, cursor);
     if(cursor->error){
         std::cout << cursor->getRaised() << std::endl;
         std::exit(1);
