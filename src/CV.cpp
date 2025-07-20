@@ -562,49 +562,17 @@ static std::vector<CV::TokenType> rebuildTokenHierarchy(const std::vector<CV::To
             return CV::TokenType(NULL);
         }
         auto target = innerTokens[0];
-        
-        // Collect specifiers
-        auto cpy = std::vector<CV::TokenType>( innerTokens.begin() + 1, innerTokens.end() );
-        innerTokens.clear();
-        for(int i = 0; i < cpy.size(); ++i){
-            auto &c = cpy[i];
-            if(c->first[0] == ':'){
-                auto sp = CV::Specifier(std::string()+c->first[0], std::string({c->first.begin() + 1, c->first.end()}) );
-                target->spec.push_back(sp);
-            }else{
-                innerTokens.push_back(c);
-            }
-        }
 
-        // Solve it if needed
         if(!target->solved){
             target->inner.push_back(unwrap(target));
             target->first = "";
             if(cursor->error){
                 return CV::TokenType(NULL);
             }
-        }else{
-            // Are there specifiers?
-            std::string v = target->first;
-            while(true) {
-                int i = v.rfind(":");
-                if(i == -1){
-                    break;
-                }
-                std::string piece { v.begin() + i, v.end() };
-                v = std::string(v.begin(), v.begin() + i);
-                auto spec = CV::Specifier(std::string()+piece[0], std::string({piece.begin() + 1, piece.end()}) );
-                target->spec.push_back(spec);  
-            }
-            target->first = v;
         }
-
-        // Append inners
-        for(int i = 0; i < innerTokens.size(); ++i){
-            auto it = unwrap(innerTokens[i]);
-            target->inner.push_back(it);
+        for(int i = 1; i < innerTokens.size(); ++i){
+            target->inner.push_back(unwrap(innerTokens[i]));
         }
-        // Refresh stats
         target->refresh();
         return target;
     };
@@ -652,16 +620,6 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
             ins->params.push_back(fetched->id);
             list->v.push_back(std::shared_ptr<CV::Quant>(NULL));
         }
-        if(origin->spec.size() > 0){
-            auto pins = prog->createInstruction(CV::InstructionType::DYNAMIC_PROXY, origin);
-            pins->data.push_back(ctx->id);
-            pins->data.push_back(list->id);
-            for(int i = 0; i < origin->spec.size(); ++i){
-                pins->literal.push_back(origin->spec[i].value);
-            }
-            pins->params.push_back(ins->id);
-            return pins;             
-        }        
         return ins;
     };
 
@@ -672,87 +630,6 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
             inners.push_back(origin->inner[i]);
         }
         return bListConstruct(origin, inners, ctx);
-    };
-
-    auto bStoreConstruct = [prog, cursor](const CV::TokenType &origin, std::vector<CV::TokenType> &tokens, const CV::ContextType &ctx){
-        auto ins = prog->createInstruction(CV::InstructionType::CONSTRUCT_STORE, origin);
-        auto store = ctx->buildStore();
-        ins->data.push_back(ctx->id);
-        ins->data.push_back(store->id);
-        for(int i = 0; i < tokens.size(); ++i){
-            auto &inc = tokens[i];
-            if(inc->spec.size() > 1){
-                cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "Inferred construct's member '"+inc->str()+"' provided more than one specifier. Only one is expected and it's the name of it.", origin);
-                return prog->createInstruction(CV::InstructionType::NOOP, origin);
-            }
-            auto name = inc->spec.size() > 0 ? inc->spec[0].value : "m"+std::to_string(i);
-            if(!CV::Tools::isValidVarName(name)){
-                cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "Inferred construct's member '"+inc->str()+"' specified name '"+name+"' is an invalid", origin);
-                return prog->createInstruction(CV::InstructionType::NOOP, origin);                 
-            }
-            if(CV::Tools::isReservedWord(name)){
-                cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "Inferred construct's member '"+inc->str()+"' specified name '"+name+"' is the name of native constructor which cannot be overriden", origin);
-                return prog->createInstruction(CV::InstructionType::NOOP, origin);                
-            }            
-            auto fetched = CV::Translate(inc, prog, ctx, cursor);
-            if(cursor->error){
-                cursor->subject = origin;
-                return prog->createInstruction(CV::InstructionType::NOOP, origin);
-            }
-            ins->params.push_back(fetched->id);
-            ins->literal.push_back(name);
-            store->v[name] = std::shared_ptr<CV::Quant>(NULL);
-        }
-        if(origin->spec.size() > 0){
-            auto pins = prog->createInstruction(CV::InstructionType::DYNAMIC_PROXY, origin);
-            pins->data.push_back(ctx->id);
-            pins->data.push_back(store->id);
-            for(int i = 0; i < origin->spec.size(); ++i){
-                pins->literal.push_back(origin->spec[i].value);
-            }
-            pins->params.push_back(ins->id);
-            return pins;             
-        }
-        return ins;
-    };
-
-    auto bStoreConstructFromToken = [bStoreConstruct, prog, cursor](const CV::TokenType &origin, const CV::ContextType &ctx){
-        auto cpy = origin->emptyCopy();
-        std::vector<CV::TokenType> inners { cpy };
-        for(int i = 0; i < origin->inner.size(); ++i){
-            inners.push_back(origin->inner[i]);
-        }
-        return bStoreConstruct(origin, inners, ctx);
-    };
-
-    auto areThereSpecs = [](const CV::TokenType &token){
-        for(int i = 0; i < token->inner.size(); ++i){
-            if(token->inner[i]->spec.size() > 0){
-                return true;
-            }
-        }
-        return false;
-    };
-
-    auto nameDirectProxy = [prog,bListConstructFromToken](const CV::TokenType &token, const CV::ContextType &ctx, int dataId){
-        if(token->spec.size() > 0){
-            auto ins = prog->createInstruction(CV::InstructionType::DYNAMIC_PROXY, token);
-            ins->data.push_back(ctx->id);
-            ins->data.push_back(dataId);
-            for(int i = 0; i < token->spec.size(); ++i){
-                ins->literal.push_back(token->spec[i].value);
-            }
-            return ins;  
-        }else{
-            if(token->inner.size() > 0){
-                return bListConstructFromToken(token, ctx);
-            }else{  
-                auto ins = prog->createInstruction(CV::InstructionType::STATIC_PROXY, token);
-                ins->data.push_back(ctx->id);
-                ins->data.push_back(dataId);
-                return ins;
-            }
-        }
     };
 
     auto isName = [](const CV::TokenType &token, const CV::ContextType &ctx){
@@ -775,22 +652,9 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
         return quant->type == CV::QuantType::FUNCTION || quant->type == CV::QuantType::BINARY_FUNCTION;
     };    
 
-    if(token->first.size() == 0 && token->inner.size() > 0 && !isNameFunction(token->inner[0], ctx)){
+    if(token->first.size() == 0 && token->inner.size() > 0){
         return bListConstruct(token, token->inner, ctx);
     }else{
-        /*
-            Solve ambiguous list (ie first inner token is a named function)
-        */
-        if(token->first.size() == 0 && token->inner.size() > 0 && isNameFunction(token->inner[0], ctx)){
-            token->first = token->inner[0]->first;   
-            token->inner = (token->inner[0]->inner);
-        }
-        /*
-            STORE(~)
-        */
-        if(token->first == "~"){
-            return bStoreConstruct(token, token->inner, ctx);
-        }else
         /*
             LET
         */
@@ -906,7 +770,14 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                         return childIns;
                     };                 
                     default: {
-                        return nameDirectProxy(token, ctx, dataId);
+                        if(token->inner.size() > 0){
+                            return bListConstructFromToken(token, ctx);
+                        }else{  
+                            auto ins = prog->createInstruction(CV::InstructionType::STATIC_PROXY, token);
+                            ins->data.push_back(ctx->id);
+                            ins->data.push_back(dataId);
+                            return ins;
+                        }
                     };
                 }
             }else{
@@ -958,6 +829,7 @@ void CV::Compile(const std::string &input, const CV::ProgramType &prog, CV::Curs
     // for(int i = 0; i < root.size(); ++i){
     //     std::cout << "\"" << root[i]->str() << "\" " << root[i]->inner.size() << std::endl;
     // }
+    // std::cout << root[0]->inner[0]->inner[0]->str() << std::endl;
     // std::exit(1);
 
     // Convert tokens into instructions
@@ -1334,7 +1206,7 @@ int main(){
     
     CVInitCore(program);
 
-    CV::Compile("[1 2 3]:0", program, cursor);
+    CV::Compile("[[+ 1 2 4 5] 1222 10 [+ 1 1 1 1]]", program, cursor);
     if(cursor->error){
         std::cout << cursor->getRaised() << std::endl;
         std::exit(1);

@@ -141,28 +141,12 @@
             void setError(const std::string &title, const std::string &message, int line);
         };
 
-        struct Specifier {
-            std::string type;
-            std::string value;
-            Specifier(){
-
-            }
-            Specifier(const std::string &type, const std::string &value){
-                this->type = type;
-                this->value = value;
-            }
-            std::string str() const {
-                return this->type+this->value;
-            }
-        };
-
         struct Token {
             std::string first;
             unsigned line;
             bool solved;
             bool complex;
             std::vector<std::shared_ptr<Token>> inner;
-            std::vector<CV::Specifier> spec;
             Token(){
                 solved = false;
                 complex = false;
@@ -176,29 +160,27 @@
                 auto c = std::make_shared<CV::Token>();
                 c->first = this->first;
                 c->line = this->line;
-                c->spec = this->spec;
+                c->refresh();
+                return c;
+            }
+            std::shared_ptr<CV::Token> copy(){
+                auto c = std::make_shared<CV::Token>();
+                c->first = this->first;
+                c->line = this->line;
+                c->inner = this->inner;
                 c->refresh();
                 return c;
             }
             std::string str() const {
                 auto f = this->first;
-                std::string specAddedum = "";
-                if(this->first.size() > 0 && this->spec.size() > 0){
-                    for(int i = 0; i < this->spec.size(); ++i){
-                        specAddedum += this->spec[this->spec.size()-1-i].str();
-                    }
-                    if(this->inner.size() == 0){
-                        f += specAddedum;
-                    }
-                }
                 std::string out = f + (this->first.size() > 0 && this->inner.size() > 0  ? " " : "");
                 for(int i = 0; i < this->inner.size(); ++i){
-                    out += inner[i]->inner.size() == 0 ? inner[i]->first : "["+inner[i]->str()+"]";
+                    out += inner[i]->inner.size() == 0 ? inner[i]->first : inner[i]->str();
                     if(i < this->inner.size()-1){
                         out += " ";
                     }
                 }
-                return this->inner.size() > 0 ? "[" + out + "]"+specAddedum : out;
+                return this->inner.size() > 0 ? "[" + out + "]" : out;
             }
             void refresh(){
                 complex = this->inner.size() > 0;
