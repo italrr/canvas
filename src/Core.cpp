@@ -1,3 +1,4 @@
+#include <cmath>
 #include "CV.hpp"
 
 namespace CV {
@@ -25,6 +26,17 @@ namespace CV {
         inline bool ExpectsOperands(int prov, int exp, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor){
             if(prov < exp){
                 cursor->setError(CV_ERROR_MSG_WRONG_TYPE, "Imperative '"+name+"' expects ("+std::to_string(exp)+") operands but provided("+std::to_string(prov)+")", token);
+                return false;
+            }   
+            return true;
+        }
+
+        inline bool ExpectsTypeAt(int type, int exp, int at, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor){
+            if(type < exp){
+                auto expTName = CV::QuantType::name(exp);
+                auto tName = CV::QuantType::name(type);
+                auto atStr = std::to_string(at);
+                cursor->setError(CV_ERROR_MSG_WRONG_TYPE, "Imperative '"+name+"' expects "+atStr+" operand to be "+expTName+": operand "+atStr+" is "+tName, token);
                 return false;
             }   
             return true;
@@ -774,40 +786,50 @@ static void __CV_CORE_CONDITIONAL_LESS_OR_EQUAL(
 // 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-// static void __CV_CORE_LIST_NTH(
-//     const std::vector<std::shared_ptr<CV::Instruction>> &args,
-//     const std::string &name,
-//     const CV::TokenType &token,
-//     const CV::CursorType &cursor,
-//     int execCtxId,
-//     int ctxId,
-//     int dataId,
-//     const std::shared_ptr<CV::Program> &prog
-// ){
-//     // Fetch context & data target
-//     auto &dataCtx = prog->ctx[ctxId];
-//     auto &execCtx = prog->ctx[execCtxId];
+static void __CV_CORE_LIST_NTH(
+    const std::vector<std::shared_ptr<CV::Instruction>> &args,
+    const std::string &name,
+    const CV::TokenType &token,
+    const CV::CursorType &cursor,
+    int execCtxId,
+    int ctxId,
+    int dataId,
+    const std::shared_ptr<CV::Program> &prog
+){
+    // Fetch context & data target
+    auto &dataCtx = prog->ctx[ctxId];
+    auto &execCtx = prog->ctx[execCtxId];
 
-//     if(!CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, token, cursor)){
-//         return;
-//     }
+    if(!CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 2, name, token, cursor)){
+        return;
+    }
 
-//     // Build result holder
-//     auto result = dataCtx->buildNumber();
+    // Get Index
+    if(!CV::ErrorCheck::ExpectsTypeAt(args[0]->type, CV::QuantType::NUMBER, 0, name, token, cursor)){
+        return;
+    }
+    int index = std::round(std::static_pointer_cast<CV::TypeNumber>(args[0])->v);
 
-//     // Fulfill promise in context
-//     dataCtx->memory[dataId] = result;
+    // Get target
+    if(!CV::ErrorCheck::ExpectsTypeAt(args[0]->type, CV::QuantType::LIST, 0, name, token, cursor)){
+        return;
+    }
+    auto list = std::static_pointer_cast<CV::TypeList>(args[1]);
 
-//     // Do the operation
-//     auto v = CV::Execute(args[0], execCtx, prog, cursor);
-//     if(cursor->error){
-//         return;
-//     }     
-//     if(!CV::ErrorCheck::AllNumbers({v}, name, token, cursor)){
-//         return;
-//     }    
-//     result->v = !std::static_pointer_cast<CV::TypeNumber>(v)->v;
-// }
+    if(index < 0){
+        cursor->setError(CV_ERROR_MSG_WRONG_TYPE, "Imperative '"+name+"' expects non-negative index number at operand 0: operand is"+std::to_string(index), token);
+        return;
+    }
+    if(index >= list->v.size()){
+        cursor->setError(CV_ERROR_MSG_WRONG_TYPE, "Imperative '"+name+"' expects index number within bounds (size:"+std::to_string(list->v.size())+"): operand is "+std::to_string(index), token);
+        return;
+    }
+
+    auto &subject = list->v[index];
+
+    // Fulfill promise in context
+    dataCtx->memory[dataId] = subject;
+}
 
 
 /*
@@ -867,7 +889,7 @@ void CVInitCore(const CV::ProgramType &prog){
 
     */
     CV::unwrapLibrary([](const CV::ProgramType &target){
-
+        target->rootContext->registerBinaryFuntion("nth", (void*)__CV_CORE_LIST_NTH);
         return true;
     }, prog); 
 

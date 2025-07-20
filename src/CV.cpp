@@ -1099,6 +1099,27 @@ std::shared_ptr<CV::Quant> CV::Context::buildNil(){
     return t;
 }
 
+std::shared_ptr<CV::Quant> CV::Context::buildType(int type){
+    switch(type){
+        case CV::QuantType::NUMBER: {
+            return this->buildNumber();
+        };
+        case CV::QuantType::STRING: {
+            return this->buildString();
+        };
+        case CV::QuantType::LIST: {
+            return this->buildList();
+        };
+        case CV::QuantType::STORE: {
+            return this->buildStore();
+        };
+        default:
+        case CV::QuantType::NIL: {
+            return this->buildNil();
+        };
+    }
+}
+
 std::shared_ptr<CV::TypeString> CV::Context::buildString(const std::string &s){
     auto t = std::make_shared<CV::TypeString>();
     this->memory[t->id] = t;
@@ -1206,7 +1227,7 @@ int main(){
     
     CVInitCore(program);
 
-    CV::Compile("[[+ 1 2 4 5] 1222 10 [+ 1 1 1 1]]", program, cursor);
+    CV::Compile("nth 0 [1 2 3]", program, cursor);
     if(cursor->error){
         std::cout << cursor->getRaised() << std::endl;
         std::exit(1);

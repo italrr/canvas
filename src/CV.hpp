@@ -261,6 +261,7 @@
             Context(const std::shared_ptr<CV::Context> &head);
             std::shared_ptr<CV::TypeNumber> buildNumber(number n = 0);
             std::shared_ptr<CV::Quant> buildNil();
+            std::shared_ptr<CV::Quant> buildType(int type);
             std::shared_ptr<CV::TypeList> buildList(const std::vector<std::shared_ptr<CV::Quant>> &list = {});
             std::shared_ptr<CV::TypeStore> buildStore(const std::unordered_map<std::string, std::shared_ptr<CV::Quant>> &list = {});
             std::shared_ptr<CV::TypeString> buildString(const std::string &s = "");
