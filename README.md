@@ -11,12 +11,25 @@ It's a language that was concieved when I was in college, and had had many diffe
 - Syntax is prefix notated
 - Lists are first class citizens
 - **No OOP**
-- _Mostly_ immutability
+- _Mostly_ immutable
 - _Mostly_ Functional
 - Recursion highly encouraged
 - Standard Library (io, fs, net, bitmap, time, math)
 - Error handling _a la_ C (checking return types). No try/catch
+- Expessive yet simple Syntax
 - Parallelism and concurrency as native features (WIP)
+
+## Syntax
+
+`canvas` syntax follows the next pattern pattern 100% of the time [STATEMENT0 ... STATEMENTN]. 
+
+### Example of an addition
+`+ 2 2` -> `4`
+
+### Example of a list definition
+`[1 2 3]` -> `[1 2 3]`
+
+### 
 
 ## Dependencies
 canvas does not require any special dependency. It requires a C++11 capable compiler, preferably GCC (or MINGW), but other Unix-like compilers can work.
