@@ -329,8 +329,8 @@
         typedef std::shared_ptr<CV::Context> ContextType;
         typedef std::shared_ptr<CV::ControlFlow> CFType;
 
-        bool getBooleanValue(const std::shared_ptr<CV::Quant> &data);
-        bool unwrapLibrary(const std::function<bool(const CV::ProgramType &target)> &fn, const CV::ProgramType &target);
+        bool GetBooleanValue(const std::shared_ptr<CV::Quant> &data);
+        bool UnwrapLibrary(const std::function<bool(const CV::ProgramType &target)> &fn, const CV::ProgramType &target);
         std::string QuantToText(const std::shared_ptr<CV::Quant> &t);
         std::shared_ptr<CV::Quant> Execute(const CV::InsType &entry, const CV::ContextType &ctx, const CV::ProgramType &prog, const CV::CursorType &cursor);
         void Compile(const std::string &input, const CV::ProgramType &prog, CV::CursorType &cursor);

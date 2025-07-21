@@ -1258,11 +1258,11 @@ bool CV::Program::deleteContext(int id){
 // 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-bool CV::unwrapLibrary(const std::function<bool(const CV::ProgramType &target)> &fn, const CV::ProgramType &target){
+bool CV::UnwrapLibrary(const std::function<bool(const CV::ProgramType &target)> &fn, const CV::ProgramType &target){
     return fn(target);
 }
 
-bool CV::getBooleanValue(const std::shared_ptr<CV::Quant> &data){
+bool CV::GetBooleanValue(const std::shared_ptr<CV::Quant> &data){
     if(data.get() == NULL){
         return false;
     }
@@ -1288,7 +1288,7 @@ int main(){
     
     CVInitCore(program);
 
-    CV::Compile("[let a 100][let b 0][while [-- a][++ b]][a b]", program, cursor);
+    CV::Compile("for [:from [:a 0]] [:to 100] [:step [++ a]]", program, cursor);
     if(cursor->error){
         std::cout << cursor->getRaised() << std::endl;
         std::exit(1);

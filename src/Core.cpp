@@ -11,6 +11,9 @@ namespace CV {
             }
             return true;
         }
+        inline bool IsItPrefixInstruction(const std::shared_ptr<CV::Instruction> &ins){
+            return ins->data.size() >= 2 && ins->data[0] == CV_INS_PREFIXER_IDENFIER_INSTRUCTION;
+        }
     }
 
     namespace ErrorCheck {
@@ -281,7 +284,7 @@ static void __CV_CORE_BOOLEAN_AND(
         if(cursor->error){
             return;
         }        
-        if(!CV::getBooleanValue(v)){
+        if(!CV::GetBooleanValue(v)){
             result->v = 0;
             break;
         }
@@ -320,7 +323,7 @@ static void __CV_CORE_BOOLEAN_OR(
         if(cursor->error){
             return;
         }        
-        if(CV::getBooleanValue(v)){
+        if(CV::GetBooleanValue(v)){
             result->v = 1;
             break;
         }
@@ -527,7 +530,7 @@ static void __CV_CORE_CONDITIONAL_IF(
         return;
     }
 
-    result->v = CV::getBooleanValue(condi);
+    result->v = CV::GetBooleanValue(condi);
 
     // TRUE BRANCH
     if(args.size() > 1 && result->v){
@@ -1249,7 +1252,69 @@ static void __CV_CORE_LOOP_WHILE(
         }
 
         // Check conditional
-        if(!CV::getBooleanValue(condBranch)){
+        if(!CV::GetBooleanValue(condBranch)){
+            break;
+        }
+        
+        // Code Branch
+        if(args.size() > 1){
+            result = CV::Execute(args[1], deepExecCtx, prog, cursor);
+            if(cursor->error){
+                return;
+            }
+        }
+
+        prog->deleteContext(deepExecCtx->id);
+    }
+
+    if(result.get() == NULL){
+        result = dataCtx->buildNil();
+    }
+    
+    // Fulfill promise in context
+    dataCtx->memory[dataId] = result;
+}
+
+CV::InsType GetPrefixer(const std::vector<CV::InsType> &src, const std::string &name){
+    for(int i = 0; i < src.size(); ++i){
+        if(CV::Test::IsItPrefixInstruction(src[i]) && src[i]->literal.size() > 0 && src[i]->literal[0] == name){
+            return src[i];
+        }
+    }
+    return CV::InsType(NULL);
+}
+
+static void __CV_CORE_LOOP_FOR(
+    const std::vector<std::shared_ptr<CV::Instruction>> &args,
+    const std::string &name,
+    const CV::TokenType &token,
+    const CV::CursorType &cursor,
+    int execCtxId,
+    int ctxId,
+    int dataId,
+    const std::shared_ptr<CV::Program> &prog
+){
+    // Fetch context & data target
+    auto &dataCtx = prog->ctx[ctxId];
+    auto &execCtx = prog->ctx[execCtxId];
+
+    if( !CV::ErrorCheck::ExpectsOperands(args.size(), 1, name, token, cursor)){
+        return;
+    }
+
+    std::shared_ptr<CV::Quant> result = NULL;
+
+    while(true) {
+        auto deepExecCtx = prog->createContext(execCtx);
+
+        // Conditional Branch
+        auto condBranch = CV::Execute(args[0], deepExecCtx, prog, cursor);
+        if(cursor->error){
+            return;
+        }
+
+        // Check conditional
+        if(!CV::GetBooleanValue(condBranch)){
             break;
         }
         
@@ -1288,7 +1353,7 @@ void CVInitCore(const CV::ProgramType &prog){
         ARITHMETIC OPERATORS
 
     */
-    CV::unwrapLibrary([](const CV::ProgramType &target){
+    CV::UnwrapLibrary([](const CV::ProgramType &target){
         target->rootContext->registerBinaryFuntion("+", (void*)__CV_CORE_ARITHMETIC_ADDITION);
         target->rootContext->registerBinaryFuntion("*", (void*)__CV_CORE_ARITHMETIC_MULT);
         target->rootContext->registerBinaryFuntion("-", (void*)__CV_CORE_ARITHMETIC_SUB);
@@ -1301,7 +1366,7 @@ void CVInitCore(const CV::ProgramType &prog){
         BOOLEAN OPERATORS
 
     */
-    CV::unwrapLibrary([](const CV::ProgramType &target){
+    CV::UnwrapLibrary([](const CV::ProgramType &target){
         target->rootContext->registerBinaryFuntion("&", (void*)__CV_CORE_BOOLEAN_AND);
         target->rootContext->registerBinaryFuntion("|", (void*)__CV_CORE_BOOLEAN_OR);
         target->rootContext->registerBinaryFuntion("!", (void*)__CV_CORE_BOOLEAN_NOT);
@@ -1314,7 +1379,7 @@ void CVInitCore(const CV::ProgramType &prog){
         CONDITIONAL OPERATORS
 
     */
-    CV::unwrapLibrary([](const CV::ProgramType &target){
+    CV::UnwrapLibrary([](const CV::ProgramType &target){
         target->rootContext->registerBinaryFuntion("=", (void*)__CV_CORE_CONDITIONAL_EQ);
         target->rootContext->registerBinaryFuntion("!=", (void*)__CV_CORE_CONDITIONAL_NEQ);
         target->rootContext->registerBinaryFuntion("if", (void*)__CV_CORE_CONDITIONAL_IF);
@@ -1330,7 +1395,7 @@ void CVInitCore(const CV::ProgramType &prog){
         LIST TOOLS
 
     */
-    CV::unwrapLibrary([](const CV::ProgramType &target){
+    CV::UnwrapLibrary([](const CV::ProgramType &target){
         target->rootContext->registerBinaryFuntion("nth", (void*)__CV_CORE_LIST_NTH);
         target->rootContext->registerBinaryFuntion("len", (void*)__CV_CORE_LIST_LENGTH);
         target->rootContext->registerBinaryFuntion(">>", (void*)__CV_CORE_LIST_PUSH);
@@ -1345,7 +1410,7 @@ void CVInitCore(const CV::ProgramType &prog){
         MUTATORS
 
     */
-    CV::unwrapLibrary([](const CV::ProgramType &target){
+    CV::UnwrapLibrary([](const CV::ProgramType &target){
         target->rootContext->registerBinaryFuntion("++", (void*)__CV_CORE_MUT_PLUSPLUS);
         target->rootContext->registerBinaryFuntion("--", (void*)__CV_CORE_MUT_MINUSMINUS);
         target->rootContext->registerBinaryFuntion("//", (void*)__CV_CORE_MUT_SLASHSLASH);
@@ -1359,7 +1424,7 @@ void CVInitCore(const CV::ProgramType &prog){
         LOOPS
 
     */
-    CV::unwrapLibrary([](const CV::ProgramType &target){
+    CV::UnwrapLibrary([](const CV::ProgramType &target){
         target->rootContext->registerBinaryFuntion("while", (void*)__CV_CORE_LOOP_WHILE);
         return true;
     }, prog); 
