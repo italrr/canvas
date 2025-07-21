@@ -1263,6 +1263,9 @@ bool CV::unwrapLibrary(const std::function<bool(const CV::ProgramType &target)> 
 }
 
 bool CV::getBooleanValue(const std::shared_ptr<CV::Quant> &data){
+    if(data.get() == NULL){
+        return false;
+    }
     switch(data->type){
         case CV::QuantType::NUMBER: {
             auto v = std::static_pointer_cast<CV::TypeNumber>(data);
@@ -1285,7 +1288,7 @@ int main(){
     
     CVInitCore(program);
 
-    CV::Compile("[1 2 3 [:abc 10]]", program, cursor);
+    CV::Compile("[let a 100][let b 0][while [-- a][++ b]][a b]", program, cursor);
     if(cursor->error){
         std::cout << cursor->getRaised() << std::endl;
         std::exit(1);

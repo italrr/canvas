@@ -29,7 +29,13 @@ It's a language that was concieved when I was in college, and had had many diffe
 ### Example of a list definition
 `[1 2 3]` -> `[1 2 3]`
 
-### 
+### Prefixers
+
+Prefixers are special syntatic tools that pretend to increment expressiveness. One of the prefixers is the Positional Prefixer. It simplifies passing parameters to functions by name ignoring the order.
+
+For example, let's say I have a "func" function that takes 2 arguments: param1 and param2. Boths of these arguments are defined as Positional. This means I can execute this function the following way
+
+```func [:param2 VALUE2] [:param1 VALUE1]```
 
 ## Dependencies
 canvas does not require any special dependency. It requires a C++11 capable compiler, preferably GCC (or MINGW), but other Unix-like compilers can work.

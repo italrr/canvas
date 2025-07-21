@@ -901,9 +901,172 @@ static void __CV_CORE_LIST_LENGTH(
 
 }
 
+static void __CV_CORE_LIST_PUSH(
+    const std::vector<std::shared_ptr<CV::Instruction>> &args,
+    const std::string &name,
+    const CV::TokenType &token,
+    const CV::CursorType &cursor,
+    int execCtxId,
+    int ctxId,
+    int dataId,
+    const std::shared_ptr<CV::Program> &prog
+){
+    // Fetch context & data target
+    auto &dataCtx = prog->ctx[ctxId];
+    auto &execCtx = prog->ctx[execCtxId];
+
+    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
+        !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 2, name, token, cursor)){
+        return;
+    }
+    
+    // Solve subject
+    auto subjectBranch = CV::Execute(args[0], execCtx, prog, cursor);
+    if(cursor->error){
+        return;
+    }
+
+    // Solve target
+    auto targetBranch = CV::Execute(args[1], execCtx, prog, cursor);
+    if(cursor->error){
+        return;
+    }
+    std::shared_ptr<CV::TypeList> target;
+    if(targetBranch->type != CV::QuantType::LIST){
+        target = dataCtx->buildList();
+        target->v.push_back(targetBranch);
+    }else{
+        target = std::static_pointer_cast<CV::TypeList>(targetBranch);
+    }
+    target->v.push_back(subjectBranch);
+
+    // Fulfill promise in context
+    dataCtx->memory[dataId] = target;
+}
+
+static void __CV_CORE_LIST_POP(
+    const std::vector<std::shared_ptr<CV::Instruction>> &args,
+    const std::string &name,
+    const CV::TokenType &token,
+    const CV::CursorType &cursor,
+    int execCtxId,
+    int ctxId,
+    int dataId,
+    const std::shared_ptr<CV::Program> &prog
+){
+    // Fetch context & data target
+    auto &dataCtx = prog->ctx[ctxId];
+    auto &execCtx = prog->ctx[execCtxId];
+
+    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
+        !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, token, cursor)){
+        return;
+    }
+    
+    auto listBranch = CV::Execute(args[0], execCtx, prog, cursor);
+    if(cursor->error){
+        return;
+    }
+    if(!CV::ErrorCheck::ExpectsTypeAt(listBranch->type, CV::QuantType::LIST, 0, name, token, cursor)){
+        return;
+    }
+    auto list = std::static_pointer_cast<CV::TypeList>(listBranch);
+
+    if(list->v.size() == 0){
+        dataCtx->memory[dataId] = list;
+    }
+
+    auto subject = list->v[list->v.size()-1];
+
+    list->v.erase(list->v.end()-1);
+
+    // Fulfill promise in context
+    dataCtx->memory[dataId] = subject;
+
+}
+
+
+static void __CV_CORE_LIST_SPLICE(
+    const std::vector<std::shared_ptr<CV::Instruction>> &args,
+    const std::string &name,
+    const CV::TokenType &token,
+    const CV::CursorType &cursor,
+    int execCtxId,
+    int ctxId,
+    int dataId,
+    const std::shared_ptr<CV::Program> &prog
+){
+    // Fetch context & data target
+    auto &dataCtx = prog->ctx[ctxId];
+    auto &execCtx = prog->ctx[execCtxId];
+
+    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
+        !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor)){
+        return;
+    }
+
+    auto result = dataCtx->buildList();
+    
+    // Join
+    for(int i = 0; i < args.size(); ++i){
+        auto listBranch = CV::Execute(args[i], execCtx, prog, cursor);
+        if(cursor->error){
+            return;
+        }
+        if(!CV::ErrorCheck::ExpectsTypeAt(listBranch->type, CV::QuantType::LIST, 0, name, token, cursor)){
+            return;
+        }
+        auto list = std::static_pointer_cast<CV::TypeList>(listBranch);
+        for(int j = 0; j < list->v.size(); ++j){
+            result->v.push_back(list->v[j]);
+        }
+    }
+
+    // Fulfill promise in context
+    dataCtx->memory[dataId] = result;
+}
+
+
+static void __CV_CORE_LIST_RESERVE(
+    const std::vector<std::shared_ptr<CV::Instruction>> &args,
+    const std::string &name,
+    const CV::TokenType &token,
+    const CV::CursorType &cursor,
+    int execCtxId,
+    int ctxId,
+    int dataId,
+    const std::shared_ptr<CV::Program> &prog
+){
+    // Fetch context & data target
+    auto &dataCtx = prog->ctx[ctxId];
+    auto &execCtx = prog->ctx[execCtxId];
+
+    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
+        !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, token, cursor)){
+        return;
+    }
+
+    auto result = dataCtx->buildList();
+    
+    auto listBranch = CV::Execute(args[0], execCtx, prog, cursor);
+    if(cursor->error){
+        return;
+    }
+    if(!CV::ErrorCheck::ExpectsTypeAt(listBranch->type, CV::QuantType::LIST, 0, name, token, cursor)){
+        return;
+    }
+    auto list = std::static_pointer_cast<CV::TypeList>(listBranch);
+    for(int i = 0; i < list->v.size(); ++i){
+        result->v.push_back(list->v[list->v.size()-1-i]);
+    }
+
+    // Fulfill promise in context
+    dataCtx->memory[dataId] = result;
+}
+
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //
-//  LIST TOOLS
+//  MUTATORS
 // 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -977,6 +1140,140 @@ static void __CV_CORE_MUT_MINUSMINUS(
     dataCtx->memory[dataId] = subjectBranch;
 }
 
+
+static void __CV_CORE_MUT_SLASHSLASH(
+    const std::vector<std::shared_ptr<CV::Instruction>> &args,
+    const std::string &name,
+    const CV::TokenType &token,
+    const CV::CursorType &cursor,
+    int execCtxId,
+    int ctxId,
+    int dataId,
+    const std::shared_ptr<CV::Program> &prog
+){
+    // Fetch context & data target
+    auto &dataCtx = prog->ctx[ctxId];
+    auto &execCtx = prog->ctx[execCtxId];
+
+    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
+        !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, token, cursor)){
+        return;
+    }
+
+    // Get subject
+    auto subjectBranch = CV::Execute(args[0], execCtx, prog, cursor);
+    if(cursor->error){
+        return;
+    }
+    if(!CV::ErrorCheck::ExpectsTypeAt(subjectBranch->type, CV::QuantType::NUMBER, 0, name, token, cursor)){
+        return;
+    }
+    
+    // Subtract
+    std::static_pointer_cast<CV::TypeNumber>(subjectBranch)->v /= static_cast<CV_DEFAULT_NUMBER_TYPE>(2.0);
+
+    // Fulfill promise in context
+    dataCtx->memory[dataId] = subjectBranch;
+}
+
+static void __CV_CORE_MUT_STARSTAR(
+    const std::vector<std::shared_ptr<CV::Instruction>> &args,
+    const std::string &name,
+    const CV::TokenType &token,
+    const CV::CursorType &cursor,
+    int execCtxId,
+    int ctxId,
+    int dataId,
+    const std::shared_ptr<CV::Program> &prog
+){
+    // Fetch context & data target
+    auto &dataCtx = prog->ctx[ctxId];
+    auto &execCtx = prog->ctx[execCtxId];
+
+    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
+        !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, token, cursor)){
+        return;
+    }
+
+    // Get subject
+    auto subjectBranch = CV::Execute(args[0], execCtx, prog, cursor);
+    if(cursor->error){
+        return;
+    }
+    if(!CV::ErrorCheck::ExpectsTypeAt(subjectBranch->type, CV::QuantType::NUMBER, 0, name, token, cursor)){
+        return;
+    }
+    
+    // Subtract
+    std::static_pointer_cast<CV::TypeNumber>(subjectBranch)->v *= std::static_pointer_cast<CV::TypeNumber>(subjectBranch)->v;
+
+    // Fulfill promise in context
+    dataCtx->memory[dataId] = subjectBranch;
+}
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//  LOOPS
+// 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+static void __CV_CORE_LOOP_WHILE(
+    const std::vector<std::shared_ptr<CV::Instruction>> &args,
+    const std::string &name,
+    const CV::TokenType &token,
+    const CV::CursorType &cursor,
+    int execCtxId,
+    int ctxId,
+    int dataId,
+    const std::shared_ptr<CV::Program> &prog
+){
+    // Fetch context & data target
+    auto &dataCtx = prog->ctx[ctxId];
+    auto &execCtx = prog->ctx[execCtxId];
+
+    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
+        !CV::ErrorCheck::ExpectsOperands(args.size(), 1, name, token, cursor)){
+        return;
+    }
+
+    std::shared_ptr<CV::Quant> result = NULL;
+
+    while(true) {
+        auto deepExecCtx = prog->createContext(execCtx);
+
+        // Conditional Branch
+        auto condBranch = CV::Execute(args[0], deepExecCtx, prog, cursor);
+        if(cursor->error){
+            return;
+        }
+
+        // Check conditional
+        if(!CV::getBooleanValue(condBranch)){
+            break;
+        }
+        
+        // Code Branch
+        if(args.size() > 1){
+            result = CV::Execute(args[1], deepExecCtx, prog, cursor);
+            if(cursor->error){
+                return;
+            }
+        }
+
+        prog->deleteContext(deepExecCtx->id);
+    }
+
+    if(result.get() == NULL){
+        result = dataCtx->buildNil();
+    }
+    
+    // Fulfill promise in context
+    dataCtx->memory[dataId] = result;
+}
+
+
+
 /*
 
 
@@ -1036,6 +1333,10 @@ void CVInitCore(const CV::ProgramType &prog){
     CV::unwrapLibrary([](const CV::ProgramType &target){
         target->rootContext->registerBinaryFuntion("nth", (void*)__CV_CORE_LIST_NTH);
         target->rootContext->registerBinaryFuntion("len", (void*)__CV_CORE_LIST_LENGTH);
+        target->rootContext->registerBinaryFuntion(">>", (void*)__CV_CORE_LIST_PUSH);
+        target->rootContext->registerBinaryFuntion("<<", (void*)__CV_CORE_LIST_POP);
+        target->rootContext->registerBinaryFuntion("splice", (void*)__CV_CORE_LIST_SPLICE);
+        target->rootContext->registerBinaryFuntion("l-rev", (void*)__CV_CORE_LIST_RESERVE);
         return true;
     }, prog); 
 
@@ -1047,6 +1348,19 @@ void CVInitCore(const CV::ProgramType &prog){
     CV::unwrapLibrary([](const CV::ProgramType &target){
         target->rootContext->registerBinaryFuntion("++", (void*)__CV_CORE_MUT_PLUSPLUS);
         target->rootContext->registerBinaryFuntion("--", (void*)__CV_CORE_MUT_MINUSMINUS);
+        target->rootContext->registerBinaryFuntion("//", (void*)__CV_CORE_MUT_SLASHSLASH);
+        target->rootContext->registerBinaryFuntion("**", (void*)__CV_CORE_MUT_STARSTAR);
+        return true;
+    }, prog); 
+
+
+    /*
+
+        LOOPS
+
+    */
+    CV::unwrapLibrary([](const CV::ProgramType &target){
+        target->rootContext->registerBinaryFuntion("while", (void*)__CV_CORE_LOOP_WHILE);
         return true;
     }, prog); 
 
