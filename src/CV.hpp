@@ -22,7 +22,8 @@
     #define CV_ERROR_MSG_INVALID_ACCESOR "Invalid Accessor"
     #define CV_ERROR_MSG_INVALID_INDEX "Invalid Index"
     #define CV_ERROR_MSG_MISUSED_PREFIX "Misused Prefix" 
-    #define CV_ERROR_MSG_ILLEGAL_PREFIXER "Illegal Prefixer" 
+    #define CV_ERROR_MSG_ILLEGAL_PREFIXER "Illegal Prefixer"
+    #define CV_ERROR_MSG_INVALID_SYNTAX "Invalid Syntax"
 
 
 
@@ -239,6 +240,7 @@
                 CF_LOOP_ITER,            
                 CF_INVOKE_FUNCTION,
                 CF_INVOKE_BINARY_FUNCTION,                  // DATA[0] -> CTX_ID, DATA[1] -> DATA_ID(owner), DATA[2]-> N_ARGS DATA[3] -> TARGET_DATA_ID | PARAMS... -> ARG_INS...
+                CF_RAW_TOKEN_REFERENCE,
 
                 // PROXIES
                 STATIC_PROXY = CV_INS_RANGE_TYPE_PROXY,     // DATA[0] -> CTX_ID, DATA[1] -> DATA_ID

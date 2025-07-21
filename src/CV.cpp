@@ -773,8 +773,12 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                 cursor->subject = token;
                 return prog->createInstruction(CV::InstructionType::NOOP, token);
             }                        
-
             ins->params.push_back(fetched->id);
+            // Finally, we pre-set this name within the context pointing to nil
+            auto ghostData = ctx->buildNil();
+            ctx->names[name] = ghostData->id;
+            ins->data.push_back(ctx->id);
+            ins->data.push_back(ghostData->id);
             return ins;
         }else{
             /*
@@ -928,6 +932,13 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
                 st->state = CV::ControlFlowState::CRASH;
                 return ctx->buildNil();
             }  
+            // Fulfill ghost name
+            if(ins->data.size() > 2){
+                auto ghostDataId = ins->data[2];
+                auto ghostDataCtxId = ins->data[3];
+                auto &cctx = prog->ctx[ghostDataCtxId];
+                cctx->memory[ghostDataId] = quant; 
+            }
             return quant;
         };
         case CV::InstructionType::STATIC_PROXY: {

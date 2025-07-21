@@ -1284,6 +1284,10 @@ CV::InsType GetPrefixer(const std::vector<CV::InsType> &src, const std::string &
     return CV::InsType(NULL);
 }
 
+std::shared_ptr<CV::Quant> SolvePrefixer(){
+
+}
+
 static void __CV_CORE_LOOP_FOR(
     const std::vector<std::shared_ptr<CV::Instruction>> &args,
     const std::string &name,
@@ -1304,35 +1308,22 @@ static void __CV_CORE_LOOP_FOR(
 
     std::shared_ptr<CV::Quant> result = NULL;
 
-    while(true) {
-        auto deepExecCtx = prog->createContext(execCtx);
-
-        // Conditional Branch
-        auto condBranch = CV::Execute(args[0], deepExecCtx, prog, cursor);
-        if(cursor->error){
-            return;
-        }
-
-        // Check conditional
-        if(!CV::GetBooleanValue(condBranch)){
-            break;
-        }
-        
-        // Code Branch
-        if(args.size() > 1){
-            result = CV::Execute(args[1], deepExecCtx, prog, cursor);
-            if(cursor->error){
-                return;
-            }
-        }
-
-        prog->deleteContext(deepExecCtx->id);
+    // Solve from 
+    auto fromPIns = GetPrefixer(args, "from");
+    std::string fromName = "from";
+    if(fromPIns.get() == NULL){
+        cursor->setError(CV_ERROR_MSG_INVALID_SYNTAX, "Imperative '"+name+"' expects a positional prefixer param 'from': none was provided", token);
+        return;
     }
+    auto fromIns = CV::Execute(args[1], execCtx, prog, cursor);
+    if(cursor->error){
+        return;
+    } 
+    std::cout << fromIns->type << std::endl;
 
-    if(result.get() == NULL){
-        result = dataCtx->buildNil();
-    }
-    
+
+    std::exit(1);
+
     // Fulfill promise in context
     dataCtx->memory[dataId] = result;
 }
@@ -1426,6 +1417,7 @@ void CVInitCore(const CV::ProgramType &prog){
     */
     CV::UnwrapLibrary([](const CV::ProgramType &target){
         target->rootContext->registerBinaryFuntion("while", (void*)__CV_CORE_LOOP_WHILE);
+        target->rootContext->registerBinaryFuntion("for", (void*)__CV_CORE_LOOP_FOR);
         return true;
     }, prog); 
 
