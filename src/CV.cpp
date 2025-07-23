@@ -766,6 +766,9 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
             ins->literal.push_back(name);
             ins->data.push_back(CV_INS_PREFIXER_IDENFIER_INSTRUCTION);
             ins->data.push_back(CV::Prefixer::POSITIONAL);
+            // Pre-set ghost name 
+            auto ghostData = ctx->buildNil();
+            ctx->names[name] = ghostData->id;
             // Build referred instruction
             auto &inc = token->inner[0];
             auto fetched = CV::Translate(inc, prog, ctx, cursor);
@@ -773,31 +776,30 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                 cursor->subject = token;
                 return prog->createInstruction(CV::InstructionType::NOOP, token);
             }                        
+            // Pass rest of data to ins
             ins->params.push_back(fetched->id);
-            // Finally, we pre-set this name within the context pointing to nil
-            auto ghostData = ctx->buildNil();
-            ctx->names[name] = ghostData->id;
             ins->data.push_back(ctx->id);
             ins->data.push_back(ghostData->id);
             return ins;
         }else{
             /*
                 IS NAME?        
-            */            
+            */   
+            auto hctx = ctx;
             auto nameRef = ctx->getName(token->first);
             if(nameRef.size() > 0){
                 // TODO: Check for PROMISE names
-                auto ctx = prog->ctx[nameRef[0]];
+                auto fctx = prog->ctx[nameRef[0]];
                 auto &dataId = nameRef[1];
-                auto &quant = ctx->memory[dataId];     
+                auto &quant = fctx->memory[dataId];     
 
                 switch(quant->type){
                     case CV::QuantType::BINARY_FUNCTION: {
                         // Build invokation
                         auto ins = prog->createInstruction(CV::InstructionType::CF_INVOKE_BINARY_FUNCTION, token);
-                        auto tempCtx = prog->createContext(ctx); // build context where we store temporary parameters
+                        auto tempCtx = prog->createContext(hctx); // build context where we store temporary parameters
                         // Where the function is stored
-                        ins->data.push_back(ctx->id); // where this function is stored
+                        ins->data.push_back(fctx->id); // where this function is stored
                         ins->data.push_back(quant->id);
                         // Where the params to the function are stored 
                         ins->data.push_back(tempCtx->id); // With the store parameters to the function
@@ -813,12 +815,12 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                         }
                         // Build Promise Proxy to store result value 
                         auto childIns = prog->createInstruction(CV::InstructionType::PROMISE_PROXY, token);
-                        auto targetData = ctx->buildNil();
-                        childIns->data.push_back(ctx->id);
+                        auto targetData = hctx->buildNil();
+                        childIns->data.push_back(hctx->id);
                         childIns->data.push_back(targetData->id);
                         childIns->params.push_back(ins->id);
                         // Tell invoke binary function who they're going to fulfill
-                        ins->data.push_back(ctx->id);
+                        ins->data.push_back(hctx->id);
                         ins->data.push_back(targetData->id);
                         return childIns;
                     };                 
@@ -934,8 +936,8 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
             }  
             // Fulfill ghost name
             if(ins->data.size() > 2){
-                auto ghostDataId = ins->data[2];
-                auto ghostDataCtxId = ins->data[3];
+                auto ghostDataId = ins->data[3];
+                auto ghostDataCtxId = ins->data[2];
                 auto &cctx = prog->ctx[ghostDataCtxId];
                 cctx->memory[ghostDataId] = quant; 
             }
