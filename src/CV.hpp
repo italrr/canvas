@@ -22,18 +22,17 @@
     #define CV_ERROR_MSG_INVALID_ACCESOR "Invalid Accessor"
     #define CV_ERROR_MSG_INVALID_INDEX "Invalid Index"
     #define CV_ERROR_MSG_MISUSED_PREFIX "Misused Prefix" 
+    #define CV_ERROR_MSG_MISUSED_FUNCTION "Misused Operator/Function" 
     #define CV_ERROR_MSG_ILLEGAL_PREFIXER "Illegal Prefixer"
     #define CV_ERROR_MSG_ILLEGAL_ITERATOR "Illegal Iterator"
     #define CV_ERROR_MSG_INVALID_SYNTAX "Invalid Syntax"
 
 
 
+
     #define CV_BINARY_FN_PARAMS const std::vector<std::shared_ptr<CV::Instruction>> &, const std::string&, const CV::TokenType &, const CV::CursorType &, int, int, int, const std::shared_ptr<CV::Program> &
 
     namespace CV {
-        ////////////////////////////
-        //// TOOLS
-        ///////////////////////////
 
         ////////////////////////////
         //// TYPES
@@ -114,12 +113,13 @@
             virtual bool clear();
             virtual std::shared_ptr<CV::Quant> copy();
         };        
-
+        struct Token;
         struct TypeFunction : CV::Quant {
             int entrypoint;
             int ctxId;
             std::string name;
             std::vector<std::string> params;
+            std::shared_ptr<CV::Token> body;
             TypeFunction();
             virtual bool clear();
             virtual std::shared_ptr<CV::Quant> copy();
@@ -342,6 +342,18 @@
         typedef std::shared_ptr<CV::Token> TokenType;
         typedef std::shared_ptr<CV::Context> ContextType;
         typedef std::shared_ptr<CV::ControlFlow> CFType;
+
+        ////////////////////////////
+        //// TOOLS
+        ///////////////////////////
+
+        namespace Test {
+            bool IsItPrefixInstruction(const std::shared_ptr<CV::Instruction> &ins);
+        }
+
+        ////////////////////////////
+        //// API
+        ///////////////////////////
 
         bool GetBooleanValue(const std::shared_ptr<CV::Quant> &data);
         bool UnwrapLibrary(const std::function<bool(const CV::ProgramType &target)> &fn, const CV::ProgramType &target);

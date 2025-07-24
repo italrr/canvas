@@ -14,6 +14,19 @@
 // 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace CV {
+    namespace Test {
+        bool areAllNumbers(const std::vector<std::shared_ptr<CV::Quant>> &arguments){
+            for(int i = 0; i < arguments.size(); ++i){
+                if(arguments[i]->type != CV::QuantType::NUMBER){
+                    return false;
+                }
+            }
+            return true;
+        }
+        bool IsItPrefixInstruction(const std::shared_ptr<CV::Instruction> &ins){
+            return ins->data.size() >= 2 && ins->data[0] == CV_INS_PREFIXER_IDENFIER_INSTRUCTION;
+        }
+    }
     namespace Tools {
 
         std::string format(const std::string &_str, ...){
@@ -258,6 +271,7 @@ std::shared_ptr<CV::Quant> CV::TypeFunction::copy(){
     cpy->name = this->name;
     cpy->entrypoint = this->entrypoint;
     cpy->ctxId = this->ctxId;
+    cpy->body = this->body->copy();
     return cpy;
 }
 
@@ -276,6 +290,7 @@ std::shared_ptr<CV::Quant> CV::TypeFunctionBinary::copy(){
     cpy->entrypoint = this->entrypoint;
     cpy->ctxId = this->ctxId;
     cpy->ref = this->ref;
+    cpy->body = this->body->copy();
     return cpy;
 }
 
@@ -388,17 +403,24 @@ std::string CV::QuantToText(const std::shared_ptr<CV::Quant> &t){
             return "'"+std::static_pointer_cast<CV::TypeString>(t)->v+"'";
         };     
 
-        // case CV::NaturalType::FUNCTION: {
-        //     auto fn = static_cast<CV::FunctionType*>(item);      
+        case CV::QuantType::FUNCTION: {
+            auto fn = std::static_pointer_cast<CV::TypeFunction>(t);      
 
-        //     std::string start = Tools::setTextColor(Tools::Color::RED, true)+"["+Tools::setTextColor(Tools::Color::RESET);
-        //     std::string end = Tools::setTextColor(Tools::Color::RED, true)+"]"+Tools::setTextColor(Tools::Color::RESET);
-        //     std::string name = Tools::setTextColor(Tools::Color::RED, true)+"fn"+Tools::setTextColor(Tools::Color::RESET);
-        //     std::string binary = Tools::setTextColor(Tools::Color::BLUE, true)+"BINARY"+Tools::setTextColor(Tools::Color::RESET);
-        //     std::string body = Tools::setTextColor(Tools::Color::BLUE, true)+fn->body.first+Tools::setTextColor(Tools::Color::RESET);
+            // std::string start = Tools::setTextColor(Tools::Color::RED, true)+"["+Tools::setTextColor(Tools::Color::RESET);
+            // std::string end = Tools::setTextColor(Tools::Color::RED, true)+"]"+Tools::setTextColor(Tools::Color::RESET);
+            // std::string name = Tools::setTextColor(Tools::Color::RED, true)+"fn"+Tools::setTextColor(Tools::Color::RESET);
+            // std::string binary = Tools::setTextColor(Tools::Color::BLUE, true)+"BINARY"+Tools::setTextColor(Tools::Color::RESET);
+            // std::string body = Tools::setTextColor(Tools::Color::BLUE, true)+fn->body.first+Tools::setTextColor(Tools::Color::RESET);
 
-        //     return start+name+" "+start+(fn->variadic ? "args" : Tools::compileList(fn->args))+end+" "+( body )+end;
-        // };
+            std::string start = "[";
+            std::string end = "]";
+            std::string name = "fn";
+            std::string binary = "BINARY";
+            std::string body = fn->body->str();
+
+
+            return start+name+" "+start+CV::Tools::compileList(fn->params)+end+" "+( body )+end;
+        };
 
         case CV::QuantType::LIST: {
             // std::string output = Tools::setTextColor(Tools::Color::MAGENTA)+"["+Tools::setTextColor(Tools::Color::RESET);
@@ -716,6 +738,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
             ctx->memory[fn->id] = fn;
             auto fctx = prog->createContext(ctx);
             fn->ctxId = fctx->id;
+            fn->body = token->inner[1];
 
             auto &paramNameList = token->inner[0];
             for(int i = 0; i < paramNameList->inner.size(); ++i){
@@ -940,9 +963,27 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
 
                 switch(quant->type){
                     case CV::QuantType::FUNCTION: {
-                        auto ins = prog->createInstruction(CV::InstructionType::CF_INVOKE_FUNCTION, token);
                         auto fn = std::static_pointer_cast<CV::TypeFunction>(quant);
                         auto &fnCtx = prog->ctx[fn->ctxId];
+                        if(fn->params.size() != token->inner.size()){
+                            cursor->setError(CV_ERROR_MSG_MISUSED_FUNCTION, "'"+token->first+"' expects exactly "+std::to_string(fn->params.size())+". Provided "+std::to_string(token->inner.size()), token);
+                            return prog->createInstruction(CV::InstructionType::NOOP, token);                
+                        }
+                        auto ins = prog->createInstruction(CV::InstructionType::CF_INVOKE_FUNCTION, token);
+                        ins->data.push_back(nameRef[0]); // Context where the function is contained
+                        ins->data.push_back(nameRef[1]); // Data ID to the function
+                        ins->data.push_back(ctx->id); // Current context where the function is being invoked on
+                        // Fetch params
+                        for(int i = 0; i < token->inner.size(); ++i){
+                            auto &inc = token->inner[i];
+                            auto fetched = CV::Translate(inc, prog, ctx, cursor);
+                            if(cursor->error){
+                                cursor->subject = token;
+                                return prog->createInstruction(CV::InstructionType::NOOP, token);
+                            }                        
+                            ins->params.push_back(fetched->id);
+                        }
+                        return ins;
                     };
                     case CV::QuantType::BINARY_FUNCTION: {
                         // Build invokation
@@ -1257,6 +1298,43 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
         /*
             CONTROL FLOW        
         */
+        case CV::InstructionType::CF_INVOKE_FUNCTION: {
+            auto fnCtxId = ins->data[0];
+            auto fnId = ins->data[1];
+            auto paramCtxId = ins->data[2];
+
+            auto fn = std::static_pointer_cast<CV::TypeFunction>(prog->ctx[fnCtxId]->memory[fnId]);
+            auto &topExecCtx = prog->ctx[fn->ctxId];
+            auto &paramCtx = prog->ctx[paramCtxId];
+
+            topExecCtx->memory.clear();
+            topExecCtx->prefetched.clear();
+
+            // Prepare Context
+            for(int i = 0; i < ins->params.size(); ++i){
+                auto &cins = prog->instructions[ins->params[i]];
+                auto v = CV::Execute(cins, paramCtx, prog, cursor);
+                if(cursor->error){
+                    st->state = CV::ControlFlowState::CRASH;
+                    return v;
+                }   
+                // Is it prefix?
+                if(CV::Test::IsItPrefixInstruction(cins)){
+                    topExecCtx->memory[topExecCtx->names[cins->literal[0]]] = v;
+                }else{
+                    topExecCtx->memory[topExecCtx->names[fn->params[i]]] = v;
+                }
+            }
+            // Execute
+            auto execCtx = prog->createContext(topExecCtx);
+            auto v = CV::Execute(prog->instructions[fn->entrypoint], execCtx, prog, cursor);
+            if(cursor->error){
+                st->state = CV::ControlFlowState::CRASH;
+                return v;
+            }   
+            prog->deleteContext(execCtx->id);
+            return v;
+        } break;
         case CV::InstructionType::CF_INVOKE_BINARY_FUNCTION: {
             auto &fnData = prog->ctx[ins->data[0]]->memory[ins->data[1]];
             auto fn = std::static_pointer_cast<CV::TypeFunctionBinary>(fnData);
@@ -1515,7 +1593,7 @@ int main(){
     
     CVInitCore(program);
 
-    CV::Compile("fn [][+ a b c]", program, cursor);
+    CV::Compile("fn [a b c][+ a b c]", program, cursor);
     if(cursor->error){
         std::cout << cursor->getRaised() << std::endl;
         std::exit(1);

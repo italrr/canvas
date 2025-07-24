@@ -2,20 +2,6 @@
 #include "CV.hpp"
 
 namespace CV {
-    namespace Test {
-        inline bool areAllNumbers(const std::vector<std::shared_ptr<CV::Quant>> &arguments){
-            for(int i = 0; i < arguments.size(); ++i){
-                if(arguments[i]->type != CV::QuantType::NUMBER){
-                    return false;
-                }
-            }
-            return true;
-        }
-        inline bool IsItPrefixInstruction(const std::shared_ptr<CV::Instruction> &ins){
-            return ins->data.size() >= 2 && ins->data[0] == CV_INS_PREFIXER_IDENFIER_INSTRUCTION;
-        }
-    }
-
     namespace ErrorCheck {
         inline bool AllNumbers(const std::vector<std::shared_ptr<CV::Quant>> &args, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor){
             for(int i = 0; i < args.size(); ++i){
