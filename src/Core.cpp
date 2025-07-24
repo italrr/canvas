@@ -1284,8 +1284,16 @@ CV::InsType GetPrefixer(const std::vector<CV::InsType> &src, const std::string &
     return CV::InsType(NULL);
 }
 
-std::shared_ptr<CV::Quant> SolvePrefixer(){
+std::vector<CV::InsType> GetNonPrefixedIns(const std::vector<CV::InsType> &instructions){
+    std::vector<CV::InsType> nonprefixed;
 
+    for(int i = 0; i < instructions.size(); ++i){
+        if(!CV::Test::IsItPrefixInstruction(instructions[i])){
+            nonprefixed.push_back(instructions[i]);
+        }
+    }
+
+    return nonprefixed;
 }
 
 static void __CV_CORE_LOOP_FOR(
@@ -1310,20 +1318,60 @@ static void __CV_CORE_LOOP_FOR(
 
     // Solve from 
     auto fromPIns = GetPrefixer(args, "from");
-    std::string fromName = "from";
     if(fromPIns.get() == NULL){
         cursor->setError(CV_ERROR_MSG_INVALID_SYNTAX, "Imperative '"+name+"' expects a positional prefixer param 'from': none was provided", token);
         return;
     }
-    auto fromIns = CV::Execute(args[1], execCtx, prog, cursor);
+    auto fromIndex = CV::Execute(fromPIns, execCtx, prog, cursor);
     if(cursor->error){
         return;
+    }
+    if(fromIndex->type != CV::QuantType::NUMBER){
+        cursor->setError(CV_ERROR_MSG_ILLEGAL_ITERATOR, "Imperative '"+name+"' expects a positional prefixer param 'from' that carries a NUMBER", token);        
+        return;
     } 
-    std::cout << fromIns->type << std::endl;
+    // Solve to
+    auto toPIns = GetPrefixer(args, "to");
+    if(toPIns.get() == NULL){
+        cursor->setError(CV_ERROR_MSG_INVALID_SYNTAX, "Imperative '"+name+"' expects a positional prefixer param 'to': none was provided", token);
+        return;
+    }
+    auto toLimit = CV::Execute(toPIns, execCtx, prog, cursor);
+    if(cursor->error){
+        return;
+    }
+    if(toLimit->type != CV::QuantType::NUMBER){
+        cursor->setError(CV_ERROR_MSG_ILLEGAL_ITERATOR, "Imperative '"+name+"' expects a positional prefixer param 'to' that carries a NUMBER", token);        
+        return;
+    } 
+    // Stepper
+    auto stepPIns = GetPrefixer(args, "step");
 
-
-    std::exit(1);
-
+    auto from = std::static_pointer_cast<CV::TypeNumber>(fromIndex);
+    auto to = std::static_pointer_cast<CV::TypeNumber>(toLimit);
+    auto code = GetNonPrefixedIns(args);
+    while(from->v != to->v){
+        // Run code
+        for(int i = 0; i < code.size(); ++i){
+            auto toLimit = CV::Execute(code[i], execCtx, prog, cursor);
+            if(cursor->error){
+                return;
+            }    
+            result = toLimit;
+        }
+        // Run provided step or add one to 'to'
+        if(stepPIns.get()){
+            auto toLimit = CV::Execute(stepPIns, execCtx, prog, cursor);
+            if(cursor->error){
+                return;
+            }
+        }else{
+            ++from->v;
+        }
+    }
+    if(result.get() == NULL){
+        result = dataCtx->buildNil();
+    }
     // Fulfill promise in context
     dataCtx->memory[dataId] = result;
 }

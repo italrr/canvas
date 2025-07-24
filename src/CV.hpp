@@ -23,6 +23,7 @@
     #define CV_ERROR_MSG_INVALID_INDEX "Invalid Index"
     #define CV_ERROR_MSG_MISUSED_PREFIX "Misused Prefix" 
     #define CV_ERROR_MSG_ILLEGAL_PREFIXER "Illegal Prefixer"
+    #define CV_ERROR_MSG_ILLEGAL_ITERATOR "Illegal Iterator"
     #define CV_ERROR_MSG_INVALID_SYNTAX "Invalid Syntax"
 
 
@@ -81,18 +82,21 @@
             virtual bool isInit(){
                 return true;
             }
+            virtual std::shared_ptr<Quant> copy();
         };
 
         struct TypeNumber : CV::Quant {
             number v;
             TypeNumber();
             virtual bool clear();
+            virtual std::shared_ptr<CV::Quant> copy();
         };
 
         struct TypeString : CV::Quant {
             std::string v;
             TypeString();
             virtual bool clear();
+            virtual std::shared_ptr<CV::Quant> copy();
         };
 
         struct TypeList : CV::Quant {
@@ -100,6 +104,7 @@
             TypeList();
             virtual bool isInit();        
             virtual bool clear();
+            virtual std::shared_ptr<CV::Quant> copy();
         };
 
         struct TypeStore : CV::Quant {
@@ -107,14 +112,17 @@
             TypeStore();
             virtual bool isInit();    
             virtual bool clear();
+            virtual std::shared_ptr<CV::Quant> copy();
         };        
 
         struct TypeFunction : CV::Quant {
             int entrypoint;
             int ctxId;
             std::string name;
+            std::vector<std::string> params;
             TypeFunction();
             virtual bool clear();
+            virtual std::shared_ptr<CV::Quant> copy();
         };        
 
         struct Program;
@@ -122,6 +130,7 @@
             void *ref;
             TypeFunctionBinary();
             virtual bool clear();
+            virtual std::shared_ptr<CV::Quant> copy();
         };          
 
         ////////////////////////////
@@ -228,6 +237,7 @@
                 // CONSTRUCTORS
                 LET = CV_INS_RANGE_TYPE_CONSTRUCTORS,
                 MUT,
+                CARBON_COPY,
                 CONSTRUCT_LIST,
                 CONSTRUCT_STORE,
 
@@ -282,10 +292,12 @@
             int id;
             std::unordered_map<unsigned, std::shared_ptr<CV::Quant>> memory;
             std::unordered_map<std::string, unsigned> names;
+            std::unordered_map<unsigned, std::vector<unsigned>> prefetched;
             std::shared_ptr<CV::Context> head;
             Context();
             Context(const std::shared_ptr<CV::Context> &head);
             std::shared_ptr<CV::TypeNumber> buildNumber(number n = 0);
+            std::shared_ptr<CV::Quant> buildCopy(const std::shared_ptr<CV::Quant> &subject);
             std::shared_ptr<CV::Quant> buildNil();
             std::shared_ptr<CV::Quant> buildType(int type);
             std::shared_ptr<CV::TypeList> buildList(const std::vector<std::shared_ptr<CV::Quant>> &list = {});
