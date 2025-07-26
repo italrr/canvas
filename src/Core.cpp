@@ -94,7 +94,7 @@ static void __CV_CORE_ARITHMETIC_ADDITION(
         auto v = CV::Execute(args[i], execCtx, prog, cursor);
         if(cursor->error){
             return;
-        }           
+        } 
         if(!CV::ErrorCheck::AllNumbers({v}, name, token, cursor)){
             return;
         }

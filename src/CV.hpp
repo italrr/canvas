@@ -359,7 +359,8 @@
         bool UnwrapLibrary(const std::function<bool(const CV::ProgramType &target)> &fn, const CV::ProgramType &target);
         std::string QuantToText(const std::shared_ptr<CV::Quant> &t);
         std::shared_ptr<CV::Quant> Execute(const CV::InsType &entry, const CV::ContextType &ctx, const CV::ProgramType &prog, const CV::CursorType &cursor);
-        void Compile(const std::string &input, const CV::ProgramType &prog, CV::CursorType &cursor);
+        void Compile(const std::string &input, const CV::ProgramType &prog, const CV::CursorType &cursor);
+        CV::InsType Compile(const CV::TokenType &input, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor);
         CV::InsType Translate(const CV::TokenType &token, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor);
 
     }

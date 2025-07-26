@@ -67,7 +67,7 @@ namespace CV {
             if(name.size() == 0){
                 return false;
             }
-            return !isNumber(std::string("")+name[0]) && name[0] != ':';
+            return !isNumber(std::string("")+name[0]) && name[0] != ':' && name[0] != '~';
         }
 
         static bool isReservedWord(const std::string &name){
@@ -613,7 +613,7 @@ static std::vector<CV::TokenType> parseTokens(std::string input, char sep, const
     return tokens;
 };
 
-static std::vector<CV::TokenType> rebuildTokenHierarchy(const std::vector<CV::TokenType> &input, char sep, CV::CursorType &cursor){
+static std::vector<CV::TokenType> rebuildTokenHierarchy(const std::vector<CV::TokenType> &input, char sep, const CV::CursorType &cursor){
     
     if(input.size() == 0){
         cursor->setError("NOOP", CV_ERROR_MSG_NOOP_NO_INSTRUCTIONS, 1);
@@ -724,7 +724,11 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
     };    
 
     if(token->first.size() == 0){
-        return bListConstruct(token, token->inner, ctx);
+        if(token->solved){
+            return bListConstruct(token, token->inner, ctx);
+        }else{
+            return CV::Compile(token, prog, ctx, cursor);
+        }
     }else{
         /*
             FN
@@ -740,9 +744,10 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
             fn->ctxId = fctx->id;
             fn->body = token->inner[1];
 
-            auto &paramNameList = token->inner[0];
-            for(int i = 0; i < paramNameList->inner.size(); ++i){
-                auto &name = paramNameList->inner[i]->first;
+            auto paramNameList = token->inner[0]->inner;
+            paramNameList.insert(paramNameList.begin(), token->inner[0]);
+            for(int i = 0; i < paramNameList.size(); ++i){
+                auto &name = paramNameList[i]->first;
                 if(!CV::Tools::isValidVarName(name)){
                     cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "'"+token->first+"' parameter name  '"+name+"' is an invalid", token);
                     return prog->createInstruction(CV::InstructionType::NOOP, token);                   
@@ -755,7 +760,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                 auto v = fctx->buildNil();
                 fctx->names[name] = v->id;
             }
-            auto target = CV::Translate(token->inner[1], prog, ctx, cursor);
+            auto target = CV::Compile(token->inner[1], prog, fctx, cursor);
             if(cursor->error){
                 cursor->subject = token;
                 return prog->createInstruction(CV::InstructionType::NOOP, token);
@@ -844,23 +849,26 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                 return prog->createInstruction(CV::InstructionType::NOOP, token);
             }         
 
-            std::shared_ptr<CV::Quant> targetData;
-
+            
             if(target->type == CV::InstructionType::STATIC_PROXY){
-                targetData = ctx->memory[target->data[1]];
+                auto &targetData = prog->ctx[target->data[0]]->memory[target->data[1]];
+                ctx->memory[targetData->id] = targetData;
+                ctx->names[name] = targetData->id;  
+                return target;
             }else{
-                targetData = ctx->buildNil();
+                auto targetData = ctx->buildNil();
+
+                auto ins = prog->createInstruction(CV::InstructionType::LET, token);
+                ins->literal.push_back(name);
+                ins->data.push_back(ctx->id);
+                ins->data.push_back(targetData->id);
+                ins->params.push_back(target->id);
+
+                ctx->names[name] = targetData->id;  
+
+                return ins;
             }
 
-            auto ins = prog->createInstruction(CV::InstructionType::LET, token);
-            ins->literal.push_back(name);
-            ins->data.push_back(ctx->id);
-            ins->data.push_back(targetData->id);
-            ins->params.push_back(target->id);
-
-            ctx->names[name] = targetData->id;  
-
-            return ins;
         }else
         /*
             NUMBER
@@ -1041,7 +1049,34 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
     return prog->createInstruction(CV::InstructionType::NOOP, token);
 }
 
-void CV::Compile(const std::string &input, const CV::ProgramType &prog, CV::CursorType &cursor){
+CV::InsType CV::Compile(const CV::TokenType &input, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor){
+
+    std::vector<CV::TokenType> list = {};
+
+    for(int i = 0; i < input->inner.size(); ++i){
+        list.push_back(input->inner[i]);
+    }
+
+    std::vector<CV::InsType> instructions;
+    for(int i = 0 ; i < list.size(); ++i){
+        auto ins = CV::Translate(list[i], prog, ctx, cursor);
+        if(cursor->error){
+            return ins;
+        }
+        instructions.push_back(ins);
+    }
+    
+    for(int i = 1; i < instructions.size(); ++i){
+        auto &current = instructions[i];
+        auto &previous = instructions[i-1];
+        previous->next = current->id;
+        current->prev = previous->id;
+    }
+
+    return instructions[0];
+}
+
+void CV::Compile(const std::string &input, const CV::ProgramType &prog, const CV::CursorType &cursor){
 
 
     // Fix outter brackets (Input must always be accompained by brackets)
@@ -1307,7 +1342,7 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
             auto &topExecCtx = prog->ctx[fn->ctxId];
             auto &paramCtx = prog->ctx[paramCtxId];
 
-            topExecCtx->memory.clear();
+            // topExecCtx->memory.clear();
             topExecCtx->prefetched.clear();
 
             // Prepare Context
@@ -1350,7 +1385,7 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
             for(int i = 0; i < nArgs; ++i){
                 arguments.push_back(prog->instructions[ins->params[i]]);
             }
-
+            
             // Cast ref into pointer function
             void (*ref)(CV_BINARY_FN_PARAMS) = (void (*)(CV_BINARY_FN_PARAMS))fn->ref;
 
@@ -1404,10 +1439,6 @@ std::shared_ptr<CV::Quant> CV::Execute(const CV::InsType &entry, const CV::Conte
             continue;
         }
         break;
-    }
-    
-    if(cursor->error){
-        return ctx->buildNil();
     }
 
     return result;
@@ -1593,7 +1624,7 @@ int main(){
     
     CVInitCore(program);
 
-    CV::Compile("fn [a b c][+ a b c]", program, cursor);
+    CV::Compile("[let t [fn [a][ [let c 2500][+ 1 c] ]]][t 0]", program, cursor);
     if(cursor->error){
         std::cout << cursor->getRaised() << std::endl;
         std::exit(1);
