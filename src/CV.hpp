@@ -26,17 +26,93 @@
     #define CV_ERROR_MSG_ILLEGAL_PREFIXER "Illegal Prefixer"
     #define CV_ERROR_MSG_ILLEGAL_ITERATOR "Illegal Iterator"
     #define CV_ERROR_MSG_INVALID_SYNTAX "Invalid Syntax"
+    #define CV_ERROR_MSG_LIBRARY_NOT_VALID "Invalid Library Import"
 
-
-
+    #define _CV_PLATFORM_TYPE_LINUX 0
+    #define _CV_PLATFORM_TYPE_WINDOWS 1
+    #define _CV_PLATFORM_TYPE_OSX 2
+    #define _CV_PLATFORM_TYPE_UNDEFINED 4
 
     #define CV_BINARY_FN_PARAMS const std::vector<std::shared_ptr<CV::Instruction>> &, const std::string&, const CV::TokenType &, const CV::CursorType &, int, int, int, const std::shared_ptr<CV::Program> &
 
     namespace CV {
 
         ////////////////////////////
+        //// PLATFORM
+        ///////////////////////////
+
+        namespace SupportedPlatform {
+            enum SupportedPlatform : int {
+                WINDOWS,
+                LINUX,
+                OSX,
+                UNKNOWN
+            };
+            static std::string name(int plat){
+                switch(plat){
+                    case SupportedPlatform::WINDOWS: 
+                        return "WINDOWS";
+                    case SupportedPlatform::LINUX:
+                        return "LINUX";
+                    case SupportedPlatform::OSX:
+                        return "OSX";                        
+                    default:
+                        return "UNKNOWN";
+                }
+            }
+        }
+
+        namespace SupportedArchitecture {
+            enum SupportedArchitecture : int {
+                X86,
+                X86_64,
+                ARM,
+                ARM64,
+                UNKNOWN
+            };
+            static std::string name(int plat){
+                switch(plat){
+                    case SupportedArchitecture::X86: 
+                        return "X86";
+                    case SupportedArchitecture::X86_64: 
+                        return "X86_64";
+                    case SupportedArchitecture::ARM: 
+                        return "ARM";
+                    case SupportedArchitecture::ARM64: 
+                        return "ARM64";                                                                                    
+                    default:
+                        return "UNKNOWN";
+                }
+            }
+        }
+
+        #if defined(__i386__) || defined(__i686__)
+            const static int ARCH = SupportedArchitecture::X86;
+        #elif defined(__x86_64__) || defined(__amd64__)
+            const static int ARCH = CV::SupportedArchitecture::X86_64;
+        #elif defined(__arm__)
+            const static int ARCH = SupportedArchitecture::ARM;
+        #elif defined(__aarch64__)
+            const static int ARCH = SupportedArchitecture::ARM64;
+        #else
+            const static int ARCH = SupportedArchitecture::UNKNOWN;
+        #endif
+        
+        #ifdef _WIN32
+            const static int PLATFORM = SupportedPlatform::WINDOWS;
+            #define _CV_PLATFORM _CV_PLATFORM_TYPE_WINDOWS
+        #elif __linux__
+            const static int PLATFORM = CV::SupportedPlatform::LINUX;
+            #define _CV_PLATFORM _CV_PLATFORM_TYPE_LINUX
+        #else
+            const static int PLATFORM = SupportedPlatform::UNSUPPORTED;
+            #define _CV_PLATFORM _CV_PLATFORM_TYPE_UNDEFINED
+        #endif  
+
+        ////////////////////////////
         //// TYPES
         ///////////////////////////
+
         namespace QuantType {
             enum QuantType : int {
                 NIL,
@@ -128,6 +204,7 @@
         struct Program;
         struct TypeFunctionBinary : TypeFunction {
             void *ref;
+            std::unordered_map<int, bool> multiParam;
             TypeFunctionBinary();
             virtual bool clear();
             virtual std::shared_ptr<CV::Quant> copy();
@@ -350,16 +427,35 @@
         namespace Test {
             bool IsItPrefixInstruction(const std::shared_ptr<CV::Instruction> &ins);
         }
+        
+        namespace ErrorCheck {
+            bool AllNumbers(const std::vector<std::shared_ptr<CV::Quant>> &args, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor);
+            bool ExpectsOperands(int prov, int exp, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor);
+            bool ExpectsTypeAt(int type, int exp, int at, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor);
+            bool ExpectsNoMoreOperands(int prov, int max, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor);
+            bool ExpectsExactlyOperands(int prov, int exp, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor);
+            bool ExpectNoPrefixer(const std::string &name, const std::vector<std::shared_ptr<CV::Instruction>> &args, const CV::TokenType &token, const CV::CursorType &cursor);
+        }
+
+        namespace Tools {
+            bool fileExists(const std::string &path);
+            std::string readFile(const std::string &path);
+            bool isReservedWord(const std::string &name);
+            bool isValidVarName(const std::string &name);
+        }
 
         ////////////////////////////
         //// API
         ///////////////////////////
 
+        bool ImportDynamicLibrary(const std::string &path, const std::string &fname, const std::shared_ptr<CV::Program> &prog, const CV::ContextType &ctx, const CV::CursorType &cursor);
+        int Import(const std::string &name, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor);
+        bool Unimport(int id);
         bool GetBooleanValue(const std::shared_ptr<CV::Quant> &data);
         bool UnwrapLibrary(const std::function<bool(const CV::ProgramType &target)> &fn, const CV::ProgramType &target);
         std::string QuantToText(const std::shared_ptr<CV::Quant> &t);
         std::shared_ptr<CV::Quant> Execute(const CV::InsType &entry, const CV::ContextType &ctx, const CV::ProgramType &prog, const CV::CursorType &cursor);
-        void Compile(const std::string &input, const CV::ProgramType &prog, const CV::CursorType &cursor);
+        CV::InsType Compile(const std::string &input, const CV::ProgramType &prog, const CV::CursorType &cursor);
         CV::InsType Compile(const CV::TokenType &input, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor);
         CV::InsType Translate(const CV::TokenType &token, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor);
 

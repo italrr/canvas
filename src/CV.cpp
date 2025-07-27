@@ -63,16 +63,16 @@ namespace CV {
             return false;
         }     
 
-        static bool isValidVarName(const std::string &name){
+        bool isValidVarName(const std::string &name){
             if(name.size() == 0){
                 return false;
             }
-            return !isNumber(std::string("")+name[0]) && name[0] != ':' && name[0] != '~';
+            return !isNumber(std::string("")+name[0]) && name[0] != '.' && name[0] != '~';
         }
 
-        static bool isReservedWord(const std::string &name){
+        bool isReservedWord(const std::string &name){
             static const std::vector<std::string> reserved {
-                "let", "bring", "~", ":", "|", "`", "cc", "mut", "fn"
+                "let", "bring", "~", ".", "|", "`", "cc", "mut", "fn"
             };
             for(int i = 0; i < reserved.size(); ++i){
                 if(reserved[i] == name){
@@ -724,11 +724,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
     };    
 
     if(token->first.size() == 0){
-        if(token->solved){
-            return bListConstruct(token, token->inner, ctx);
-        }else{
-            return CV::Compile(token, prog, ctx, cursor);
-        }
+        return bListConstruct(token, token->inner, ctx);
     }else{
         /*
             FN
@@ -871,6 +867,20 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
 
         }else
         /*
+            NIL
+        */
+        if(token->first == "nil"){
+            if(token->inner.size() > 0){
+                return bListConstructFromToken(token, ctx);
+            }else{
+                auto ins = prog->createInstruction(CV::InstructionType::STATIC_PROXY, token);
+                auto data = ctx->buildNil();
+                ins->data.push_back(ctx->id);
+                ins->data.push_back(data->id);
+                return ins;
+            } 
+        }else
+        /*
             NUMBER
         */
         if(CV::Tools::isNumber(token->first)){
@@ -901,7 +911,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
         }else
         // EXPANDER
         // POSITIONAL PROXY
-        if(token->first[0] == ':'){
+        if(token->first[0] == '~'){
             if(token->first.size() == 1){
                 cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "'"+token->first+"' prefixers expect a name", token);
                 return prog->createInstruction(CV::InstructionType::NOOP, token);                                   
@@ -1076,7 +1086,7 @@ CV::InsType CV::Compile(const CV::TokenType &input, const CV::ProgramType &prog,
     return instructions[0];
 }
 
-void CV::Compile(const std::string &input, const CV::ProgramType &prog, const CV::CursorType &cursor){
+CV::InsType CV::Compile(const std::string &input, const CV::ProgramType &prog, const CV::CursorType &cursor){
 
 
     // Fix outter brackets (Input must always be accompained by brackets)
@@ -1090,7 +1100,7 @@ void CV::Compile(const std::string &input, const CV::ProgramType &prog, const CV
     // Split basic tokens
     auto tokens = parseTokens(fixedInput, ' ', cursor);
     if(cursor->error){
-        return;
+        return prog->createInstruction(CV::InstructionType::NOOP, tokens[0]);
     }
 
     std::vector<CV::TokenType> root;
@@ -1098,7 +1108,7 @@ void CV::Compile(const std::string &input, const CV::ProgramType &prog, const CV
     for(int i = 0; i < tokens.size(); ++i){
         auto built = rebuildTokenHierarchy({tokens[i]}, ' ', cursor);
         if(cursor->error){
-            return;
+            return prog->createInstruction(CV::InstructionType::NOOP, built[0]);
         }
         for(int j = 0; j < built.size(); ++j){
             root.push_back(built[j]);
@@ -1118,7 +1128,7 @@ void CV::Compile(const std::string &input, const CV::ProgramType &prog, const CV
     for(int i = 0 ; i < root.size(); ++i){
         auto ins = CV::Translate(root[i], prog, prog->rootContext, cursor);
         if(cursor->error){
-            return;
+            return prog->createInstruction(CV::InstructionType::NOOP, root[i]);
         }
         instructions.push_back(ins);
     }
@@ -1132,7 +1142,7 @@ void CV::Compile(const std::string &input, const CV::ProgramType &prog, const CV
     }
 
     // Set entry point (should be first instruction in the list)
-    prog->entrypointIns = instructions[0]->id;
+    return instructions[0];
 
 }
 
@@ -1624,12 +1634,12 @@ int main(){
     
     CVInitCore(program);
 
-    CV::Compile("[let t [fn [a][ [let c 2500][+ 1 c] ]]][t 0]", program, cursor);
+    auto entrypoint = CV::Compile("[bring './lib/io.cv']", program, cursor);
     if(cursor->error){
         std::cout << cursor->getRaised() << std::endl;
         std::exit(1);
     }
-    auto &entrypoint = program->instructions[program->entrypointIns];
+    program->entrypointIns = entrypoint->id;
     auto result = CV::Execute(entrypoint, program->rootContext, program, cursor);
     if(cursor->error){
         std::cout << cursor->getRaised() << std::endl;

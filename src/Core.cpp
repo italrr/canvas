@@ -3,7 +3,7 @@
 
 namespace CV {
     namespace ErrorCheck {
-        inline bool AllNumbers(const std::vector<std::shared_ptr<CV::Quant>> &args, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor){
+        bool AllNumbers(const std::vector<std::shared_ptr<CV::Quant>> &args, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor){
             for(int i = 0; i < args.size(); ++i){
                 if(args[i]->type != CV::QuantType::NUMBER){
                     cursor->setError(CV_ERROR_MSG_WRONG_TYPE, "Imperative '"+name+"' expects all operands to be numbers: operand "+std::to_string(i)+" is "+CV::QuantType::name(args[i]->type), token);
@@ -12,7 +12,7 @@ namespace CV {
             }            
             return true;
         }
-        inline bool ExpectsOperands(int prov, int exp, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor){
+        bool ExpectsOperands(int prov, int exp, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor){
             if(prov < exp){
                 cursor->setError(CV_ERROR_MSG_WRONG_TYPE, "Imperative '"+name+"' expects ("+std::to_string(exp)+") operands but provided("+std::to_string(prov)+")", token);
                 return false;
@@ -20,7 +20,7 @@ namespace CV {
             return true;
         }
 
-        inline bool ExpectsTypeAt(int type, int exp, int at, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor){
+        bool ExpectsTypeAt(int type, int exp, int at, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor){
             if(type < exp){
                 auto expTName = CV::QuantType::name(exp);
                 auto tName = CV::QuantType::name(type);
@@ -31,7 +31,7 @@ namespace CV {
             return true;
         }
 
-        inline bool ExpectsNoMoreOperands(int prov, int max, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor){
+        bool ExpectsNoMoreOperands(int prov, int max, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor){
             if(prov > max){
                 cursor->setError(CV_ERROR_MSG_WRONG_TYPE, "Imperative '"+name+"' expects no more than ("+std::to_string(max)+") operands but provided("+std::to_string(prov)+")", token);
                 return false;
@@ -39,14 +39,15 @@ namespace CV {
             return true;
         }        
 
-        inline bool ExpectsExactlyOperands(int prov, int exp, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor){
+        bool ExpectsExactlyOperands(int prov, int exp, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor){
             if(prov != exp){
                 cursor->setError(CV_ERROR_MSG_WRONG_TYPE, "Imperative '"+name+"' expects exactly ("+std::to_string(exp)+") operands but provided("+std::to_string(prov)+")", token);
                 return false;
             }   
             return true;
         }
-        inline bool ExpectNoPrefixer(const std::string &name, const std::vector<std::shared_ptr<CV::Instruction>> &args, const CV::TokenType &token, const CV::CursorType &cursor){
+        
+        bool ExpectNoPrefixer(const std::string &name, const std::vector<std::shared_ptr<CV::Instruction>> &args, const CV::TokenType &token, const CV::CursorType &cursor){
             for(int i = 0; i < args.size(); ++i){
                 if(args[i]->data.size() >= 2 && args[i]->data[0] == CV_INS_PREFIXER_IDENFIER_INSTRUCTION){
                     cursor->setError(CV_ERROR_MSG_ILLEGAL_PREFIXER, "Imperative '"+name+"' does not accept any prefixers: operand at "+std::to_string(i)+" is "+CV::Prefixer::name(args[i]->data[1])+"("+args[i]->token->str()+")", token);
@@ -1244,9 +1245,11 @@ static void __CV_CORE_LOOP_WHILE(
         
         // Code Branch
         if(args.size() > 1){
-            result = CV::Execute(args[1], deepExecCtx, prog, cursor);
-            if(cursor->error){
-                return;
+            for(int i = 1; i < args.size(); ++i ){
+                result = CV::Execute(args[i], deepExecCtx, prog, cursor);
+                if(cursor->error){
+                    return;
+                }
             }
         }
 
@@ -1337,9 +1340,11 @@ static void __CV_CORE_LOOP_FOR(
     auto to = std::static_pointer_cast<CV::TypeNumber>(toLimit);
     auto code = GetNonPrefixedIns(args);
     while(from->v != to->v){
+        auto deepExecCtx = prog->createContext(execCtx);
+
         // Run code
         for(int i = 0; i < code.size(); ++i){
-            auto toLimit = CV::Execute(code[i], execCtx, prog, cursor);
+            auto toLimit = CV::Execute(code[i], deepExecCtx, prog, cursor);
             if(cursor->error){
                 return;
             }    
@@ -1347,13 +1352,14 @@ static void __CV_CORE_LOOP_FOR(
         }
         // Run provided step or add one to 'to'
         if(stepPIns.get()){
-            auto toLimit = CV::Execute(stepPIns, execCtx, prog, cursor);
+            auto toLimit = CV::Execute(stepPIns, deepExecCtx, prog, cursor);
             if(cursor->error){
                 return;
             }
         }else{
             ++from->v;
         }
+        prog->deleteContext(deepExecCtx->id);
     }
     if(result.get() == NULL){
         result = dataCtx->buildNil();
@@ -1363,6 +1369,108 @@ static void __CV_CORE_LOOP_FOR(
 }
 
 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//  LIB
+// 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+static void __CV_CORE_LIB_BRING(
+    const std::vector<std::shared_ptr<CV::Instruction>> &args,
+    const std::string &name,
+    const CV::TokenType &token,
+    const CV::CursorType &cursor,
+    int execCtxId,
+    int ctxId,
+    int dataId,
+    const std::shared_ptr<CV::Program> &prog
+){
+    // Fetch context & data target
+    auto &dataCtx = prog->ctx[ctxId];
+    auto &execCtx = prog->ctx[execCtxId];
+
+    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
+        !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, token, cursor)){
+        return;
+    }
+
+    auto fnamev = CV::Execute(args[0], execCtx, prog, cursor);
+    if(cursor->error){
+        return;
+    }
+
+    if(!CV::ErrorCheck::ExpectsTypeAt(fnamev->type, CV::QuantType::STRING, 0, name, token, cursor)){
+        return;
+    }
+
+    auto fname = std::static_pointer_cast<CV::TypeString>(fnamev)->v;
+
+    int id = CV::Import(fname, prog, execCtx, cursor);
+
+    dataCtx->memory[dataId] = dataCtx->buildNumber(id == 1);
+}
+
+static void __CV_CORE_LIB_DYNAMIC_LIBRAY(
+    const std::vector<std::shared_ptr<CV::Instruction>> &args,
+    const std::string &name,
+    const CV::TokenType &token,
+    const CV::CursorType &cursor,
+    int execCtxId,
+    int ctxId,
+    int dataId,
+    const std::shared_ptr<CV::Program> &prog
+){
+    // Fetch context & data target
+    auto &dataCtx = prog->ctx[ctxId];
+    auto &execCtx = prog->ctx[execCtxId];
+
+    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
+        !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, token, cursor)){
+        return;
+    }
+
+    auto fnamev = CV::Execute(args[0], execCtx, prog, cursor);
+    if(cursor->error){
+        return;
+    }
+
+    if(!CV::ErrorCheck::ExpectsTypeAt(fnamev->type, CV::QuantType::STRING, 0, name, token, cursor)){
+        return;
+    }
+
+    auto fname = std::static_pointer_cast<CV::TypeString>(fnamev)->v;
+
+
+    std::string path = "./lib/" + fname;
+    switch(CV::PLATFORM){
+        case CV::SupportedPlatform::LINUX: {
+            path += ".so";
+        } break; 
+        case CV::SupportedPlatform::WINDOWS: {
+            path += ".dll";
+        } break;
+        case CV::SupportedPlatform::OSX: {
+            // TODO
+        } break;                
+        default:
+        case CV::SupportedPlatform::UNKNOWN: {
+            fprintf(stderr, "%s: Unable to load dyanmic library for this platform (UNKNOWN/UNDEFINED).", name.c_str());
+            std::exit(1);
+        } break;                        
+    }
+
+    if(!CV::Tools::fileExists(path)){
+        cursor->setError(CV_ERROR_MSG_LIBRARY_NOT_VALID, "No dynamic library '"+fname+"' was found", token);
+        return;
+    }
+
+    bool result = CV::ImportDynamicLibrary(path, fname, prog, execCtx, cursor);
+    if(cursor->error){
+        return;
+    }
+
+    dataCtx->memory[dataId] = dataCtx->buildNumber(result);
+}
 
 /*
 
@@ -1373,38 +1481,33 @@ static void __CV_CORE_LOOP_FOR(
 */
 void CVInitCore(const CV::ProgramType &prog){
 
-    /*
 
-        ARITHMETIC OPERATORS
-
-    */
     CV::UnwrapLibrary([](const CV::ProgramType &target){
+        /*
+
+            ARITHMETIC OPERATORS
+
+        */
         target->rootContext->registerBinaryFuntion("+", (void*)__CV_CORE_ARITHMETIC_ADDITION);
         target->rootContext->registerBinaryFuntion("*", (void*)__CV_CORE_ARITHMETIC_MULT);
         target->rootContext->registerBinaryFuntion("-", (void*)__CV_CORE_ARITHMETIC_SUB);
         target->rootContext->registerBinaryFuntion("/", (void*)__CV_CORE_ARITHMETIC_DIV);
-        return true;
-    }, prog);
 
-    /*
+        /*
 
-        BOOLEAN OPERATORS
+            BOOLEAN OPERATORS
 
-    */
-    CV::UnwrapLibrary([](const CV::ProgramType &target){
+        */
         target->rootContext->registerBinaryFuntion("&", (void*)__CV_CORE_BOOLEAN_AND);
         target->rootContext->registerBinaryFuntion("|", (void*)__CV_CORE_BOOLEAN_OR);
         target->rootContext->registerBinaryFuntion("!", (void*)__CV_CORE_BOOLEAN_NOT);
-        return true;
-    }, prog);   
     
     
-    /*
+        /*
 
-        CONDITIONAL OPERATORS
+            CONDITIONAL OPERATORS
 
-    */
-    CV::UnwrapLibrary([](const CV::ProgramType &target){
+        */
         target->rootContext->registerBinaryFuntion("=", (void*)__CV_CORE_CONDITIONAL_EQ);
         target->rootContext->registerBinaryFuntion("!=", (void*)__CV_CORE_CONDITIONAL_NEQ);
         target->rootContext->registerBinaryFuntion("if", (void*)__CV_CORE_CONDITIONAL_IF);
@@ -1412,48 +1515,77 @@ void CVInitCore(const CV::ProgramType &prog){
         target->rootContext->registerBinaryFuntion(">=", (void*)__CV_CORE_CONDITIONAL_MORE_OR_EQ);
         target->rootContext->registerBinaryFuntion("<", (void*)__CV_CORE_CONDITIONAL_LESS_THAN);
         target->rootContext->registerBinaryFuntion("<=", (void*)__CV_CORE_CONDITIONAL_LESS_OR_EQUAL);
-        return true;
-    }, prog);    
 
-    /*
+        /*
 
-        LIST TOOLS
+            LIST TOOLS
 
-    */
-    CV::UnwrapLibrary([](const CV::ProgramType &target){
+        */
         target->rootContext->registerBinaryFuntion("nth", (void*)__CV_CORE_LIST_NTH);
         target->rootContext->registerBinaryFuntion("len", (void*)__CV_CORE_LIST_LENGTH);
-        target->rootContext->registerBinaryFuntion(">>", (void*)__CV_CORE_LIST_PUSH);
-        target->rootContext->registerBinaryFuntion("<<", (void*)__CV_CORE_LIST_POP);
         target->rootContext->registerBinaryFuntion("splice", (void*)__CV_CORE_LIST_SPLICE);
         target->rootContext->registerBinaryFuntion("l-rev", (void*)__CV_CORE_LIST_RESERVE);
-        return true;
-    }, prog); 
 
-    /*
+        /*
 
-        MUTATORS
+            MUTATORS
 
-    */
-    CV::UnwrapLibrary([](const CV::ProgramType &target){
+        */
         target->rootContext->registerBinaryFuntion("++", (void*)__CV_CORE_MUT_PLUSPLUS);
         target->rootContext->registerBinaryFuntion("--", (void*)__CV_CORE_MUT_MINUSMINUS);
         target->rootContext->registerBinaryFuntion("//", (void*)__CV_CORE_MUT_SLASHSLASH);
         target->rootContext->registerBinaryFuntion("**", (void*)__CV_CORE_MUT_STARSTAR);
-        return true;
-    }, prog); 
+        target->rootContext->registerBinaryFuntion(">>", (void*)__CV_CORE_LIST_PUSH);
+        target->rootContext->registerBinaryFuntion("<<", (void*)__CV_CORE_LIST_POP);
 
+        /*
 
-    /*
+            LOOPS
 
-        LOOPS
-
-    */
-    CV::UnwrapLibrary([](const CV::ProgramType &target){
+        */
         target->rootContext->registerBinaryFuntion("while", (void*)__CV_CORE_LOOP_WHILE);
         target->rootContext->registerBinaryFuntion("for", (void*)__CV_CORE_LOOP_FOR);
+        
+        
+        /*
+
+            LIB
+
+        */
+        target->rootContext->registerBinaryFuntion("bring", (void*)__CV_CORE_LIB_BRING);
+        target->rootContext->registerBinaryFuntion("____cv_load_dynamic_library", (void*)__CV_CORE_LIB_DYNAMIC_LIBRAY);
+
         return true;
     }, prog); 
 
 }
 
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//  LIBRARY API
+// 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+int CV::Import(const std::string &fname, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor){
+    if(!CV::Tools::fileExists(fname)){
+        cursor->setError(CV_ERROR_MSG_LIBRARY_NOT_VALID, "'"+fname+"' does not exist");
+        return 0;
+    }
+    auto literal = CV::Tools::readFile(fname);
+    auto entrypoint = CV::Compile(literal, prog, cursor);
+    if(cursor->error){
+        std::cout << cursor->getRaised() << std::endl;
+        std::exit(1);
+    }
+    auto result = CV::Execute(entrypoint, ctx, prog, cursor);
+    if(cursor->error){
+        std::cout << cursor->getRaised() << std::endl;
+        std::exit(1);
+    }
+    return 1;
+}
+
+bool CV::Unimport(int id){
+    return true;
+}
