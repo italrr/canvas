@@ -8,6 +8,15 @@
 // LOCAL INCLUDES
 #include "CV.hpp"
 
+// DYNAMIC LIBRARY STUFF
+#if (_CV_PLATFORM == _CV_PLATFORM_TYPE_LINUX)
+    #include <dlfcn.h> 
+#elif  (_CV_PLATFORM == _CV_PLATFORM_TYPE_WINDOWS)
+    // should prob move the entire DLL loading routines to its own file
+    #include <libloaderapi.h>
+#endif
+
+
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //
 //  TOOLS
@@ -72,7 +81,8 @@ namespace CV {
 
         bool isReservedWord(const std::string &name){
             static const std::vector<std::string> reserved {
-                "let", "bring", "bring:dynamic-library", "~", ".", "|", "`", "cc", "mut", "fn"
+                "let", "bring", "bring:dynamic-library", "~", ".", "|", "`", "cc", "mut", "fn",
+                "return", "yield", "skip"
             };
             for(int i = 0; i < reserved.size(); ++i){
                 if(reserved[i] == name){
@@ -731,6 +741,41 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
         }
     }else{
         /*
+            SKIP / RETURN / YIELD
+        */
+        if(token->first == "skip" || token->first == "return" || token->first == "yield"){
+            if(token->inner.size() > 1){
+                cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "'"+token->first+"' expects no more than 1 operand ("+token->first+" VALUE)", token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
+
+            auto ins = prog->createInstruction(CV::InstructionType::CF_INTERRUPT, token);
+            
+            int type = CV::InterruptType::UNDEFINED;
+            if(token->first == "skip"){
+                type = CV::InterruptType::SKIP;
+            }else
+            if(token->first == "yield"){
+                type = CV::InterruptType::YIELD;
+            }else
+            if(token->first == "return"){
+                type = CV::InterruptType::RETURN;
+            }
+            ins->data.push_back(type);
+
+            if(token->inner.size() > 0){
+                ins->data.push_back(ctx->id);
+                auto target = CV::Translate(token->inner[0], prog, ctx, cursor);
+                if(cursor->error){
+                    cursor->subject = token;
+                    return prog->createInstruction(CV::InstructionType::NOOP, token);
+                }
+                ins->params.push_back(target->id);
+            }
+
+            return ins;
+        }else
+        /*
             BRING
         */
         if(token->first== "bring" || token->first == "bring:dynamic-library"){
@@ -796,7 +841,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                     return prog->createInstruction(CV::InstructionType::NOOP, token);
                 }
 
-                bool result = CV::ImportDynamicLibrary(path, fname, prog, ctx, cursor);
+                int id = CV::ImportDynamicLibrary(path, fname, prog, ctx, cursor);
 
             }
             if(cursor->error){
@@ -1439,6 +1484,33 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
         /*
             CONTROL FLOW        
         */
+        case CV::InstructionType::CF_INTERRUPT: {
+            switch(ins->data[0]){
+                case CV::InterruptType::YIELD: {
+                    st->state = CV::ControlFlowState::YIELD;
+                } break;
+                case CV::InterruptType::SKIP: {
+                    st->state = CV::ControlFlowState::SKIP;
+                } break;
+                case CV::InterruptType::RETURN: {
+                    st->state = CV::ControlFlowState::RETURN;
+                } break;
+                default: {
+                    st->state = CV::ControlFlowState::CRASH;
+                } break;
+            }
+            if(ins->params.size() > 0){
+                auto &payloadCtx = prog->ctx[ins->data[1]];
+                auto v = CV::Execute(prog->instructions[ins->params[0]], payloadCtx, prog, cursor);
+                if(cursor->error){
+                    st->state = CV::ControlFlowState::CRASH;
+                    return v;
+                }   
+                st->payload = v;
+                return v;
+            }
+            return ctx->buildNil();
+        };
         case CV::InstructionType::CF_INVOKE_FUNCTION: {
             auto fnCtxId = ins->data[0];
             auto fnId = ins->data[1];
@@ -1768,6 +1840,52 @@ bool CV::Unimport(int id){
     return true;
 }
 
+int CV::ImportDynamicLibrary(const std::string &path, const std::string &fname, const std::shared_ptr<CV::Program> &prog, const CV::ContextType &ctx, const CV::CursorType &cursor){
+    #if (_CV_PLATFORM == _CV_PLATFORM_TYPE_LINUX)
+        void (*registerlibrary )(const std::shared_ptr<CV::Stack> &stack);
+        void* handle = NULL;
+        const char* error = NULL;
+        handle = dlopen(path.c_str(), RTLD_LAZY);
+        if(!handle){
+            fprintf( stderr, "Failed to load dynamic library %s: %s\n", fname.c_str(), dlerror());
+            std::exit(1);
+        }
+        dlerror();
+        registerlibrary = (void (*)(const std::shared_ptr<CV::Stack> &stack)) dlsym( handle, "_CV_REGISTER_LIBRARY" );
+        error = dlerror();
+        if(error){
+            fprintf( stderr, "Failed to load dynamic library '_CV_REGISTER_LIBRARY' from '%s': %s\n", fname.c_str(), error);
+            dlclose(handle);
+            std::exit(1);
+        }
+        // Try to load
+        (*registerlibrary)(stack);
+        loadedLibraries.push_back(handle);
+        return true;
+    #elif  (_CV_PLATFORM == _CV_PLATFORM_TYPE_WINDOWS)
+        typedef void (*rlib)(const std::shared_ptr<CV::Program> &prog, const CV::ContextType &ctx, const CV::CursorType &cursor);
+
+        rlib entry;
+        HMODULE hdll;
+        // Load lib
+        hdll = LoadLibraryA(path.c_str());
+        if(hdll == NULL){
+            fprintf( stderr, "Failed to load dynamic library %s\n", fname.c_str());
+            std::exit(1);                
+        }
+        // Fetch register's address
+        entry = (rlib)GetProcAddress(hdll, "_CV_REGISTER_LIBRARY");
+        if(entry == NULL){
+            fprintf( stderr, "Failed to load dynamic library '_CV_REGISTER_LIBRARY' from '%s'\n", fname.c_str());
+            std::exit(1);      
+        }
+        entry(prog, ctx, cursor);
+        auto id = GEN_ID();
+        prog->loadedDynamicLibs[id] = hdll;
+        return id;
+    #endif
+}
+
 void CVInitCore(const CV::ProgramType &prog);
 
 int main(){
@@ -1778,7 +1896,7 @@ int main(){
     
     CVInitCore(program);
 
-    auto entrypoint = CV::Compile("[let t [fn [a][[+ 1 1][+ a a a]]]][t 1]", program, cursor);
+    auto entrypoint = CV::Compile("print 'hello world'", program, cursor);
     if(cursor->error){
         std::cout << cursor->getRaised() << std::endl;
         std::exit(1);

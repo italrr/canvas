@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <cmath>
 #include "CV.hpp"
 
@@ -64,7 +65,6 @@ namespace CV {
 //  ARITHMETIC
 // 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-#include <iostream>
 static void __CV_CORE_ARITHMETIC_ADDITION(
     const std::vector<std::shared_ptr<CV::Instruction>> &args,
     const std::string &name,
@@ -1448,7 +1448,52 @@ static void __CV_CORE_LOOP_FOR(
 
 
 */
+
+static void __CV_CORE_PRINT(
+    const std::vector<std::shared_ptr<CV::Instruction>> &args,
+    const std::string &name,
+    const CV::TokenType &token,
+    const CV::CursorType &cursor,
+    int execCtxId,
+    int ctxId,
+    int dataId,
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
+){
+    // Fetch context & data target
+    auto &dataCtx = prog->ctx[ctxId];
+    auto &execCtx = prog->ctx[execCtxId];
+
+    if(!CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor)){
+        return;
+    }
+
+    std::string v;
+
+    for(int i = 0; i < args.size(); ++i){
+        auto arg = CV::Execute(args[i], execCtx, prog, cursor, st);
+        if(cursor->error){
+            return;
+        }    
+        if(arg->type == CV::QuantType::STRING){
+            v += std::static_pointer_cast<CV::TypeString>(arg)->v;
+        }else{
+            v += CV::QuantToText(arg);
+        }
+    }
+
+    printf("%s\n", v.c_str());
+
+    // Fulfill promise in context
+    dataCtx->memory[dataId] = dataCtx->buildNil();
+}
+
+
 void CVInitCore(const CV::ProgramType &target){
+    /*
+        PRINT
+    */
+    target->rootContext->registerBinaryFuntion("print", (void*)__CV_CORE_PRINT);
 
     /*
 

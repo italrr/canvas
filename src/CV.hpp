@@ -2,6 +2,7 @@
     #define CANVAS_HPP
 
     #include <vector>
+    #include <cctype>
     #include <unordered_map>
     #include <memory>
     #include <string>
@@ -322,9 +323,7 @@
                 CONSTRUCT_STORE,
 
                 // CONTROL FLOW
-                CF_INT_YIELD = CV_INS_RANGE_TYPE_CONTROL_FLOW,
-                CF_INT_SKIP,
-                CF_INT_RETURN,
+                CF_INTERRUPT = CV_INS_RANGE_TYPE_CONTROL_FLOW,
                 CF_LOOP_DO,
                 CF_LOOP_FOR,
                 CF_LOOP_ITER,            
@@ -340,6 +339,44 @@
             };
         }
 
+        namespace InterruptType {
+            enum InterruptType : int {
+                UNDEFINED = 0,
+                RETURN = 10,
+                YIELD,
+                SKIP
+            };
+            static std::string name(int t){
+                switch(t){
+                    case CV::InterruptType::RETURN: {
+                        return "RETURN";
+                    };
+                    case CV::InterruptType::YIELD: {
+                        return "YIELD";
+                    };
+                    case CV::InterruptType::SKIP: {
+                        return "SKIP";
+                    };
+                    default: {
+                        return "UNDEFINED";
+                    };
+
+                }
+            }
+            static int type(const std::string &name){
+                if(name == "YIELD"){
+                    return CV::InterruptType::YIELD;
+                }else
+                if(name == "RETURN"){
+                    return CV::InterruptType::RETURN;
+                }else
+                if(name == "SKIP"){
+                    return CV::InterruptType::SKIP;
+                }else{
+                    return CV::InterruptType::UNDEFINED;
+                }
+            }
+        }
 
         namespace ControlFlowState {
             enum ControlFlowState : int {
@@ -391,6 +428,7 @@
         struct Program {
             unsigned entrypointIns;
             std::shared_ptr<Context> rootContext;
+            std::unordered_map<unsigned, void*> loadedDynamicLibs;
             std::unordered_map<unsigned, std::shared_ptr<CV::Context>> ctx; 
             std::unordered_map<unsigned, std::shared_ptr<CV::Instruction>> instructions;
             std::shared_ptr<CV::Instruction> createInstruction(unsigned type, const std::shared_ptr<CV::Token> &token);
@@ -451,7 +489,7 @@
         //// API
         ///////////////////////////
 
-        bool ImportDynamicLibrary(const std::string &path, const std::string &fname, const std::shared_ptr<CV::Program> &prog, const CV::ContextType &ctx, const CV::CursorType &cursor);
+        int ImportDynamicLibrary(const std::string &path, const std::string &fname, const std::shared_ptr<CV::Program> &prog, const CV::ContextType &ctx, const CV::CursorType &cursor);
         int Import(const std::string &name, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor);
         bool Unimport(int id);
         bool GetBooleanValue(const std::shared_ptr<CV::Quant> &data);

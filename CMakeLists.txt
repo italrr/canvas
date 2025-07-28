@@ -19,7 +19,6 @@ endmacro()
 
 set (cv_src 
             src/CV.cpp
-            src/Library.cpp
             src/Core.cpp)
 
 if(UNIX AND NOT APPLE)
@@ -44,7 +43,7 @@ target_link_libraries(cv cv_bin)
 # -------------------------------------------------------------------------- #
 
 # bitmap
-add_library(io SHARED src/libs/io.cpp src/CV.cpp src/Core.cpp src/Library.cpp)
+add_library(io SHARED src/libs/io.cpp src/CV.cpp src/Core.cpp)
 mvLib(io)
 # # time
 # add_library(tm SHARED src/libs/time.cpp src/CV.cpp src/Tools.cpp)
