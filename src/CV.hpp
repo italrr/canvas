@@ -33,7 +33,7 @@
     #define _CV_PLATFORM_TYPE_OSX 2
     #define _CV_PLATFORM_TYPE_UNDEFINED 4
 
-    #define CV_BINARY_FN_PARAMS const std::vector<std::shared_ptr<CV::Instruction>> &, const std::string&, const CV::TokenType &, const CV::CursorType &, int, int, int, const std::shared_ptr<CV::Program> &
+    #define CV_BINARY_FN_PARAMS const std::vector<std::shared_ptr<CV::Instruction>> &, const std::string&, const CV::TokenType &, const CV::CursorType &, int, int, int, const std::shared_ptr<CV::Program> &, const CV::CFType &
 
     namespace CV {
 
@@ -309,8 +309,11 @@
 
         namespace InstructionType {
             enum InstructionType : int {
+                
                 INVALID = 0,
                 NOOP = 10,
+                LIBRAY_IMPORT,
+                
                 // CONSTRUCTORS
                 LET = CV_INS_RANGE_TYPE_CONSTRUCTORS,
                 MUT,
@@ -330,10 +333,10 @@
                 CF_RAW_TOKEN_REFERENCE,
 
                 // PROXIES
-                STATIC_PROXY = CV_INS_RANGE_TYPE_PROXY,     // DATA[0] -> CTX_ID, DATA[1] -> DATA_ID
-                PROMISE_PROXY,                              // DATA[0] -> CTX_ID, DATA[1] -> PROMISED_DATA_ID |  PARAM[0] -> TARGET_INS, 
-                DYNAMIC_PROXY,                              // DATA[0] -> CTX_ID, DATA[1] -> DATA_ID, DATA[n] -> ...LITERAL, OPTIONAL: PARAM[0] -> preprocess
-                POSITIONAL_PROXY,                           // PARAM[0] -> TARGET_INS | LITERAL[0] -> NAME                            
+                PROXY_STATIC = CV_INS_RANGE_TYPE_PROXY,     // DATA[0] -> CTX_ID, DATA[1] -> DATA_ID
+                PROXY_PROMISE,                              // DATA[0] -> CTX_ID, DATA[1] -> PROMISED_DATA_ID |  PARAM[0] -> TARGET_INS, 
+                PROXY_DYNAMIC,                              // DATA[0] -> CTX_ID, DATA[1] -> DATA_ID, DATA[n] -> ...LITERAL, OPTIONAL: PARAM[0] -> preprocess
+                PROXY_POSITIONAL,                           // PARAM[0] -> TARGET_INS | LITERAL[0] -> NAME                            
             };
         }
 
@@ -452,9 +455,8 @@
         int Import(const std::string &name, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor);
         bool Unimport(int id);
         bool GetBooleanValue(const std::shared_ptr<CV::Quant> &data);
-        bool UnwrapLibrary(const std::function<bool(const CV::ProgramType &target)> &fn, const CV::ProgramType &target);
         std::string QuantToText(const std::shared_ptr<CV::Quant> &t);
-        std::shared_ptr<CV::Quant> Execute(const CV::InsType &entry, const CV::ContextType &ctx, const CV::ProgramType &prog, const CV::CursorType &cursor);
+        std::shared_ptr<CV::Quant> Execute(const CV::InsType &entry, const CV::ContextType &ctx, const CV::ProgramType &prog, const CV::CursorType &cursor, CFType cf = CFType(NULL));
         CV::InsType Compile(const std::string &input, const CV::ProgramType &prog, const CV::CursorType &cursor);
         CV::InsType Compile(const CV::TokenType &input, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor);
         CV::InsType Translate(const CV::TokenType &token, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor);

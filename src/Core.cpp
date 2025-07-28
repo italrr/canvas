@@ -73,7 +73,8 @@ static void __CV_CORE_ARITHMETIC_ADDITION(
     int execCtxId,
     int ctxId,
     int dataId,
-    const std::shared_ptr<CV::Program> &prog
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
 ){
     // Fetch context & data target
     auto &dataCtx = prog->ctx[ctxId];
@@ -111,7 +112,8 @@ static void __CV_CORE_ARITHMETIC_SUB(
     int execCtxId,
     int ctxId,
     int dataId,
-    const std::shared_ptr<CV::Program> &prog
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
 ){
     // Fetch context & data target
     auto &dataCtx = prog->ctx[ctxId];
@@ -157,7 +159,8 @@ static void __CV_CORE_ARITHMETIC_MULT(
     int execCtxId,
     int ctxId,
     int dataId,
-    const std::shared_ptr<CV::Program> &prog
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
 ){
     // Fetch context & data target
     auto &dataCtx = prog->ctx[ctxId];
@@ -195,7 +198,8 @@ static void __CV_CORE_ARITHMETIC_DIV(
     int execCtxId,
     int ctxId,
     int dataId,
-    const std::shared_ptr<CV::Program> &prog
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
 ){
     // Fetch context & data target
     auto &dataCtx = prog->ctx[ctxId];
@@ -247,7 +251,8 @@ static void __CV_CORE_BOOLEAN_AND(
     int execCtxId,
     int ctxId,
     int dataId,
-    const std::shared_ptr<CV::Program> &prog
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
 ){
     // Fetch context & data target
     auto &dataCtx = prog->ctx[ctxId];
@@ -286,7 +291,8 @@ static void __CV_CORE_BOOLEAN_OR(
     int execCtxId,
     int ctxId,
     int dataId,
-    const std::shared_ptr<CV::Program> &prog
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
 ){
     // Fetch context & data target
     auto &dataCtx = prog->ctx[ctxId];
@@ -325,7 +331,8 @@ static void __CV_CORE_BOOLEAN_NOT(
     int execCtxId,
     int ctxId,
     int dataId,
-    const std::shared_ptr<CV::Program> &prog
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
 ){
     // Fetch context & data target
     auto &dataCtx = prog->ctx[ctxId];
@@ -367,7 +374,8 @@ static void __CV_CORE_CONDITIONAL_EQ(
     int execCtxId,
     int ctxId,
     int dataId,
-    const std::shared_ptr<CV::Program> &prog
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
 ){
     // Fetch context & data target
     auto &dataCtx = prog->ctx[ctxId];
@@ -429,7 +437,8 @@ static void __CV_CORE_CONDITIONAL_NEQ(
     int execCtxId,
     int ctxId,
     int dataId,
-    const std::shared_ptr<CV::Program> &prog
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
 ){
     // Fetch context & data target
     auto &dataCtx = prog->ctx[ctxId];
@@ -493,7 +502,8 @@ static void __CV_CORE_CONDITIONAL_IF(
     int execCtxId,
     int ctxId,
     int dataId,
-    const std::shared_ptr<CV::Program> &prog
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
 ){
     // Fetch context & data target
     auto &dataCtx = prog->ctx[ctxId];
@@ -550,7 +560,8 @@ static void __CV_CORE_CONDITIONAL_MORE_THAN(
     int execCtxId,
     int ctxId,
     int dataId,
-    const std::shared_ptr<CV::Program> &prog
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
 ){
     // Fetch context & data target
     auto &dataCtx = prog->ctx[ctxId];
@@ -612,7 +623,8 @@ static void __CV_CORE_CONDITIONAL_MORE_OR_EQ(
     int execCtxId,
     int ctxId,
     int dataId,
-    const std::shared_ptr<CV::Program> &prog
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
 ){
     // Fetch context & data target
     auto &dataCtx = prog->ctx[ctxId];
@@ -675,7 +687,8 @@ static void __CV_CORE_CONDITIONAL_LESS_THAN(
     int execCtxId,
     int ctxId,
     int dataId,
-    const std::shared_ptr<CV::Program> &prog
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
 ){
     // Fetch context & data target
     auto &dataCtx = prog->ctx[ctxId];
@@ -737,7 +750,8 @@ static void __CV_CORE_CONDITIONAL_LESS_OR_EQUAL(
     int execCtxId,
     int ctxId,
     int dataId,
-    const std::shared_ptr<CV::Program> &prog
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
 ){
     // Fetch context & data target
     auto &dataCtx = prog->ctx[ctxId];
@@ -806,7 +820,8 @@ static void __CV_CORE_LIST_NTH(
     int execCtxId,
     int ctxId,
     int dataId,
-    const std::shared_ptr<CV::Program> &prog
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
 ){
     // Fetch context & data target
     auto &dataCtx = prog->ctx[ctxId];
@@ -862,7 +877,8 @@ static void __CV_CORE_LIST_LENGTH(
     int execCtxId,
     int ctxId,
     int dataId,
-    const std::shared_ptr<CV::Program> &prog
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
 ){
     // Fetch context & data target
     auto &dataCtx = prog->ctx[ctxId];
@@ -899,7 +915,8 @@ static void __CV_CORE_LIST_PUSH(
     int execCtxId,
     int ctxId,
     int dataId,
-    const std::shared_ptr<CV::Program> &prog
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
 ){
     // Fetch context & data target
     auto &dataCtx = prog->ctx[ctxId];
@@ -942,7 +959,8 @@ static void __CV_CORE_LIST_POP(
     int execCtxId,
     int ctxId,
     int dataId,
-    const std::shared_ptr<CV::Program> &prog
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
 ){
     // Fetch context & data target
     auto &dataCtx = prog->ctx[ctxId];
@@ -984,7 +1002,8 @@ static void __CV_CORE_LIST_SPLICE(
     int execCtxId,
     int ctxId,
     int dataId,
-    const std::shared_ptr<CV::Program> &prog
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
 ){
     // Fetch context & data target
     auto &dataCtx = prog->ctx[ctxId];
@@ -1025,7 +1044,8 @@ static void __CV_CORE_LIST_RESERVE(
     int execCtxId,
     int ctxId,
     int dataId,
-    const std::shared_ptr<CV::Program> &prog
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
 ){
     // Fetch context & data target
     auto &dataCtx = prog->ctx[ctxId];
@@ -1068,7 +1088,8 @@ static void __CV_CORE_MUT_PLUSPLUS(
     int execCtxId,
     int ctxId,
     int dataId,
-    const std::shared_ptr<CV::Program> &prog
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
 ){
     // Fetch context & data target
     auto &dataCtx = prog->ctx[ctxId];
@@ -1103,7 +1124,8 @@ static void __CV_CORE_MUT_MINUSMINUS(
     int execCtxId,
     int ctxId,
     int dataId,
-    const std::shared_ptr<CV::Program> &prog
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
 ){
     // Fetch context & data target
     auto &dataCtx = prog->ctx[ctxId];
@@ -1139,7 +1161,8 @@ static void __CV_CORE_MUT_SLASHSLASH(
     int execCtxId,
     int ctxId,
     int dataId,
-    const std::shared_ptr<CV::Program> &prog
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
 ){
     // Fetch context & data target
     auto &dataCtx = prog->ctx[ctxId];
@@ -1174,7 +1197,8 @@ static void __CV_CORE_MUT_STARSTAR(
     int execCtxId,
     int ctxId,
     int dataId,
-    const std::shared_ptr<CV::Program> &prog
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
 ){
     // Fetch context & data target
     auto &dataCtx = prog->ctx[ctxId];
@@ -1205,7 +1229,7 @@ static void __CV_CORE_MUT_STARSTAR(
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //
 //  LOOPS
-// 
+//
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 static void __CV_CORE_LOOP_WHILE(
@@ -1216,7 +1240,8 @@ static void __CV_CORE_LOOP_WHILE(
     int execCtxId,
     int ctxId,
     int dataId,
-    const std::shared_ptr<CV::Program> &prog
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
 ){
     // Fetch context & data target
     auto &dataCtx = prog->ctx[ctxId];
@@ -1229,11 +1254,14 @@ static void __CV_CORE_LOOP_WHILE(
 
     std::shared_ptr<CV::Quant> result = NULL;
 
+    auto cf = std::make_shared<CV::ControlFlow>();
+    cf->ctx = CV::ControlFlowState::CONTINUE;
+
     while(true) {
         auto deepExecCtx = prog->createContext(execCtx);
 
         // Conditional Branch
-        auto condBranch = CV::Execute(args[0], deepExecCtx, prog, cursor);
+        auto condBranch = CV::Execute(args[0], deepExecCtx, prog, cursor, cf);
         if(cursor->error){
             return;
         }
@@ -1252,8 +1280,27 @@ static void __CV_CORE_LOOP_WHILE(
                 }
             }
         }
-
+    
         prog->deleteContext(deepExecCtx->id);
+
+        // RETURN breaks flow upwards
+        if(cf->state == CV::ControlFlowState::RETURN){
+            st->state = CV::ControlFlowState::RETURN;
+            st->payload = cf->payload;
+            result = cf->payload;
+            break;
+        }
+        // SKIP skips every other branch afterwards
+        if(cf->state == CV::ControlFlowState::SKIP){
+            cf->state = CV::ControlFlowState::CONTINUE;
+            continue;
+        }
+        // YIELD breaks flow
+        if(cf->state == CV::ControlFlowState::YIELD){
+            st->payload = cf->payload;
+            result = cf->payload;
+            break;
+        }
     }
 
     if(result.get() == NULL){
@@ -1293,7 +1340,8 @@ static void __CV_CORE_LOOP_FOR(
     int execCtxId,
     int ctxId,
     int dataId,
-    const std::shared_ptr<CV::Program> &prog
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
 ){
     // Fetch context & data target
     auto &dataCtx = prog->ctx[ctxId];
@@ -1339,25 +1387,50 @@ static void __CV_CORE_LOOP_FOR(
     auto from = std::static_pointer_cast<CV::TypeNumber>(fromIndex);
     auto to = std::static_pointer_cast<CV::TypeNumber>(toLimit);
     auto code = GetNonPrefixedIns(args);
-    while(from->v != to->v){
+    auto cf = std::make_shared<CV::ControlFlow>();
+    bool running = true;
+    cf->ctx = CV::ControlFlowState::CONTINUE;
+    while(running && from->v != to->v){
         auto deepExecCtx = prog->createContext(execCtx);
 
         // Run code
         for(int i = 0; i < code.size(); ++i){
-            auto toLimit = CV::Execute(code[i], deepExecCtx, prog, cursor);
+            auto toLimit = CV::Execute(code[i], deepExecCtx, prog, cursor, cf);
             if(cursor->error){
                 return;
             }    
             result = toLimit;
+            // RETURN breaks flow upwards
+            if(cf->state == CV::ControlFlowState::RETURN){
+                st->state = CV::ControlFlowState::RETURN;
+                st->payload = cf->payload;
+                running = false;
+                result = cf->payload;
+                break;
+            }
+            // SKIP skips every other branch afterwards
+            if(cf->state == CV::ControlFlowState::SKIP){
+                cf->state = CV::ControlFlowState::CONTINUE;
+                break;
+            }
+            // YIELD breaks flow
+            if(cf->state == CV::ControlFlowState::YIELD){
+                running = false;
+                st->payload = cf->payload;
+                result = cf->payload;
+                break;
+            }
         }
         // Run provided step or add one to 'to'
-        if(stepPIns.get()){
-            auto toLimit = CV::Execute(stepPIns, deepExecCtx, prog, cursor);
-            if(cursor->error){
-                return;
+        if(running){
+            if(stepPIns.get()){
+                auto toLimit = CV::Execute(stepPIns, deepExecCtx, prog, cursor, cf);
+                if(cursor->error){
+                    return;
+                }
+            }else{
+                ++from->v;
             }
-        }else{
-            ++from->v;
         }
         prog->deleteContext(deepExecCtx->id);
     }
@@ -1368,110 +1441,6 @@ static void __CV_CORE_LOOP_FOR(
     dataCtx->memory[dataId] = result;
 }
 
-
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//
-//  LIB
-// 
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-static void __CV_CORE_LIB_BRING(
-    const std::vector<std::shared_ptr<CV::Instruction>> &args,
-    const std::string &name,
-    const CV::TokenType &token,
-    const CV::CursorType &cursor,
-    int execCtxId,
-    int ctxId,
-    int dataId,
-    const std::shared_ptr<CV::Program> &prog
-){
-    // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
-
-    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
-        !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, token, cursor)){
-        return;
-    }
-
-    auto fnamev = CV::Execute(args[0], execCtx, prog, cursor);
-    if(cursor->error){
-        return;
-    }
-
-    if(!CV::ErrorCheck::ExpectsTypeAt(fnamev->type, CV::QuantType::STRING, 0, name, token, cursor)){
-        return;
-    }
-
-    auto fname = std::static_pointer_cast<CV::TypeString>(fnamev)->v;
-
-    int id = CV::Import(fname, prog, execCtx, cursor);
-
-    dataCtx->memory[dataId] = dataCtx->buildNumber(id == 1);
-}
-
-static void __CV_CORE_LIB_DYNAMIC_LIBRAY(
-    const std::vector<std::shared_ptr<CV::Instruction>> &args,
-    const std::string &name,
-    const CV::TokenType &token,
-    const CV::CursorType &cursor,
-    int execCtxId,
-    int ctxId,
-    int dataId,
-    const std::shared_ptr<CV::Program> &prog
-){
-    // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
-
-    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
-        !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, token, cursor)){
-        return;
-    }
-
-    auto fnamev = CV::Execute(args[0], execCtx, prog, cursor);
-    if(cursor->error){
-        return;
-    }
-
-    if(!CV::ErrorCheck::ExpectsTypeAt(fnamev->type, CV::QuantType::STRING, 0, name, token, cursor)){
-        return;
-    }
-
-    auto fname = std::static_pointer_cast<CV::TypeString>(fnamev)->v;
-
-
-    std::string path = "./lib/" + fname;
-    switch(CV::PLATFORM){
-        case CV::SupportedPlatform::LINUX: {
-            path += ".so";
-        } break; 
-        case CV::SupportedPlatform::WINDOWS: {
-            path += ".dll";
-        } break;
-        case CV::SupportedPlatform::OSX: {
-            // TODO
-        } break;                
-        default:
-        case CV::SupportedPlatform::UNKNOWN: {
-            fprintf(stderr, "%s: Unable to load dyanmic library for this platform (UNKNOWN/UNDEFINED).", name.c_str());
-            std::exit(1);
-        } break;                        
-    }
-
-    if(!CV::Tools::fileExists(path)){
-        cursor->setError(CV_ERROR_MSG_LIBRARY_NOT_VALID, "No dynamic library '"+fname+"' was found", token);
-        return;
-    }
-
-    bool result = CV::ImportDynamicLibrary(path, fname, prog, execCtx, cursor);
-    if(cursor->error){
-        return;
-    }
-
-    dataCtx->memory[dataId] = dataCtx->buildNumber(result);
-}
-
 /*
 
 
@@ -1479,113 +1448,69 @@ static void __CV_CORE_LIB_DYNAMIC_LIBRAY(
 
 
 */
-void CVInitCore(const CV::ProgramType &prog){
+void CVInitCore(const CV::ProgramType &target){
+
+    /*
+
+        ARITHMETIC OPERATORS
+
+    */
+    target->rootContext->registerBinaryFuntion("+", (void*)__CV_CORE_ARITHMETIC_ADDITION);
+    target->rootContext->registerBinaryFuntion("*", (void*)__CV_CORE_ARITHMETIC_MULT);
+    target->rootContext->registerBinaryFuntion("-", (void*)__CV_CORE_ARITHMETIC_SUB);
+    target->rootContext->registerBinaryFuntion("/", (void*)__CV_CORE_ARITHMETIC_DIV);
+
+    /*
+
+        BOOLEAN OPERATORS
+
+    */
+    target->rootContext->registerBinaryFuntion("&", (void*)__CV_CORE_BOOLEAN_AND);
+    target->rootContext->registerBinaryFuntion("|", (void*)__CV_CORE_BOOLEAN_OR);
+    target->rootContext->registerBinaryFuntion("!", (void*)__CV_CORE_BOOLEAN_NOT);
 
 
-    CV::UnwrapLibrary([](const CV::ProgramType &target){
-        /*
+    /*
 
-            ARITHMETIC OPERATORS
+        CONDITIONAL OPERATORS
 
-        */
-        target->rootContext->registerBinaryFuntion("+", (void*)__CV_CORE_ARITHMETIC_ADDITION);
-        target->rootContext->registerBinaryFuntion("*", (void*)__CV_CORE_ARITHMETIC_MULT);
-        target->rootContext->registerBinaryFuntion("-", (void*)__CV_CORE_ARITHMETIC_SUB);
-        target->rootContext->registerBinaryFuntion("/", (void*)__CV_CORE_ARITHMETIC_DIV);
+    */
+    target->rootContext->registerBinaryFuntion("=", (void*)__CV_CORE_CONDITIONAL_EQ);
+    target->rootContext->registerBinaryFuntion("!=", (void*)__CV_CORE_CONDITIONAL_NEQ);
+    target->rootContext->registerBinaryFuntion("if", (void*)__CV_CORE_CONDITIONAL_IF);
+    target->rootContext->registerBinaryFuntion(">", (void*)__CV_CORE_CONDITIONAL_MORE_THAN);
+    target->rootContext->registerBinaryFuntion(">=", (void*)__CV_CORE_CONDITIONAL_MORE_OR_EQ);
+    target->rootContext->registerBinaryFuntion("<", (void*)__CV_CORE_CONDITIONAL_LESS_THAN);
+    target->rootContext->registerBinaryFuntion("<=", (void*)__CV_CORE_CONDITIONAL_LESS_OR_EQUAL);
 
-        /*
+    /*
 
-            BOOLEAN OPERATORS
+        LIST TOOLS
 
-        */
-        target->rootContext->registerBinaryFuntion("&", (void*)__CV_CORE_BOOLEAN_AND);
-        target->rootContext->registerBinaryFuntion("|", (void*)__CV_CORE_BOOLEAN_OR);
-        target->rootContext->registerBinaryFuntion("!", (void*)__CV_CORE_BOOLEAN_NOT);
-    
-    
-        /*
+    */
+    target->rootContext->registerBinaryFuntion("nth", (void*)__CV_CORE_LIST_NTH);
+    target->rootContext->registerBinaryFuntion("len", (void*)__CV_CORE_LIST_LENGTH);
+    target->rootContext->registerBinaryFuntion("splice", (void*)__CV_CORE_LIST_SPLICE);
+    target->rootContext->registerBinaryFuntion("l-rev", (void*)__CV_CORE_LIST_RESERVE);
 
-            CONDITIONAL OPERATORS
+    /*
 
-        */
-        target->rootContext->registerBinaryFuntion("=", (void*)__CV_CORE_CONDITIONAL_EQ);
-        target->rootContext->registerBinaryFuntion("!=", (void*)__CV_CORE_CONDITIONAL_NEQ);
-        target->rootContext->registerBinaryFuntion("if", (void*)__CV_CORE_CONDITIONAL_IF);
-        target->rootContext->registerBinaryFuntion(">", (void*)__CV_CORE_CONDITIONAL_MORE_THAN);
-        target->rootContext->registerBinaryFuntion(">=", (void*)__CV_CORE_CONDITIONAL_MORE_OR_EQ);
-        target->rootContext->registerBinaryFuntion("<", (void*)__CV_CORE_CONDITIONAL_LESS_THAN);
-        target->rootContext->registerBinaryFuntion("<=", (void*)__CV_CORE_CONDITIONAL_LESS_OR_EQUAL);
+        MUTATORS
 
-        /*
+    */
+    target->rootContext->registerBinaryFuntion("++", (void*)__CV_CORE_MUT_PLUSPLUS);
+    target->rootContext->registerBinaryFuntion("--", (void*)__CV_CORE_MUT_MINUSMINUS);
+    target->rootContext->registerBinaryFuntion("//", (void*)__CV_CORE_MUT_SLASHSLASH);
+    target->rootContext->registerBinaryFuntion("**", (void*)__CV_CORE_MUT_STARSTAR);
+    target->rootContext->registerBinaryFuntion(">>", (void*)__CV_CORE_LIST_PUSH);
+    target->rootContext->registerBinaryFuntion("<<", (void*)__CV_CORE_LIST_POP);
 
-            LIST TOOLS
+    /*
 
-        */
-        target->rootContext->registerBinaryFuntion("nth", (void*)__CV_CORE_LIST_NTH);
-        target->rootContext->registerBinaryFuntion("len", (void*)__CV_CORE_LIST_LENGTH);
-        target->rootContext->registerBinaryFuntion("splice", (void*)__CV_CORE_LIST_SPLICE);
-        target->rootContext->registerBinaryFuntion("l-rev", (void*)__CV_CORE_LIST_RESERVE);
+        LOOPS
 
-        /*
+    */
+    target->rootContext->registerBinaryFuntion("while", (void*)__CV_CORE_LOOP_WHILE);
+    target->rootContext->registerBinaryFuntion("for", (void*)__CV_CORE_LOOP_FOR);
 
-            MUTATORS
-
-        */
-        target->rootContext->registerBinaryFuntion("++", (void*)__CV_CORE_MUT_PLUSPLUS);
-        target->rootContext->registerBinaryFuntion("--", (void*)__CV_CORE_MUT_MINUSMINUS);
-        target->rootContext->registerBinaryFuntion("//", (void*)__CV_CORE_MUT_SLASHSLASH);
-        target->rootContext->registerBinaryFuntion("**", (void*)__CV_CORE_MUT_STARSTAR);
-        target->rootContext->registerBinaryFuntion(">>", (void*)__CV_CORE_LIST_PUSH);
-        target->rootContext->registerBinaryFuntion("<<", (void*)__CV_CORE_LIST_POP);
-
-        /*
-
-            LOOPS
-
-        */
-        target->rootContext->registerBinaryFuntion("while", (void*)__CV_CORE_LOOP_WHILE);
-        target->rootContext->registerBinaryFuntion("for", (void*)__CV_CORE_LOOP_FOR);
-        
-        
-        /*
-
-            LIB
-
-        */
-        target->rootContext->registerBinaryFuntion("bring", (void*)__CV_CORE_LIB_BRING);
-        target->rootContext->registerBinaryFuntion("____cv_load_dynamic_library", (void*)__CV_CORE_LIB_DYNAMIC_LIBRAY);
-
-        return true;
-    }, prog); 
-
-}
-
-
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//
-//  LIBRARY API
-// 
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-int CV::Import(const std::string &fname, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor){
-    if(!CV::Tools::fileExists(fname)){
-        cursor->setError(CV_ERROR_MSG_LIBRARY_NOT_VALID, "'"+fname+"' does not exist");
-        return 0;
-    }
-    auto literal = CV::Tools::readFile(fname);
-    auto entrypoint = CV::Compile(literal, prog, cursor);
-    if(cursor->error){
-        std::cout << cursor->getRaised() << std::endl;
-        std::exit(1);
-    }
-    auto result = CV::Execute(entrypoint, ctx, prog, cursor);
-    if(cursor->error){
-        std::cout << cursor->getRaised() << std::endl;
-        std::exit(1);
-    }
-    return 1;
-}
-
-bool CV::Unimport(int id){
-    return true;
 }

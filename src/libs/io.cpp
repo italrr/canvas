@@ -23,7 +23,8 @@ static void __CV_STD_IO_OUT(
     int execCtxId,
     int ctxId,
     int dataId,
-    const std::shared_ptr<CV::Program> &prog
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
 ){
     // Fetch context & data target
     auto &dataCtx = prog->ctx[ctxId];
@@ -33,7 +34,7 @@ static void __CV_STD_IO_OUT(
         !CV::ErrorCheck::ExpectsOperands(args.size(), 1, name, token, cursor)){
         return;
     }
-
+    
     std::string out = "";
     for(int i = 0; i < args.size(); ++i){
         auto quant = CV::Execute(args[i], execCtx, prog, cursor);
@@ -60,7 +61,8 @@ static void __CV_STD_IO_ERR(
     int execCtxId,
     int ctxId,
     int dataId,
-    const std::shared_ptr<CV::Program> &prog
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
 ){
     // Fetch context & data target
     auto &dataCtx = prog->ctx[ctxId];
@@ -97,7 +99,8 @@ static void __CV_STD_IO_IN(
     int execCtxId,
     int ctxId,
     int dataId,
-    const std::shared_ptr<CV::Program> &prog
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
 ){
     // Fetch context & data target
     auto &dataCtx = prog->ctx[ctxId];
@@ -113,7 +116,8 @@ static void __CV_STD_IO_IN(
     dataCtx->memory[dataId] = dataCtx->buildString(input);
 }
 
-extern "C" void _CV_REGISTER_LIBRARY(const std::shared_ptr<CV::Program> &prog, const CV::ContextType &ctx, const CV::CursorType &cursor){
+extern "C" void _CV_REGISTER_LIBRARY(const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st, const CV::ContextType &ctx, const CV::CursorType &cursor){
     ctx->registerBinaryFuntion("io:out", (void*)__CV_STD_IO_OUT);
     ctx->registerBinaryFuntion("io:err", (void*)__CV_STD_IO_ERR);
     ctx->registerBinaryFuntion("io:in", (void*)__CV_STD_IO_IN);
