@@ -184,6 +184,28 @@ namespace CV {
             }
             return r;
         }
+        
+        std::string cleanSpecialCharacters(const std::string &v){
+            std::string result;
+            for(int i = 0; i < v.size(); ++i){
+                auto c = v[i];
+                if(c == '\n'){
+                    result += "\\n";
+                    continue;
+                }else
+                if(c == '\t'){
+                    result += "\\t";
+                    continue;
+                }else
+                if(c == '\r'){
+                    result += "\\r";
+                    continue;
+                }
+
+                result += c;              
+            }
+            return result;
+        }
 
         std::string solveEscapedCharacters(const std::string &v){
             std::string result;
@@ -195,9 +217,25 @@ namespace CV {
                     ++i;
                     continue;
                 }  
+                if(c == '\n'){
+                    result += "\\n";
+                    ++i;
+                    continue;
+                }  
                 result += c;              
             }
             return result;
+        }
+
+        std::string cleanTokenInput(const std::string &str){
+            std::string out;
+            for(int i = 0; i < str.size(); ++i){
+                if(str[i] == ' ' || str[i] == '\n' || str[i] == '\t' || str[i] == '\r'){
+                    continue;
+                }
+                out += str[i];
+            }
+            return out;
         }
 
         bool fileExists(const std::string &path){
@@ -212,6 +250,8 @@ namespace CV {
             for(std::string line; std::getline(file, line);){
                 if(line.size() > 0){
                     buffer += line+"\n";
+                }else{
+                    buffer += "\n";
                 }
             }    
             return buffer;
@@ -406,7 +446,7 @@ std::string CV::Cursor::getRaised(){
         this->line = this->subject->line;
     }
     return      CV::Tools::setTextColor(CV::Tools::Color::RED, false) +
-                "[Line #"+std::to_string(this->line)+"] "+this->title+": "+this->message+in+
+                CV::Tools::cleanSpecialCharacters("[Line #"+std::to_string(this->line)+"] "+this->title+": "+this->message+in)+
                 CV::Tools::setTextColor(CV::Tools::Color::RESET, false);
 }
 
@@ -467,8 +507,10 @@ std::string CV::QuantToText(const std::shared_ptr<CV::Quant> &t){
         };
 
         case CV::QuantType::STRING: {
+            auto out = std::static_pointer_cast<CV::TypeString>(t)->v;
+
             return  Tools::setTextColor(Tools::Color::GREEN)+
-                    "'"+std::static_pointer_cast<CV::TypeString>(t)->v+
+                    "'"+out+
                     "'"+Tools::setTextColor(Tools::Color::RESET);
         };     
 
@@ -548,7 +590,7 @@ static std::vector<CV::TokenType> parseTokens(std::string input, char sep, const
     bool onComment = false;
     int leftBrackets = 0;
     int rightBrackets = 0;
-    int cline = startLine-1;
+    int cline = startLine;
     int quotes = 0;
     // Count outer brackets
     for(int i = 0; i < input.size(); ++i){
@@ -588,7 +630,7 @@ static std::vector<CV::TokenType> parseTokens(std::string input, char sep, const
         cursor->setError("Syntax Error", "Mismatching quotes", cline);
         return {};
     }
-    cline = 1;
+    cline = startLine;
     // Add missing brackets for simple statements
     if(((leftBrackets+rightBrackets)/2 > 1) || (leftBrackets+rightBrackets) == 0 || input[0] != '[' || input[input.length()-1] != ']'){
         input = "[" + input + "]";
@@ -680,6 +722,7 @@ static std::vector<CV::TokenType> rebuildTokenHierarchy(const std::vector<CV::To
         if(cursor->error){
             return CV::TokenType(NULL);
         }
+
         if(innerTokens.size() == 0){
             auto empty = token->copy();
             empty->first = "";
@@ -1272,17 +1315,27 @@ CV::InsType CV::Compile(const CV::TokenType &input, const CV::ProgramType &prog,
     return instructions[0];
 }
 
-CV::InsType CV::Compile(const std::string &input, const CV::ProgramType &prog, const CV::CursorType &cursor){
-
+CV::InsType CV::Compile(const std::string &input, const CV::ProgramType &prog, const CV::CursorType &cursor){   
 
     // Fix outter brackets (Input must always be accompained by brackets)
+    auto cleanInput = CV::Tools::cleanTokenInput(input);
     auto fixedInput = input;
-    if(fixedInput[0] != '[' || fixedInput[fixedInput.size()-1] != ']'){
-        fixedInput = "["+fixedInput+"]";
+    if(cleanInput[0] != '[' || cleanInput[cleanInput.size()-1] != ']'){
+        fixedInput = "["+fixedInput;
+        if(fixedInput[fixedInput.size()-1] == '\n'){
+            fixedInput[fixedInput.size()-1] = ']';
+        }else{
+            fixedInput = fixedInput+"]";
+        }
     }
-    fixedInput = "["+fixedInput+"]";
-
-
+    // Double brackets (Statement must respect [ [] -> STATEMENT ] -> PROGRAM hierarchy)
+    cleanInput = CV::Tools::cleanTokenInput(fixedInput);
+    if(cleanInput[0] == '[' && cleanInput[1] != '['){
+        fixedInput = "["+fixedInput;
+    }
+    if(cleanInput[cleanInput.size()-1] == ']' && cleanInput[cleanInput.size()-2] != ']'){
+        fixedInput = fixedInput+"]";
+    }
     // Split basic tokens
     auto tokens = parseTokens(fixedInput, ' ', cursor, 1);
     if(cursor->error){

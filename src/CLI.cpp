@@ -130,7 +130,6 @@ int main(int argc, char* argv[]){
 			std::getline (std::cin, input);
 
 			if(input.size() > 0){
-
 				// Compile
 				auto entrypoint = CV::Compile(input, program, cursor);
 				if(cursor->error){
