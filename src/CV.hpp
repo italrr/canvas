@@ -11,8 +11,8 @@
 
     #define CV_DEFAULT_NUMBER_TYPE double
     typedef CV_DEFAULT_NUMBER_TYPE number;
-    #define CV_RELEASE_VERSION number[3] = { 1, 0, 0 }
-    #define CV_RELEASE_DATE "Oct. 1st 2025"; 
+    static const number CV_RELEASE_VERSION[3] = { 1, 0, 0 };
+    static const std::string CV_RELEASE_DATE = "Oct. 1st 2025"; 
 
     #define CV_ERROR_MSG_NOOP_NO_INSTRUCTIONS "Provided no instructions"
     #define CV_ERROR_MSG_WRONG_TYPE "Provided wrong types"
@@ -248,6 +248,7 @@
             std::string getRaised();
             bool raise();
             void reset();
+            void clear();
             void setError(const std::string &title, const std::string &message, const std::shared_ptr<CV::Token> &subject = NULL);
             void setError(const std::string &title, const std::string &message, int line);
         };
@@ -479,6 +480,21 @@
         }
 
         namespace Tools {
+            namespace Color {
+                enum Color : int {
+                    BLACK,
+                    RED,
+                    GREEN,
+                    YELLOW,
+                    BLUE,
+                    MAGENTA,
+                    CYAN,
+                    WHITE,
+                    RESET
+                };
+            }    
+            std::string setTextColor(int color, bool bold = false);
+            std::string setBackgroundColor(int color);
             bool fileExists(const std::string &path);
             std::string readFile(const std::string &path);
             bool isReservedWord(const std::string &name);
@@ -494,6 +510,9 @@
         bool Unimport(int id);
         bool GetBooleanValue(const std::shared_ptr<CV::Quant> &data);
         std::string QuantToText(const std::shared_ptr<CV::Quant> &t);
+        void SetUseColor(bool v);
+        std::string GetLogo();
+        void InitializeCore(const CV::ProgramType &prog);
         std::shared_ptr<CV::Quant> Execute(const CV::InsType &entry, const CV::ContextType &ctx, const CV::ProgramType &prog, const CV::CursorType &cursor, CFType cf = CFType(NULL));
         CV::InsType Compile(const std::string &input, const CV::ProgramType &prog, const CV::CursorType &cursor);
         CV::InsType Compile(const CV::TokenType &input, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor);

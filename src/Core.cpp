@@ -1489,7 +1489,7 @@ static void __CV_CORE_PRINT(
 }
 
 
-void CVInitCore(const CV::ProgramType &target){
+void CV::InitializeCore(const CV::ProgramType &target){
     /*
         PRINT
     */

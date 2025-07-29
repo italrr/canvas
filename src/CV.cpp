@@ -1,5 +1,6 @@
 // SYSTEM INCLUDES
 #include <iostream>
+#include <stdio.h>
 #include <stdarg.h>
 #include <functional>
 #include <sys/stat.h>
@@ -13,9 +14,10 @@
     #include <dlfcn.h> 
 #elif  (_CV_PLATFORM == _CV_PLATFORM_TYPE_WINDOWS)
     // should prob move the entire DLL loading routines to its own file
-    #include <libloaderapi.h>
+    #include <Libloaderapi.h>
 #endif
 
+static bool UseColorOnText = false;
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -37,6 +39,60 @@ namespace CV {
         }
     }
     namespace Tools {
+
+        namespace ColorTable {
+
+            static std::unordered_map<int, std::string> TextColorCodes = {
+                {CV::Tools::Color::BLACK,   "\e[0;30m"},
+                {CV::Tools::Color::RED,     "\e[0;31m"},
+                {CV::Tools::Color::GREEN,   "\e[0;32m"},
+                {CV::Tools::Color::YELLOW,  "\e[0;33m"},
+                {CV::Tools::Color::BLUE,    "\e[0;34m"},
+                {CV::Tools::Color::MAGENTA,  "\e[0;35m"},
+                {CV::Tools::Color::CYAN,    "\e[0;36m"},
+                {CV::Tools::Color::WHITE,   "\e[0;37m"},
+                {CV::Tools::Color::RESET,   "\e[0m"}
+            };
+
+            static std::unordered_map<int, std::string> BoldTextColorCodes = {
+                {CV::Tools::Color::BLACK,   "\e[1;30m"},
+                {CV::Tools::Color::RED,     "\e[1;31m"},
+                {CV::Tools::Color::GREEN,   "\e[1;32m"},
+                {CV::Tools::Color::YELLOW,  "\e[1;33m"},
+                {CV::Tools::Color::BLUE,    "\e[1;34m"},
+                {CV::Tools::Color::MAGENTA, "\e[1;35m"},
+                {CV::Tools::Color::CYAN,    "\e[1;36m"},
+                {CV::Tools::Color::WHITE,   "\e[1;37m"},
+                {CV::Tools::Color::RESET,   "\e[0m"}
+            };        
+
+            static std::unordered_map<int, std::string> BackgroundColorCodes = {
+                {CV::Tools::Color::BLACK,   "\e[40m"},
+                {CV::Tools::Color::RED,     "\e[41m"},
+                {CV::Tools::Color::GREEN,   "\e[42m"},
+                {CV::Tools::Color::YELLOW,  "\e[43m"},
+                {CV::Tools::Color::BLUE,    "\e[44m"},
+                {CV::Tools::Color::MAGENTA, "\e[45m"},
+                {CV::Tools::Color::CYAN,    "\e[46m"},
+                {CV::Tools::Color::WHITE,   "\e[47m"},
+                {CV::Tools::Color::RESET,   "\e[0m"}
+            };     
+        }   
+  
+        std::string setTextColor(int color, bool bold){
+            if(!UseColorOnText){
+                return "";
+            }
+            return (bold ? ColorTable::BoldTextColorCodes.find(color)->second : ColorTable::TextColorCodes.find(color)->second);
+        }
+
+        std::string setBackgroundColor(int color){
+            if(!UseColorOnText){
+                return "";
+            }
+
+            return ColorTable::BackgroundColorCodes.find(color)->second;
+        }
 
         std::string format(const std::string &_str, ...){
             va_list arglist;
@@ -317,6 +373,12 @@ CV::Cursor::Cursor(){
     this->autoprint = true;
 }
 
+void CV::Cursor::clear(){
+    this->error = false;
+    this->used = false;
+    this->message = "";
+}
+
 void CV::Cursor::setError(const std::string &title, const std::string &message, const std::shared_ptr<CV::Token> &subject){
     accessMutex.lock();
     this->title = title;
@@ -343,7 +405,9 @@ std::string CV::Cursor::getRaised(){
         in = " in '"+this->subject->str()+"'";
         this->line = this->subject->line;
     }
-    return "[Line #"+std::to_string(this->line)+"] "+this->title+": "+this->message+in;
+    return      CV::Tools::setTextColor(CV::Tools::Color::RED, false) +
+                "[Line #"+std::to_string(this->line)+"] "+this->title+": "+this->message+in+
+                CV::Tools::setTextColor(CV::Tools::Color::RESET, false);
 }
 
 bool CV::Cursor::raise(){
@@ -393,48 +457,35 @@ std::string CV::QuantToText(const std::shared_ptr<CV::Quant> &t){
         
         default:
         case CV::QuantType::NIL: {
-            // return Tools::setTextColor(Tools::Color::BLUE)+"nil"+Tools::setTextColor(Tools::Color::RESET);
-            return "nil";
+            return Tools::setTextColor(Tools::Color::BLUE)+"nil"+Tools::setTextColor(Tools::Color::RESET);
         };
 
         case CV::QuantType::NUMBER: {
-            // return  CV::Tools::setTextColor(Tools::Color::CYAN) +
-            //         CV::Tools::removeTrailingZeros(static_cast<CV::NumberType*>(item)->get())+
-            //         CV::Tools::setTextColor(Tools::Color::RESET);
-            return CV::Tools::removeTrailingZeros(std::static_pointer_cast<CV::TypeNumber>(t)->v);
+            return      CV::Tools::setTextColor(Tools::Color::CYAN)+
+                        CV::Tools::removeTrailingZeros(std::static_pointer_cast<CV::TypeNumber>(t)->v)+
+                        CV::Tools::setTextColor(Tools::Color::RESET);
         };
 
         case CV::QuantType::STRING: {
-            // return Tools::setTextColor(Tools::Color::GREEN)+
-            //         "'"+static_cast<CV::StringType*>(item)->get()+"'"+
-            //         Tools::setTextColor(Tools::Color::RESET);
-            // return 
-
-            return "'"+std::static_pointer_cast<CV::TypeString>(t)->v+"'";
+            return  Tools::setTextColor(Tools::Color::GREEN)+
+                    "'"+std::static_pointer_cast<CV::TypeString>(t)->v+
+                    "'"+Tools::setTextColor(Tools::Color::RESET);
         };     
 
         case CV::QuantType::FUNCTION: {
             auto fn = std::static_pointer_cast<CV::TypeFunction>(t);      
 
-            // std::string start = Tools::setTextColor(Tools::Color::RED, true)+"["+Tools::setTextColor(Tools::Color::RESET);
-            // std::string end = Tools::setTextColor(Tools::Color::RED, true)+"]"+Tools::setTextColor(Tools::Color::RESET);
-            // std::string name = Tools::setTextColor(Tools::Color::RED, true)+"fn"+Tools::setTextColor(Tools::Color::RESET);
-            // std::string binary = Tools::setTextColor(Tools::Color::BLUE, true)+"BINARY"+Tools::setTextColor(Tools::Color::RESET);
-            // std::string body = Tools::setTextColor(Tools::Color::BLUE, true)+fn->body.first+Tools::setTextColor(Tools::Color::RESET);
-
-            std::string start = "[";
-            std::string end = "]";
-            std::string name = "fn";
-            std::string binary = "BINARY";
-            std::string body = fn->body->str();
-
+            std::string start = Tools::setTextColor(Tools::Color::RED, true)+"["+Tools::setTextColor(Tools::Color::RESET);
+            std::string end = Tools::setTextColor(Tools::Color::RED, true)+"]"+Tools::setTextColor(Tools::Color::RESET);
+            std::string name = Tools::setTextColor(Tools::Color::RED, true)+"fn"+Tools::setTextColor(Tools::Color::RESET);
+            std::string binary = Tools::setTextColor(Tools::Color::BLUE, true)+"BINARY"+Tools::setTextColor(Tools::Color::RESET);
+            std::string body = Tools::setTextColor(Tools::Color::BLUE, true)+fn->body->str()+Tools::setTextColor(Tools::Color::RESET);
 
             return start+name+" "+start+CV::Tools::compileList(fn->params)+end+" "+( body )+end;
         };
 
         case CV::QuantType::LIST: {
-            // std::string output = Tools::setTextColor(Tools::Color::MAGENTA)+"["+Tools::setTextColor(Tools::Color::RESET);
-            std::string output = "[";
+            std::string output = Tools::setTextColor(Tools::Color::MAGENTA)+"["+Tools::setTextColor(Tools::Color::RESET);
 
             auto list = std::static_pointer_cast<CV::TypeList>(t);
 
@@ -448,19 +499,16 @@ std::string CV::QuantToText(const std::shared_ptr<CV::Quant> &t){
                 }
             }
             if(limit != total){
-                // output += Tools::setTextColor(Tools::Color::YELLOW)+"...("+std::to_string(total-limit)+" hidden)"+Tools::setTextColor(Tools::Color::RESET);
+                output += Tools::setTextColor(Tools::Color::YELLOW)+"...("+std::to_string(total-limit)+" hidden)"+Tools::setTextColor(Tools::Color::RESET);
 
-                output += "...("+std::to_string(total-limit)+" hidden)";
 
             }
                         
-            // return output + Tools::setTextColor(Tools::Color::MAGENTA)+"]"+Tools::setTextColor(Tools::Color::RESET);
-            return output + "]";
+            return output + Tools::setTextColor(Tools::Color::MAGENTA)+"]"+Tools::setTextColor(Tools::Color::RESET);
         };
 
         case CV::QuantType::STORE: {
-            // std::string output = Tools::setTextColor(Tools::Color::MAGENTA)+"["+Tools::setTextColor(Tools::Color::RESET);
-            std::string output = "[";
+            std::string output = Tools::setTextColor(Tools::Color::MAGENTA)+"["+Tools::setTextColor(Tools::Color::RESET);
 
             auto store = std::static_pointer_cast<CV::TypeStore>(t);
 
@@ -476,14 +524,11 @@ std::string CV::QuantToText(const std::shared_ptr<CV::Quant> &t){
                 ++i;
             }
             if(limit != total){
-                // output += Tools::setTextColor(Tools::Color::YELLOW)+"...("+std::to_string(total-limit)+" hidden)"+Tools::setTextColor(Tools::Color::RESET);
-
-                output += "...("+std::to_string(total-limit)+" hidden)";
+                output += Tools::setTextColor(Tools::Color::YELLOW)+"...("+std::to_string(total-limit)+" hidden)"+Tools::setTextColor(Tools::Color::RESET);
 
             }
                         
-            // return output + Tools::setTextColor(Tools::Color::MAGENTA)+"]"+Tools::setTextColor(Tools::Color::RESET);
-            return output + "]";
+            return output + Tools::setTextColor(Tools::Color::MAGENTA)+"]"+Tools::setTextColor(Tools::Color::RESET);
         };        
 
     }
@@ -495,7 +540,7 @@ std::string CV::QuantToText(const std::shared_ptr<CV::Quant> &t){
 // 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-static std::vector<CV::TokenType> parseTokens(std::string input, char sep, const std::shared_ptr<CV::Cursor> &cursor){
+static std::vector<CV::TokenType> parseTokens(std::string input, char sep, const std::shared_ptr<CV::Cursor> &cursor, int startLine){
     std::vector<std::shared_ptr<CV::Token>> tokens; 
     std::string buffer;
     int open = 0;
@@ -503,7 +548,7 @@ static std::vector<CV::TokenType> parseTokens(std::string input, char sep, const
     bool onComment = false;
     int leftBrackets = 0;
     int rightBrackets = 0;
-    int cline = 0;
+    int cline = startLine-1;
     int quotes = 0;
     // Count outer brackets
     for(int i = 0; i < input.size(); ++i){
@@ -631,7 +676,7 @@ static std::vector<CV::TokenType> rebuildTokenHierarchy(const std::vector<CV::To
     }
 
     std::function<CV::TokenType(const CV::TokenType &token)> unwrap = [&](const CV::TokenType &token){
-        auto innerTokens = parseTokens(token->first, sep, cursor);
+        auto innerTokens = parseTokens(token->first, sep, cursor, token->line);
         if(cursor->error){
             return CV::TokenType(NULL);
         }
@@ -1050,7 +1095,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
             auto name = std::string(token->first.begin()+1, token->first.end());
 
             // Test if the first field (name) is a complex token
-            auto testSplit = parseTokens(name, ' ', cursor);
+            auto testSplit = parseTokens(name, ' ', cursor, token->line);
             if(cursor->error){
                 return prog->createInstruction(CV::InstructionType::NOOP, token);                   
             }
@@ -1239,7 +1284,7 @@ CV::InsType CV::Compile(const std::string &input, const CV::ProgramType &prog, c
 
 
     // Split basic tokens
-    auto tokens = parseTokens(fixedInput, ' ', cursor);
+    auto tokens = parseTokens(fixedInput, ' ', cursor, 1);
     if(cursor->error){
         return prog->createInstruction(CV::InstructionType::NOOP, tokens[0]);
     }
@@ -1886,32 +1931,41 @@ int CV::ImportDynamicLibrary(const std::string &path, const std::string &fname, 
     #endif
 }
 
-void CVInitCore(const CV::ProgramType &prog);
-
-int main(){
-
-    auto cursor = std::make_shared<CV::Cursor>();
-    auto program = std::make_shared<CV::Program>();
-    program->rootContext = program->createContext();
-    
-    CVInitCore(program);
-
-    auto entrypoint = CV::Compile("print 'hello world'", program, cursor);
-    if(cursor->error){
-        std::cout << cursor->getRaised() << std::endl;
-        std::exit(1);
-    }
-    program->entrypointIns = entrypoint->id;
-    auto result = CV::Execute(entrypoint, program->rootContext, program, cursor);
-    if(cursor->error){
-        std::cout << cursor->getRaised() << std::endl;
-        std::exit(1);
-    }
-
-    std::cout << CV::QuantToText(result) << std::endl;
-
-    std::cout << "exit" << std::endl;
-
-    return 0;
-
+void CV::SetUseColor(bool v){
+    UseColorOnText = v;
 }
+
+std::string CV::GetLogo(){
+    std::string start = CV::Tools::setTextColor(Tools::Color::MAGENTA) + "[" + CV::Tools::setTextColor(Tools::Color::RESET);
+    std::string cv = CV::Tools::setTextColor(Tools::Color::CYAN) + "~" + CV::Tools::setTextColor(Tools::Color::RESET);
+    std::string end = CV::Tools::setTextColor(Tools::Color::MAGENTA) + "]" + CV::Tools::setTextColor(Tools::Color::RESET);
+    return start+cv+end;
+}
+
+// int main(){
+
+//     auto cursor = std::make_shared<CV::Cursor>();
+//     auto program = std::make_shared<CV::Program>();
+//     program->rootContext = program->createContext();
+    
+//     CV::InitializeCore(program);
+
+//     auto entrypoint = CV::Compile("print 'hello world'", program, cursor);
+//     if(cursor->error){
+//         std::cout << cursor->getRaised() << std::endl;
+//         std::exit(1);
+//     }
+//     program->entrypointIns = entrypoint->id;
+//     auto result = CV::Execute(entrypoint, program->rootContext, program, cursor);
+//     if(cursor->error){
+//         std::cout << cursor->getRaised() << std::endl;
+//         std::exit(1);
+//     }
+
+//     std::cout << CV::QuantToText(result) << std::endl;
+
+//     std::cout << "exit" << std::endl;
+
+//     return 0;
+
+// }
