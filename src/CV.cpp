@@ -138,7 +138,7 @@ namespace CV {
         bool isReservedWord(const std::string &name){
             static const std::vector<std::string> reserved {
                 "let", "bring", "bring:dynamic-library", "~", ".", "|", "`", "cc", "mut", "fn",
-                "return", "yield", "skip"
+                "return", "yield", "skip", "l:list"
             };
             for(int i = 0; i < reserved.size(); ++i){
                 if(reserved[i] == name){
@@ -819,15 +819,36 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
         auto &cctx = prog->ctx[nameRef[0]];
         auto &quant = cctx->memory[nameRef[1]];  
         return quant->type == CV::QuantType::FUNCTION || quant->type == CV::QuantType::BINARY_FUNCTION;
-    };    
+    };
+    
+    auto areAllFunctions = [isNameFunction](const CV::TokenType &token, const CV::ContextType &ctx){
+        if(token->inner.size() < 1){
+            return false;
+        } 
+        
+        for(int i = 0; i < token->inner.size(); ++i){
+            if(token->inner[i]->first.size() == 0 || !isNameFunction(token->inner[i], ctx)){
+                return false;
+            } 
+        }
+        return true;
+    };
 
     if(token->first.size() == 0){
-        if(token->inner.size() > 0 && token->inner[0]->first.size() > 0 && isNameFunction(token->inner[0], ctx)){
+        // Instruction list
+        if(areAllFunctions(token, ctx)){
             return CV::Compile(token, prog, ctx, cursor);
         }else{
+        // Or list?
             return bListConstruct(token, token->inner, ctx);
         }
     }else{
+        /*
+            l:list
+        */
+        if(token->first == "l:list"){
+            return bListConstruct(token, token->inner, ctx);
+        }else
         /*
             SKIP / RETURN / YIELD
         */
@@ -1330,12 +1351,11 @@ CV::InsType CV::Compile(const std::string &input, const CV::ProgramType &prog, c
     }
     // Double brackets (Statement must respect [ [] -> STATEMENT ] -> PROGRAM hierarchy)
     cleanInput = CV::Tools::cleanTokenInput(fixedInput);
-    if(cleanInput[0] == '[' && cleanInput[1] != '['){
-        fixedInput = "["+fixedInput;
+    if( cleanInput[0] == '[' && cleanInput[1] != '[' &&
+        cleanInput[cleanInput.size()-1] == ']' && cleanInput[cleanInput.size()-2] != ']'){
+        fixedInput = "["+fixedInput+"]";
     }
-    if(cleanInput[cleanInput.size()-1] == ']' && cleanInput[cleanInput.size()-2] != ']'){
-        fixedInput = fixedInput+"]";
-    }
+
     // Split basic tokens
     auto tokens = parseTokens(fixedInput, ' ', cursor, 1);
     if(cursor->error){
