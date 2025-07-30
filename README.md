@@ -1,6 +1,6 @@
 canvas [~]
 ----------
-`canvas` is a dynamic, high-level, JIT compiled, general purpose, scripting/programming language designed and developed as a extension interface or propotyping tool for scrappy solutions. It is a piece of software entirely of my own creation. The philosophy of `canvas` aims to be as simple as it can possibly be while also being as powerful as the user can make it out.
+`canvas` is a dynamic, high-level, JIT compiled, general purpose, scripting/programming language designed and developed as an extension interface or propotyping tool for scrappy solutions. The philosophy of `canvas` is to aim to be as simple as it can possibly be while also being as powerful as the user can make it out.
 
 It's a language that was concieved when I was in college, and had had many different iterations, variations and rewrites. It's heavily inspired by other languages of my choise such as Python and JavaScript. There's also an small touch of Lisp into it.
 
@@ -13,7 +13,7 @@ It's a language that was concieved when I was in college, and had had many diffe
 - **No OOP**
 - _Mostly_ immutable
 - _Mostly_ Functional
-- Recursion highly encouraged
+- Recursion highly encouraged through 
 - Standard Library (io, fs, net, bitmap, time, math)
 - Error handling _a la_ C (checking return types). No try/catch
 - Expessive yet simple Syntax
@@ -55,7 +55,7 @@ The takeaway is that the user is highly encouraged to be explicit when needed to
 
 ### Prefixers
 
-Prefixers are special syntatic tools that pretend to increment expressiveness. One of the prefixers is the Positional Prefixer. It simplifies passing parameters to functions by name ignoring the order.
+Prefixers are special syntactic tools that pretend to increase expressiveness. One of the prefixers is the Positional Prefixer (~). It simplifies passing parameters to functions by name ignoring the order.
 
 For example, let's say I have a "func" function that takes 2 arguments: param1 and param2. Boths of these arguments are defined as Positional. This means I can execute this function the following way
 
