@@ -28,6 +28,7 @@
     #define CV_ERROR_MSG_ILLEGAL_ITERATOR "Illegal Iterator"
     #define CV_ERROR_MSG_INVALID_SYNTAX "Invalid Syntax"
     #define CV_ERROR_MSG_LIBRARY_NOT_VALID "Invalid Library Import"
+    #define CV_ERROR_MSG_STORE_UNDEFINED_MEMBER "Undefined Named Type"
 
     #define _CV_PLATFORM_TYPE_LINUX 0
     #define _CV_PLATFORM_TYPE_WINDOWS 1
@@ -218,12 +219,12 @@
         namespace Prefixer {
             enum Prefixer : int {
                 UNDEFINED,
-                POSITIONAL
+                NAMER
             };
             static std::string name(int v){
                 switch(v){
-                    case CV::Prefixer::POSITIONAL: {
-                        return "POSITIONAL";
+                    case CV::Prefixer::NAMER: {
+                        return "NAMER";
                     };
                     case CV::Prefixer::UNDEFINED:
                     default: {
@@ -307,7 +308,7 @@
         #define CV_INS_RANGE_TYPE_CONSTRUCTORS 100
         #define CV_INS_RANGE_TYPE_CONTROL_FLOW 200
         #define CV_INS_RANGE_TYPE_PROXY 1000
-        #define CV_INS_PREFIXER_IDENFIER_INSTRUCTION 4000000
+        #define CV_INS_PREFIXER_IDENTIFIER_INSTRUCTION 4000000
 
         namespace InstructionType {
             enum InstructionType : int {
@@ -336,7 +337,8 @@
                 PROXY_STATIC = CV_INS_RANGE_TYPE_PROXY,     // DATA[0] -> CTX_ID, DATA[1] -> DATA_ID
                 PROXY_PROMISE,                              // DATA[0] -> CTX_ID, DATA[1] -> PROMISED_DATA_ID |  PARAM[0] -> TARGET_INS, 
                 PROXY_DYNAMIC,                              // DATA[0] -> CTX_ID, DATA[1] -> DATA_ID, DATA[n] -> ...LITERAL, OPTIONAL: PARAM[0] -> preprocess
-                PROXY_POSITIONAL,                           // PARAM[0] -> TARGET_INS | LITERAL[0] -> NAME                            
+                PROXY_NAMER,                                // PARAM[0] -> TARGET_INS | LITERAL[0] -> NAME                            
+                PROXY_ACCESS,                               // DATA[0] -> CTX_ID, DATA[1] -> DATA_ID, LITERAL[0] -> NAME
             };
         }
 

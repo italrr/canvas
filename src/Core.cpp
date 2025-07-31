@@ -50,7 +50,7 @@ namespace CV {
         
         bool ExpectNoPrefixer(const std::string &name, const std::vector<std::shared_ptr<CV::Instruction>> &args, const CV::TokenType &token, const CV::CursorType &cursor){
             for(int i = 0; i < args.size(); ++i){
-                if(args[i]->data.size() >= 2 && args[i]->data[0] == CV_INS_PREFIXER_IDENFIER_INSTRUCTION){
+                if(args[i]->data.size() >= 2 && args[i]->data[0] == CV_INS_PREFIXER_IDENTIFIER_INSTRUCTION){
                     cursor->setError(CV_ERROR_MSG_ILLEGAL_PREFIXER, "Imperative '"+name+"' does not accept any prefixers: operand at "+std::to_string(i)+" is "+CV::Prefixer::name(args[i]->data[1])+"("+args[i]->token->str()+")", token);
                     return false;
                 }

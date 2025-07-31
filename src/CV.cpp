@@ -35,7 +35,7 @@ namespace CV {
             return true;
         }
         bool IsItPrefixInstruction(const std::shared_ptr<CV::Instruction> &ins){
-            return ins->data.size() >= 2 && ins->data[0] == CV_INS_PREFIXER_IDENFIER_INSTRUCTION;
+            return ins->data.size() >= 2 && ins->data[0] == CV_INS_PREFIXER_IDENTIFIER_INSTRUCTION;
         }
     }
     namespace Tools {
@@ -559,7 +559,9 @@ std::string CV::QuantToText(const std::shared_ptr<CV::Quant> &t){
             int i = 0;
             for(auto &it : store->v){
                 auto &q = it.second;
-                output += CV::QuantToText(q)+":"+it.first;
+                output +=   Tools::setTextColor(Tools::Color::YELLOW)+"["+Tools::setTextColor(Tools::Color::RESET)+
+                            "~"+it.first+" "+CV::QuantToText(q)+
+                            Tools::setTextColor(Tools::Color::YELLOW)+"]"+Tools::setTextColor(Tools::Color::RESET);
                 if(i < store->v.size()-1){
                     output += " ";
                 }
@@ -792,6 +794,38 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
         return ins;
     };
 
+    auto bStoreConstruct = [prog, cursor](const std::string &name, const CV::TokenType &origin, std::vector<CV::TokenType> &tokens, const CV::ContextType &ctx){
+        auto ins = prog->createInstruction(CV::InstructionType::CONSTRUCT_STORE, origin);
+        auto store = ctx->buildStore();
+        ins->data.push_back(ctx->id);
+        ins->data.push_back(store->id);
+        for(int i = 0; i < tokens.size(); ++i){
+            auto &inc = tokens[i];
+            auto fetched = CV::Translate(inc, prog, ctx, cursor);
+            if(cursor->error){
+                cursor->subject = origin;
+                return prog->createInstruction(CV::InstructionType::NOOP, origin);
+            }
+            if(fetched->type != CV::InstructionType::PROXY_NAMER){
+                cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "'"+name+"' may only be able to construct named types using NAMER prefixer", origin);
+                return prog->createInstruction(CV::InstructionType::NOOP, origin);
+            }
+            ins->params.push_back(fetched->id);
+            auto vname = fetched->literal[0];
+            if(!CV::Tools::isValidVarName(vname)){
+                cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "'"+name+"' is attempting to construct store with invalidly named type '"+vname+"'", origin);
+                return prog->createInstruction(CV::InstructionType::NOOP, origin);                   
+            }
+            if(CV::Tools::isReservedWord(vname)){
+                cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "'"+name+"' is attempting to construct store with reserved name named type '"+vname+"'", origin);
+                return prog->createInstruction(CV::InstructionType::NOOP, origin);                
+            }
+            ins->literal.push_back(vname);
+            store->v[vname] = std::shared_ptr<CV::Quant>(NULL);
+        }
+        return ins;
+    };
+
     auto bListConstructFromToken = [bListConstruct, prog, cursor](const CV::TokenType &origin, const CV::ContextType &ctx){
         auto cpy = origin->emptyCopy();
         std::vector<CV::TokenType> inners { cpy };
@@ -818,7 +852,9 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
         }
         auto &cctx = prog->ctx[nameRef[0]];
         auto &quant = cctx->memory[nameRef[1]];  
-        return quant->type == CV::QuantType::FUNCTION || quant->type == CV::QuantType::BINARY_FUNCTION;
+        return  quant->type == CV::QuantType::FUNCTION ||
+                quant->type == CV::QuantType::BINARY_FUNCTION ||
+                quant->type == CV::QuantType::STORE;
     };
     
     auto areAllFunctions = [isNameFunction](const CV::TokenType &token, const CV::ContextType &ctx){
@@ -834,15 +870,37 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
         return true;
     };
 
+    auto areAllNames = [isNameFunction](const CV::TokenType &token, const CV::ContextType &ctx){
+        if(token->inner.size() < 1){
+            return false;
+        } 
+        
+        for(int i = 0; i < token->inner.size(); ++i){
+            if(token->inner[i]->first.size() < 2 || token->inner[i]->first[0] != '~'){
+                return false;
+            } 
+        }
+        return true;
+    };
+
     if(token->first.size() == 0){
         // Instruction list
-        if(areAllFunctions(token, ctx)){
+        if(areAllFunctions(token, ctx) && token->inner.size() >= 2){
             return CV::Compile(token, prog, ctx, cursor);
+        }else
+        if(areAllNames(token, ctx)){
+            return bStoreConstruct(token->first, token, token->inner, ctx);
         }else{
         // Or list?
             return bListConstruct(token, token->inner, ctx);
         }
     }else{
+        /*
+            s:store
+        */
+        if(token->first == "s:store"){
+            return bStoreConstruct(token->first, token, token->inner, ctx);
+        }else
         /*
             l:list
         */
@@ -1058,7 +1116,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
         */
         if(token->first == "let"){
             if(token->inner.size() != 2){
-                cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "'"+token->first+"' expects exactly 3 tokens (let NAME VALUE)", token);
+                cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "'"+token->first+"' expects exactly 3 tokens (let NAME VALUE)", token);
                 return prog->createInstruction(CV::InstructionType::NOOP, token);
             }
 
@@ -1066,12 +1124,12 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
             auto &insToken = token->inner[1];
 
             if(nameToken->inner.size() != 0){
-                cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "'"+token->first+"' expects NAME as second operand", token);
+                cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "'"+token->first+"' expects NAME as second operand", token);
                 return prog->createInstruction(CV::InstructionType::NOOP, token);                
             }
             auto &name = nameToken->first;
             if(!CV::Tools::isValidVarName(name)){
-                cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "'"+token->first+"' second operand '"+name+"' is an invalid name", token);
+                cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "'"+token->first+"' second operand '"+name+"' is an invalid name", token);
                 return prog->createInstruction(CV::InstructionType::NOOP, token);                   
             }
             if(CV::Tools::isReservedWord(name)){
@@ -1149,13 +1207,8 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                 return ins;
             }
         }else
-        // EXPANDER
-        // POSITIONAL PROXY
+        // NAMER
         if(token->first[0] == '~'){
-            if(token->first.size() == 1){
-                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "'"+token->first+"' prefixers expect a name", token);
-                return prog->createInstruction(CV::InstructionType::NOOP, token);                                   
-            }
             auto name = std::string(token->first.begin()+1, token->first.end());
 
             // Test if the first field (name) is a complex token
@@ -1164,7 +1217,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                 return prog->createInstruction(CV::InstructionType::NOOP, token);                   
             }
             if(testSplit.size() > 1){
-                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "Position Prefix '"+token->first+"' cannot take any complex token", token);
+                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "Namer Prefix '"+token->first+"' cannot take any complex token", token);
                 return prog->createInstruction(CV::InstructionType::NOOP, token);            
             }
             // Is it a valid name?
@@ -1178,32 +1231,41 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                 return prog->createInstruction(CV::InstructionType::NOOP, token);                
             }
             // Only expects a single value
-            if(token->inner.size() != 1){
-                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "Positional Prefix '"+token->first+"' expects exactly 1 value. Provided "+std::to_string(token->inner.size()), token);
+            if(token->inner.size() > 1){
+                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "Namer Prefix '"+token->first+"' no more than 1 value. Provided "+std::to_string(token->inner.size()), token);
                 return prog->createInstruction(CV::InstructionType::NOOP, token);                
             }
             // Build position proxy instruction
-            auto ins = prog->createInstruction(CV::InstructionType::PROXY_POSITIONAL, token);
+            auto ins = prog->createInstruction(CV::InstructionType::PROXY_NAMER, token);
             ins->literal.push_back(name);
-            ins->data.push_back(CV_INS_PREFIXER_IDENFIER_INSTRUCTION);
-            ins->data.push_back(CV::Prefixer::POSITIONAL);
-            // Build referred instruction
-            auto &inc = token->inner[0];
-            auto fetched = CV::Translate(inc, prog, ctx, cursor);
-            if(cursor->error){
-                cursor->subject = token;
-                return prog->createInstruction(CV::InstructionType::NOOP, token);
-            }                        
-            // Pre-set ghost name 
+            ins->data.push_back(CV_INS_PREFIXER_IDENTIFIER_INSTRUCTION);
+            ins->data.push_back(CV::Prefixer::NAMER);
             std::shared_ptr<CV::Quant> ghostData;
-            if(fetched->type == CV::InstructionType::PROXY_STATIC){
-                ghostData = ctx->memory[fetched->id];
+            // Build referred instruction
+            if(token->inner.size() > 0){
+                auto &inc = token->inner[0];
+                auto fetched = CV::Translate(inc, prog, ctx, cursor);
+                if(cursor->error){
+                    cursor->subject = token;
+                    return prog->createInstruction(CV::InstructionType::NOOP, token);
+                }                        
+                // Pre-set ghost name 
+                if(fetched->type == CV::InstructionType::PROXY_STATIC){
+                    ghostData = prog->ctx[fetched->data[0]]->memory[fetched->data[1]];
+                }else{
+                    ghostData = ctx->buildNil();
+                }
+                if(ctx->names.count(name) == 0){
+                    ctx->names[name] = ghostData->id;
+                }
+                ins->params.push_back(fetched->id);
             }else{
                 ghostData = ctx->buildNil();
+                if(ctx->names.count(name) == 0){
+                    ctx->names[name] = ghostData->id;
+                }
             }
-            ctx->names[name] = ghostData->id;
             // Pass rest of data to ins
-            ins->params.push_back(fetched->id);
             ins->data.push_back(ctx->id);
             ins->data.push_back(ghostData->id);
             return ins;
@@ -1212,6 +1274,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                 IS NAME?        
             */   
             auto hctx = ctx;
+            std::string qname = token->first;
             auto nameRef = ctx->getName(token->first);
             if(nameRef.size() > 0){
                 // TODO: Check for PROMISE names
@@ -1282,7 +1345,67 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                         ins->data.push_back(hctx->id);
                         ins->data.push_back(targetData->id);
                         return childIns;
-                    };                 
+                    };
+                    case CV::QuantType::STORE: {
+                        auto store = std::static_pointer_cast<CV::TypeStore>(quant);
+                        // Does this named proxy come with parameters?
+                        if(token->inner.size() > 0){
+                            // Are they named?
+                            if(areAllNames(token, ctx)){
+                                std::vector<std::string> names;
+                                std::vector<int> ids;
+                                // Gather names
+                                for(int i = 0; i < token->inner.size(); ++i){                               
+                                    auto fetched = CV::Translate(token->inner[i], prog, ctx, cursor);
+                                    if(cursor->error){
+                                        cursor->subject = token;
+                                        return prog->createInstruction(CV::InstructionType::NOOP, token);
+                                    }          
+                                    names.push_back(fetched->literal[0]);
+                                }
+                                // Check if they're indeed part of this
+                                for(int i = 0; i < names.size(); ++i){
+                                    if(store->v.count(names[i]) == 0){
+                                        cursor->setError(CV_ERROR_MSG_STORE_UNDEFINED_MEMBER, "store '"+qname+"' has no member named '"+names[i]+"'", token);
+                                        return prog->createInstruction(CV::InstructionType::NOOP, token);                
+                                    }
+                                }
+                                // Build Access Proxy
+                                auto buildAccessProxy = [token](int ctxId, int dataId, const std::string &mname, const CV::ProgramType &prog){
+                                    auto ins = prog->createInstruction(CV::InstructionType::PROXY_ACCESS, token);
+                                    ins->data.push_back(ctxId);
+                                    ins->data.push_back(dataId);
+                                    ins->literal.push_back(mname);
+                                    return ins;                                     
+                                };
+                                // One name returns the value itself
+                                if(names.size() == 1){
+                                    return buildAccessProxy(nameRef[0], nameRef[1], names[0], prog);
+                                }else{
+                                // Several names returns a list of values
+                                    auto ins = prog->createInstruction(CV::InstructionType::CONSTRUCT_LIST, token);
+                                    auto list = hctx->buildList();
+                                    ins->data.push_back(hctx->id);
+                                    ins->data.push_back(list->id);
+                                    for(int i = 0; i < names.size(); ++i){
+                                        auto fetched = buildAccessProxy(nameRef[0], nameRef[1], names[i], prog);
+                                        ins->params.push_back(fetched->id);
+                                        list->v.push_back(std::shared_ptr<CV::Quant>(NULL));
+                                    }
+                                    return ins;
+                                }
+                            }else{
+                            // Otherwise this must be a list
+                                return bListConstructFromToken(token, ctx);
+                            }
+                        }else{
+                        // Return its static proxy
+                            auto ins = prog->createInstruction(CV::InstructionType::PROXY_STATIC, token);
+                            ins->data.push_back(nameRef[0]);
+                            ins->data.push_back(nameRef[1]);
+                            return ins;                            
+                        }
+                    };  
                     default: {
                         if(token->inner.size() > 0){
                             return bListConstructFromToken(token, ctx);
@@ -1422,23 +1545,37 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
         /*
             PROXIES
         */
-        case CV::InstructionType::PROXY_POSITIONAL: {
+        case CV::InstructionType::PROXY_ACCESS: {
+            auto ctxId = ins->data[0];
+            auto dataId = ins->data[1];
+            std::string mname = ins->literal[0];
+            auto &quant = prog->ctx[ctxId]->memory[dataId];
+            auto store = std::static_pointer_cast<CV::TypeStore>(quant);
+            // TODO: Perhaps some error checking?
+            return store->v[mname];
+        };
+        case CV::InstructionType::PROXY_NAMER: {
             if(ctx->prefetched.count(ins->id) > 0){
                 auto dir = ctx->prefetched[ins->id];
                 return prog->ctx[dir[0]]->memory[dir[1]];
             }
-            auto &entrypoint = prog->instructions[ins->params[0]];
-            auto quant = CV::Execute(entrypoint, ctx, prog, cursor);
-            if(cursor->error){
-                st->state = CV::ControlFlowState::CRASH;
-                return ctx->buildNil();
-            }  
-            // Fulfill ghost name
-            if(ins->data.size() > 2){
-                auto ghostDataId = ins->data[3];
-                auto ghostDataCtxId = ins->data[2];
-                auto &cctx = prog->ctx[ghostDataCtxId];
-                cctx->memory[ghostDataId] = quant; 
+            std::shared_ptr<CV::Quant> quant;
+            if(ins->params.size() > 0){
+                auto &entrypoint = prog->instructions[ins->params[0]];
+                quant = CV::Execute(entrypoint, ctx, prog, cursor);
+                if(cursor->error){
+                    st->state = CV::ControlFlowState::CRASH;
+                    return ctx->buildNil();
+                }
+                // Fulfill ghost name
+                if(ins->data.size() > 2){
+                    auto ghostDataId = ins->data[3];
+                    auto ghostDataCtxId = ins->data[2];
+                    auto &cctx = prog->ctx[ghostDataCtxId];
+                    cctx->memory[ghostDataId] = quant; 
+                }  
+            }else{
+                quant = prog->ctx[ins->data[2]]->memory[ins->data[3]];
             }
             ctx->prefetched[ins->id] = {(unsigned)ctx->id, (unsigned)quant->id};
             return quant;
