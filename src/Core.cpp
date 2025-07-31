@@ -7,7 +7,7 @@ namespace CV {
         bool AllNumbers(const std::vector<std::shared_ptr<CV::Quant>> &args, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor){
             for(int i = 0; i < args.size(); ++i){
                 if(args[i]->type != CV::QuantType::NUMBER){
-                    cursor->setError(CV_ERROR_MSG_WRONG_TYPE, "Imperative '"+name+"' expects all operands to be numbers: operand "+std::to_string(i)+" is "+CV::QuantType::name(args[i]->type), token);
+                    cursor->setError(CV_ERROR_MSG_WRONG_OPERANDS, "Imperative '"+name+"' expects all operands to be numbers: operand "+std::to_string(i)+" is "+CV::QuantType::name(args[i]->type), token);
                     return false;
                 }
             }            
@@ -15,7 +15,7 @@ namespace CV {
         }
         bool ExpectsOperands(int prov, int exp, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor){
             if(prov < exp){
-                cursor->setError(CV_ERROR_MSG_WRONG_TYPE, "Imperative '"+name+"' expects ("+std::to_string(exp)+") operands but provided("+std::to_string(prov)+")", token);
+                cursor->setError(CV_ERROR_MSG_WRONG_OPERANDS, "Imperative '"+name+"' expects ("+std::to_string(exp)+") operands but provided("+std::to_string(prov)+")", token);
                 return false;
             }   
             return true;
@@ -34,7 +34,7 @@ namespace CV {
 
         bool ExpectsNoMoreOperands(int prov, int max, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor){
             if(prov > max){
-                cursor->setError(CV_ERROR_MSG_WRONG_TYPE, "Imperative '"+name+"' expects no more than ("+std::to_string(max)+") operands but provided("+std::to_string(prov)+")", token);
+                cursor->setError(CV_ERROR_MSG_WRONG_OPERANDS, "Imperative '"+name+"' expects no more than ("+std::to_string(max)+") operands but provided("+std::to_string(prov)+")", token);
                 return false;
             }   
             return true;
@@ -42,7 +42,23 @@ namespace CV {
 
         bool ExpectsExactlyOperands(int prov, int exp, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor){
             if(prov != exp){
-                cursor->setError(CV_ERROR_MSG_WRONG_TYPE, "Imperative '"+name+"' expects exactly ("+std::to_string(exp)+") operands but provided("+std::to_string(prov)+")", token);
+                cursor->setError(CV_ERROR_MSG_WRONG_OPERANDS, "Imperative '"+name+"' expects exactly ("+std::to_string(exp)+") operands but provided("+std::to_string(prov)+")", token);
+                return false;
+            }   
+            return true;
+        }
+
+        bool ExpectsExactlyOperands(int prov, int exp, const std::string &name, const std::vector<std::string> &names, const CV::TokenType &token, const CV::CursorType &cursor){
+            std::string format = "";
+            for(int i = 0; i < names.size(); ++i){
+                format += names[i];
+                if(i < names.size()-1){
+                    format += " ";
+                }
+            }
+            if(prov != exp){
+
+                cursor->setError(CV_ERROR_MSG_WRONG_OPERANDS, "Imperative '"+name+"' expects exactly "+std::to_string(exp)+" ["+format+"] operands but provided("+std::to_string(prov)+")", token);
                 return false;
             }   
             return true;
@@ -177,8 +193,16 @@ static void __CV_CORE_ARITHMETIC_MULT(
     // Fulfill promise in context
     dataCtx->memory[dataId] = result;
 
+    auto fv = CV::Execute(args[0], execCtx, prog, cursor);
+    if(cursor->error){
+        return;
+    }           
+    if(!CV::ErrorCheck::AllNumbers({fv}, name, token, cursor)){
+        return;
+    }    
+    result->v = std::static_pointer_cast<CV::TypeNumber>(fv)->v;
     // Do the operation
-    for(int i = 0; i < args.size(); ++i){
+    for(int i = 1; i < args.size(); ++i){
         auto v = CV::Execute(args[i], execCtx, prog, cursor);
         if(cursor->error){
             return;
@@ -188,6 +212,7 @@ static void __CV_CORE_ARITHMETIC_MULT(
         }
         result->v *= std::static_pointer_cast<CV::TypeNumber>(v)->v;
     }
+
 }
 
 static void __CV_CORE_ARITHMETIC_DIV(

@@ -16,6 +16,7 @@
 
     #define CV_ERROR_MSG_NOOP_NO_INSTRUCTIONS "Provided no instructions"
     #define CV_ERROR_MSG_WRONG_TYPE "Provided wrong types"
+    #define CV_ERROR_MSG_WRONG_OPERANDS "Provided wrong operands"
     #define CV_ERROR_MSG_INVALID_INSTRUCTION "Invalid Instruction Type"
     #define CV_ERROR_MSG_MISUSED_IMPERATIVE "Misused Imperative"
     #define CV_ERROR_MSG_UNDEFINED_IMPERATIVE "Undefined imperative, name or constructor within this context or above"
@@ -478,6 +479,7 @@
             bool ExpectsTypeAt(int type, int exp, int at, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor);
             bool ExpectsNoMoreOperands(int prov, int max, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor);
             bool ExpectsExactlyOperands(int prov, int exp, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor);
+            bool ExpectsExactlyOperands(int prov, int exp, const std::string &name, const std::vector<std::string> &names, const CV::TokenType &token, const CV::CursorType &cursor);
             bool ExpectNoPrefixer(const std::string &name, const std::vector<std::shared_ptr<CV::Instruction>> &args, const CV::TokenType &token, const CV::CursorType &cursor);
         }
 
