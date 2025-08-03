@@ -37,7 +37,7 @@ static void __CV_STD_IO_OUT(
     
     std::string out = "";
     for(int i = 0; i < args.size(); ++i){
-        auto quant = CV::Execute(args[i], execCtx, prog, cursor);
+        auto quant = CV::Execute(args[i], execCtx, prog, cursor, st);
         if(cursor->error){
             return;
         }
@@ -75,7 +75,7 @@ static void __CV_STD_IO_ERR(
 
     std::string out = "";
     for(int i = 0; i < args.size(); ++i){
-        auto quant = CV::Execute(args[i], execCtx, prog, cursor);
+        auto quant = CV::Execute(args[i], execCtx, prog, cursor, st);
         if(cursor->error){
             return;
         }

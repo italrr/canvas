@@ -96,6 +96,7 @@ int main(int argc, char* argv[]){
 
 		auto cursor = std::make_shared<CV::Cursor>();
 		auto program = std::make_shared<CV::Program>();
+		auto st = std::make_shared<CV::ControlFlow>();
 		program->rootContext = program->createContext();		
 		CV::InitializeCore(program);
 
@@ -107,7 +108,7 @@ int main(int argc, char* argv[]){
 			return 1;
 		}
 		program->entrypointIns = entrypoint->id;
-		auto result = CV::Execute(entrypoint, program->rootContext, program, cursor);
+		auto result = CV::Execute(entrypoint, program->rootContext, program, cursor, st);
 		if(cursor->error){
 			std::cout << cursor->getRaised() << std::endl;
 			return 1;
@@ -119,6 +120,7 @@ int main(int argc, char* argv[]){
 
 		auto cursor = std::make_shared<CV::Cursor>();
 		auto program = std::make_shared<CV::Program>();
+		auto st = std::make_shared<CV::ControlFlow>();
 		program->rootContext = program->createContext();		
 		CV::InitializeCore(program);
 
@@ -141,7 +143,7 @@ int main(int argc, char* argv[]){
 					}
 				}
 				// Execute
-				auto result = CV::Execute(entrypoint, program->rootContext, program, cursor);
+				auto result = CV::Execute(entrypoint, program->rootContext, program, cursor, st);
 				if(cursor->error){
 					std::cout << cursor->getRaised() << std:: endl << std::endl;
 					if(useRelaxed){
@@ -172,6 +174,7 @@ int main(int argc, char* argv[]){
 
 		auto cursor = std::make_shared<CV::Cursor>();
 		auto program = std::make_shared<CV::Program>();
+		auto st = std::make_shared<CV::ControlFlow>();
 		program->rootContext = program->createContext();
 		
 		CV::InitializeCore(program);
@@ -182,7 +185,7 @@ int main(int argc, char* argv[]){
 			return 1;
 		}
 		program->entrypointIns = entrypoint->id;
-		auto result = CV::Execute(entrypoint, program->rootContext, program, cursor);
+		auto result = CV::Execute(entrypoint, program->rootContext, program, cursor, st);
 		if(cursor->error){
 			std::cout << cursor->getRaised() << std:: endl;
 			return 1;

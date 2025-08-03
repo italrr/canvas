@@ -961,8 +961,8 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
             if(!CV::ErrorCheck::ExpectNoPrefixer(token->first, {target}, token, cursor)){
                 return prog->createInstruction(CV::InstructionType::NOOP, token);
             }
-
-            auto fnamev = CV::Execute(target, ctx, prog, cursor);
+            auto st = std::make_shared<CV::ControlFlow>();
+            auto fnamev = CV::Execute(target, ctx, prog, cursor, st);
             if(cursor->error){
                 return prog->createInstruction(CV::InstructionType::NOOP, token);
             }
@@ -1562,7 +1562,7 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
             std::shared_ptr<CV::Quant> quant;
             if(ins->params.size() > 0){
                 auto &entrypoint = prog->instructions[ins->params[0]];
-                quant = CV::Execute(entrypoint, ctx, prog, cursor);
+                quant = CV::Execute(entrypoint, ctx, prog, cursor, st);
                 if(cursor->error){
                     st->state = CV::ControlFlowState::CRASH;
                     return ctx->buildNil();
@@ -1586,20 +1586,20 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
             return prog->ctx[ctxId]->memory[dataId];
         };
         case CV::InstructionType::PROXY_PROMISE: {
-            if(ctx->prefetched.count(ins->id) > 0){
-                auto dir = ctx->prefetched[ins->id];
-                return prog->ctx[dir[0]]->memory[dir[1]];
-            }
+            // if(ctx->prefetched.count(ins->id) > 0){
+            //     auto dir = ctx->prefetched[ins->id];
+            //     return prog->ctx[dir[0]]->memory[dir[1]];
+            // }
             auto cctx = prog->ctx[ins->data[0]];
             auto targetDataId = ins->data[1];
             // Execute (The instruction needs to fulfill the promise on its side)
             auto &entrypoint = prog->instructions[ins->params[0]];
-            auto quant = CV::Execute(entrypoint, cctx, prog, cursor);
+            auto quant = CV::Execute(entrypoint, cctx, prog, cursor, st);
             if(cursor->error){
                 st->state = CV::ControlFlowState::CRASH;
                 return cctx->memory[targetDataId];
             }            
-            ctx->prefetched[ins->id] = {(unsigned)cctx->id, (unsigned)targetDataId};
+            // ctx->prefetched[ins->id] = {(unsigned)cctx->id, (unsigned)targetDataId};
             return cctx->memory[targetDataId];
         };                    
 
@@ -1612,7 +1612,7 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
             auto &qlist = cctx->memory[ins->data[1]];
             auto list = std::static_pointer_cast<CV::TypeList>(qlist);
             for(int i = 0; i < ins->params.size(); ++i){
-                auto quant = CV::Execute(prog->instructions[ins->params[i]], cctx, prog, cursor);
+                auto quant = CV::Execute(prog->instructions[ins->params[i]], cctx, prog, cursor, st);
                 if(cursor->error){
                     st->state = CV::ControlFlowState::CRASH;
                     return ctx->buildNil();
@@ -1626,7 +1626,7 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
             auto &qstore = cctx->memory[ins->data[1]];
             auto store = std::static_pointer_cast<CV::TypeStore>(qstore);
             for(int i = 0; i < ins->params.size(); ++i){
-                auto quant = CV::Execute(prog->instructions[ins->params[i]], cctx, prog, cursor);
+                auto quant = CV::Execute(prog->instructions[ins->params[i]], cctx, prog, cursor, st);
                 if(cursor->error){
                     st->state = CV::ControlFlowState::CRASH;
                     return ctx->buildNil();
@@ -1650,7 +1650,7 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
             auto &data = prog->ctx[targetDataCtxId]->memory[targetDataId];
             auto &entrypoint = prog->instructions[ins->params[0]];
 
-            auto v = CV::Execute(entrypoint, execCtx, prog, cursor);
+            auto v = CV::Execute(entrypoint, execCtx, prog, cursor, st);
             if(cursor->error){
                 st->state = CV::ControlFlowState::CRASH;
                 return data;
@@ -1700,7 +1700,7 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
             auto &name = ins->literal[0];
             auto &entrypoint = prog->instructions[ins->params[0]];
 
-            auto v = CV::Execute(entrypoint, cctx, prog, cursor);
+            auto v = CV::Execute(entrypoint, cctx, prog, cursor, st);
             if(cursor->error){
                 st->state = CV::ControlFlowState::CRASH;
                 return v;
@@ -1723,7 +1723,7 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
 
             auto &entrypoint = prog->instructions[ins->params[0]];
 
-            auto v = CV::Execute(entrypoint, cctx, prog, cursor);
+            auto v = CV::Execute(entrypoint, cctx, prog, cursor, st);
             if(cursor->error){
                 st->state = CV::ControlFlowState::CRASH;
                 return v;
@@ -1756,7 +1756,7 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
             }
             if(ins->params.size() > 0){
                 auto &payloadCtx = prog->ctx[ins->data[1]];
-                auto v = CV::Execute(prog->instructions[ins->params[0]], payloadCtx, prog, cursor);
+                auto v = CV::Execute(prog->instructions[ins->params[0]], payloadCtx, prog, cursor, st);
                 if(cursor->error){
                     st->state = CV::ControlFlowState::CRASH;
                     return v;
@@ -1784,7 +1784,7 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
             // Prepare Context
             for(int i = 0; i < ins->params.size(); ++i){
                 auto &cins = prog->instructions[ins->params[i]];
-                auto v = CV::Execute(cins, paramCtx, prog, cursor);
+                auto v = CV::Execute(cins, paramCtx, prog, cursor, st);
                 if(cursor->error){
                     st->state = CV::ControlFlowState::CRASH;
                     return v;
@@ -2083,7 +2083,8 @@ int CV::Import(const std::string &fname, const CV::ProgramType &prog, const CV::
         std::cout << cursor->getRaised() << std::endl;
         std::exit(1);
     }
-    auto result = CV::Execute(entrypoint, ctx, prog, cursor);
+    auto st = std::make_shared<CV::ControlFlow>();
+    auto result = CV::Execute(entrypoint, ctx, prog, cursor, st);
     if(cursor->error){
         std::cout << cursor->getRaised() << std::endl;
         std::exit(1);

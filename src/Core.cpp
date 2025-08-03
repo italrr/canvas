@@ -109,7 +109,7 @@ static void __CV_CORE_ARITHMETIC_ADDITION(
 
     // Do the operation
     for(int i = 0; i < args.size(); ++i){
-        auto v = CV::Execute(args[i], execCtx, prog, cursor);
+        auto v = CV::Execute(args[i], execCtx, prog, cursor, st);
         if(cursor->error){
             return;
         } 
@@ -146,7 +146,7 @@ static void __CV_CORE_ARITHMETIC_SUB(
     // Fulfill promise in context
     dataCtx->memory[dataId] = result;
 
-    auto fv = CV::Execute(args[0], execCtx, prog, cursor);
+    auto fv = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
         return;
     }           
@@ -156,7 +156,7 @@ static void __CV_CORE_ARITHMETIC_SUB(
     result->v = std::static_pointer_cast<CV::TypeNumber>(fv)->v;
     // Do the operation
     for(int i = 1; i < args.size(); ++i){
-        auto v = CV::Execute(args[i], execCtx, prog, cursor);
+        auto v = CV::Execute(args[i], execCtx, prog, cursor, st);
         if(cursor->error){
             return;
         }           
@@ -193,7 +193,7 @@ static void __CV_CORE_ARITHMETIC_MULT(
     // Fulfill promise in context
     dataCtx->memory[dataId] = result;
 
-    auto fv = CV::Execute(args[0], execCtx, prog, cursor);
+    auto fv = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
         return;
     }           
@@ -203,7 +203,7 @@ static void __CV_CORE_ARITHMETIC_MULT(
     result->v = std::static_pointer_cast<CV::TypeNumber>(fv)->v;
     // Do the operation
     for(int i = 1; i < args.size(); ++i){
-        auto v = CV::Execute(args[i], execCtx, prog, cursor);
+        auto v = CV::Execute(args[i], execCtx, prog, cursor, st);
         if(cursor->error){
             return;
         }           
@@ -241,7 +241,7 @@ static void __CV_CORE_ARITHMETIC_DIV(
     // Fulfill promise in context
     dataCtx->memory[dataId] = result;
 
-    auto fv = CV::Execute(args[0], execCtx, prog, cursor);
+    auto fv = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
         return;
     }           
@@ -251,7 +251,7 @@ static void __CV_CORE_ARITHMETIC_DIV(
     result->v = std::static_pointer_cast<CV::TypeNumber>(fv)->v;
     // Do the operation
     for(int i = 1; i < args.size(); ++i){
-        auto v = CV::Execute(args[i], execCtx, prog, cursor);
+        auto v = CV::Execute(args[i], execCtx, prog, cursor, st);
         if(cursor->error){
             return;
         }           
@@ -297,7 +297,7 @@ static void __CV_CORE_BOOLEAN_AND(
     // Do the operation
     result->v = 1;
     for(int i = 0; i < args.size(); ++i){
-        auto v = CV::Execute(args[i], execCtx, prog, cursor);
+        auto v = CV::Execute(args[i], execCtx, prog, cursor, st);
         if(cursor->error){
             return;
         }        
@@ -337,7 +337,7 @@ static void __CV_CORE_BOOLEAN_OR(
     // Do the operation
     result->v = 0;
     for(int i = 0; i < args.size(); ++i){
-        auto v = CV::Execute(args[i], execCtx, prog, cursor);
+        auto v = CV::Execute(args[i], execCtx, prog, cursor, st);
         if(cursor->error){
             return;
         }        
@@ -375,7 +375,7 @@ static void __CV_CORE_BOOLEAN_NOT(
     dataCtx->memory[dataId] = result;
 
     // Do the operation
-    auto v = CV::Execute(args[0], execCtx, prog, cursor);
+    auto v = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
         return;
     }     
@@ -419,12 +419,12 @@ static void __CV_CORE_CONDITIONAL_EQ(
     dataCtx->memory[dataId] = result;
 
     // Do the operation
-    auto ai = CV::Execute(args[0], execCtx, prog, cursor);
+    auto ai = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
         return;
     }  
 
-    auto bi = CV::Execute(args[1], execCtx, prog, cursor);
+    auto bi = CV::Execute(args[1], execCtx, prog, cursor, st);
     if(cursor->error){
         return;
     }      
@@ -439,14 +439,14 @@ static void __CV_CORE_CONDITIONAL_EQ(
     result->v = a == b;
 
     if(args.size() > 2 && result->v){
-        auto trueBranch = CV::Execute(args[2], execCtx, prog, cursor);
+        auto trueBranch = CV::Execute(args[2], execCtx, prog, cursor, st);
         if(cursor->error){
             return;
         }
         dataCtx->memory[dataId] = trueBranch;
     }else
     if(args.size() > 3 && !result->v){
-        auto falseBranch = CV::Execute(args[3], execCtx, prog, cursor);
+        auto falseBranch = CV::Execute(args[3], execCtx, prog, cursor, st);
         if(cursor->error){
             return;
         }
@@ -482,12 +482,12 @@ static void __CV_CORE_CONDITIONAL_NEQ(
     dataCtx->memory[dataId] = result;
 
     // Do the operation
-    auto ai = CV::Execute(args[0], execCtx, prog, cursor);
+    auto ai = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
         return;
     }  
 
-    auto bi = CV::Execute(args[1], execCtx, prog, cursor);
+    auto bi = CV::Execute(args[1], execCtx, prog, cursor, st);
     if(cursor->error){
         return;
     }      
@@ -503,7 +503,7 @@ static void __CV_CORE_CONDITIONAL_NEQ(
 
     // TRUE BRANCH
     if(args.size() > 2 && result->v){
-        auto trueBranch = CV::Execute(args[2], execCtx, prog, cursor);
+        auto trueBranch = CV::Execute(args[2], execCtx, prog, cursor, st);
         if(cursor->error){
             return;
         }
@@ -511,14 +511,14 @@ static void __CV_CORE_CONDITIONAL_NEQ(
     }else
     // FALSE BRANCH
     if(args.size() > 3 && !result->v){
-        auto falseBranch = CV::Execute(args[3], execCtx, prog, cursor);
+        auto falseBranch = CV::Execute(args[3], execCtx, prog, cursor, st);
         if(cursor->error){
             return;
         }
         dataCtx->memory[dataId] = falseBranch;
     }    
 }
-
+#include <iostream>
 static void __CV_CORE_CONDITIONAL_IF(
     const std::vector<std::shared_ptr<CV::Instruction>> &args,
     const std::string &name,
@@ -547,7 +547,7 @@ static void __CV_CORE_CONDITIONAL_IF(
     dataCtx->memory[dataId] = result;
 
     // Do the operation
-    auto condi = CV::Execute(args[0], execCtx, prog, cursor);
+    auto condi = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
         return;
     }
@@ -556,7 +556,7 @@ static void __CV_CORE_CONDITIONAL_IF(
 
     // TRUE BRANCH
     if(args.size() > 1 && result->v){
-        auto trueBranch = CV::Execute(args[1], execCtx, prog, cursor);
+        auto trueBranch = CV::Execute(args[1], execCtx, prog, cursor, st);
         if(cursor->error){
             return;
         }
@@ -567,7 +567,7 @@ static void __CV_CORE_CONDITIONAL_IF(
     }else
     // FALSE BRANCH
     if(args.size() > 2 && !result->v){
-        auto falseBranch = CV::Execute(args[2], execCtx, prog, cursor);
+        auto falseBranch = CV::Execute(args[2], execCtx, prog, cursor, st);
         if(cursor->error){
             return;
         }
@@ -605,12 +605,12 @@ static void __CV_CORE_CONDITIONAL_MORE_THAN(
     dataCtx->memory[dataId] = result;
 
     // Do the operation
-    auto ai = CV::Execute(args[0], execCtx, prog, cursor);
+    auto ai = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
         return;
     }  
 
-    auto bi = CV::Execute(args[1], execCtx, prog, cursor);
+    auto bi = CV::Execute(args[1], execCtx, prog, cursor, st);
     if(cursor->error){
         return;
     }      
@@ -625,14 +625,14 @@ static void __CV_CORE_CONDITIONAL_MORE_THAN(
     result->v = a > b;
 
     if(args.size() > 2 && result->v){
-        auto trueBranch = CV::Execute(args[2], execCtx, prog, cursor);
+        auto trueBranch = CV::Execute(args[2], execCtx, prog, cursor, st);
         if(cursor->error){
             return;
         }
         dataCtx->memory[dataId] = trueBranch;
     }else
     if(args.size() > 3 && !result->v){
-        auto falseBranch = CV::Execute(args[3], execCtx, prog, cursor);
+        auto falseBranch = CV::Execute(args[3], execCtx, prog, cursor, st);
         if(cursor->error){
             return;
         }
@@ -668,12 +668,12 @@ static void __CV_CORE_CONDITIONAL_MORE_OR_EQ(
     dataCtx->memory[dataId] = result;
 
     // Do the operation
-    auto ai = CV::Execute(args[0], execCtx, prog, cursor);
+    auto ai = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
         return;
     }  
 
-    auto bi = CV::Execute(args[1], execCtx, prog, cursor);
+    auto bi = CV::Execute(args[1], execCtx, prog, cursor, st);
     if(cursor->error){
         return;
     }      
@@ -688,14 +688,14 @@ static void __CV_CORE_CONDITIONAL_MORE_OR_EQ(
     result->v = a >= b;
 
     if(args.size() > 2 && result->v){
-        auto trueBranch = CV::Execute(args[2], execCtx, prog, cursor);
+        auto trueBranch = CV::Execute(args[2], execCtx, prog, cursor, st);
         if(cursor->error){
             return;
         }
         dataCtx->memory[dataId] = trueBranch;
     }else
     if(args.size() > 3 && !result->v){
-        auto falseBranch = CV::Execute(args[3], execCtx, prog, cursor);
+        auto falseBranch = CV::Execute(args[3], execCtx, prog, cursor, st);
         if(cursor->error){
             return;
         }
@@ -732,12 +732,12 @@ static void __CV_CORE_CONDITIONAL_LESS_THAN(
     dataCtx->memory[dataId] = result;
 
     // Do the operation
-    auto ai = CV::Execute(args[0], execCtx, prog, cursor);
+    auto ai = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
         return;
     }  
 
-    auto bi = CV::Execute(args[1], execCtx, prog, cursor);
+    auto bi = CV::Execute(args[1], execCtx, prog, cursor, st);
     if(cursor->error){
         return;
     }      
@@ -752,14 +752,14 @@ static void __CV_CORE_CONDITIONAL_LESS_THAN(
     result->v = a < b;
 
     if(args.size() > 2 && result->v){
-        auto trueBranch = CV::Execute(args[2], execCtx, prog, cursor);
+        auto trueBranch = CV::Execute(args[2], execCtx, prog, cursor, st);
         if(cursor->error){
             return;
         }
         dataCtx->memory[dataId] = trueBranch;
     }else
     if(args.size() > 3 && !result->v){
-        auto falseBranch = CV::Execute(args[3], execCtx, prog, cursor);
+        auto falseBranch = CV::Execute(args[3], execCtx, prog, cursor, st);
         if(cursor->error){
             return;
         }
@@ -795,12 +795,12 @@ static void __CV_CORE_CONDITIONAL_LESS_OR_EQUAL(
     dataCtx->memory[dataId] = result;
 
     // Do the operation
-    auto ai = CV::Execute(args[0], execCtx, prog, cursor);
+    auto ai = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
         return;
     }  
 
-    auto bi = CV::Execute(args[1], execCtx, prog, cursor);
+    auto bi = CV::Execute(args[1], execCtx, prog, cursor, st);
     if(cursor->error){
         return;
     }      
@@ -815,14 +815,14 @@ static void __CV_CORE_CONDITIONAL_LESS_OR_EQUAL(
     result->v = a <= b;
 
     if(args.size() > 2 && result->v){
-        auto trueBranch = CV::Execute(args[2], execCtx, prog, cursor);
+        auto trueBranch = CV::Execute(args[2], execCtx, prog, cursor, st);
         if(cursor->error){
             return;
         }
         dataCtx->memory[dataId] = trueBranch;
     }else
     if(args.size() > 3 && !result->v){
-        auto falseBranch = CV::Execute(args[3], execCtx, prog, cursor);
+        auto falseBranch = CV::Execute(args[3], execCtx, prog, cursor, st);
         if(cursor->error){
             return;
         }
@@ -858,7 +858,7 @@ static void __CV_CORE_LIST_NTH(
     }
 
     // Get Index
-    auto indexBranch = CV::Execute(args[0], execCtx, prog, cursor);
+    auto indexBranch = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
         return;
     }
@@ -868,7 +868,7 @@ static void __CV_CORE_LIST_NTH(
     int index = std::round(std::static_pointer_cast<CV::TypeNumber>(indexBranch)->v);
 
     // Get target
-    auto listBranch = CV::Execute(args[1], execCtx, prog, cursor);
+    auto listBranch = CV::Execute(args[1], execCtx, prog, cursor, st);
     if(cursor->error){
         return;
     }
@@ -915,7 +915,7 @@ static void __CV_CORE_LIST_LENGTH(
     }
 
     // Get target
-    auto listBranch = CV::Execute(args[0], execCtx, prog, cursor);
+    auto listBranch = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
         return;
     }
@@ -953,13 +953,13 @@ static void __CV_CORE_LIST_PUSH(
     }
     
     // Solve subject
-    auto subjectBranch = CV::Execute(args[0], execCtx, prog, cursor);
+    auto subjectBranch = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
         return;
     }
 
     // Solve target
-    auto targetBranch = CV::Execute(args[1], execCtx, prog, cursor);
+    auto targetBranch = CV::Execute(args[1], execCtx, prog, cursor, st);
     if(cursor->error){
         return;
     }
@@ -996,7 +996,7 @@ static void __CV_CORE_LIST_POP(
         return;
     }
     
-    auto listBranch = CV::Execute(args[0], execCtx, prog, cursor);
+    auto listBranch = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
         return;
     }
@@ -1043,7 +1043,7 @@ static void __CV_CORE_LIST_SPLICE(
     
     // Join
     for(int i = 0; i < args.size(); ++i){
-        auto listBranch = CV::Execute(args[i], execCtx, prog, cursor);
+        auto listBranch = CV::Execute(args[i], execCtx, prog, cursor, st);
         if(cursor->error){
             return;
         }
@@ -1083,7 +1083,7 @@ static void __CV_CORE_LIST_RESERVE(
 
     auto result = dataCtx->buildList();
     
-    auto listBranch = CV::Execute(args[0], execCtx, prog, cursor);
+    auto listBranch = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
         return;
     }
@@ -1126,7 +1126,7 @@ static void __CV_CORE_MUT_PLUSPLUS(
     }
 
     // Get subject
-    auto subjectBranch = CV::Execute(args[0], execCtx, prog, cursor);
+    auto subjectBranch = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
         return;
     }
@@ -1162,7 +1162,7 @@ static void __CV_CORE_MUT_MINUSMINUS(
     }
 
     // Get subject
-    auto subjectBranch = CV::Execute(args[0], execCtx, prog, cursor);
+    auto subjectBranch = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
         return;
     }
@@ -1199,7 +1199,7 @@ static void __CV_CORE_MUT_SLASHSLASH(
     }
 
     // Get subject
-    auto subjectBranch = CV::Execute(args[0], execCtx, prog, cursor);
+    auto subjectBranch = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
         return;
     }
@@ -1235,7 +1235,7 @@ static void __CV_CORE_MUT_STARSTAR(
     }
 
     // Get subject
-    auto subjectBranch = CV::Execute(args[0], execCtx, prog, cursor);
+    auto subjectBranch = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
         return;
     }
@@ -1279,16 +1279,29 @@ static void __CV_CORE_LOOP_WHILE(
 
     std::shared_ptr<CV::Quant> result = NULL;
 
-    auto cf = std::make_shared<CV::ControlFlow>();
-    cf->ctx = CV::ControlFlowState::CONTINUE;
 
     while(true) {
         auto deepExecCtx = prog->createContext(execCtx);
 
         // Conditional Branch
-        auto condBranch = CV::Execute(args[0], deepExecCtx, prog, cursor, cf);
+        auto condBranch = CV::Execute(args[0], deepExecCtx, prog, cursor, st);
         if(cursor->error){
             return;
+        }
+        // RETURN breaks flow upwards
+        if(st->state == CV::ControlFlowState::RETURN){
+            result = st->payload;
+            break;
+        }
+        // skips every other branch afterwards
+        if(st->state == CV::ControlFlowState::SKIP){
+            st->state = CV::ControlFlowState::CONTINUE;
+            continue;
+        }
+        // YIELD breaks flow
+        if(st->state == CV::ControlFlowState::YIELD){
+            result = st->payload;
+            break;
         }
 
         // Check conditional
@@ -1299,7 +1312,7 @@ static void __CV_CORE_LOOP_WHILE(
         // Code Branch
         if(args.size() > 1){
             for(int i = 1; i < args.size(); ++i ){
-                result = CV::Execute(args[i], deepExecCtx, prog, cursor);
+                result = CV::Execute(args[i], deepExecCtx, prog, cursor, st);
                 if(cursor->error){
                     return;
                 }
@@ -1309,21 +1322,18 @@ static void __CV_CORE_LOOP_WHILE(
         prog->deleteContext(deepExecCtx->id);
 
         // RETURN breaks flow upwards
-        if(cf->state == CV::ControlFlowState::RETURN){
-            st->state = CV::ControlFlowState::RETURN;
-            st->payload = cf->payload;
-            result = cf->payload;
+        if(st->state == CV::ControlFlowState::RETURN){
+            result = st->payload;
             break;
         }
-        // SKIP skips every other branch afterwards
-        if(cf->state == CV::ControlFlowState::SKIP){
-            cf->state = CV::ControlFlowState::CONTINUE;
+        // skips every other branch afterwards
+        if(st->state == CV::ControlFlowState::SKIP){
+            st->state = CV::ControlFlowState::CONTINUE;
             continue;
         }
         // YIELD breaks flow
-        if(cf->state == CV::ControlFlowState::YIELD){
-            st->payload = cf->payload;
-            result = cf->payload;
+        if(st->state == CV::ControlFlowState::YIELD){
+            result = st->payload;
             break;
         }
     }
@@ -1384,7 +1394,7 @@ static void __CV_CORE_LOOP_FOR(
         cursor->setError(CV_ERROR_MSG_INVALID_SYNTAX, "Imperative '"+name+"' expects a positional prefixer param 'from': none was provided", token);
         return;
     }
-    auto fromIndex = CV::Execute(fromPIns, execCtx, prog, cursor);
+    auto fromIndex = CV::Execute(fromPIns, execCtx, prog, cursor, st);
     if(cursor->error){
         return;
     }
@@ -1398,7 +1408,7 @@ static void __CV_CORE_LOOP_FOR(
         cursor->setError(CV_ERROR_MSG_INVALID_SYNTAX, "Imperative '"+name+"' expects a positional prefixer param 'to': none was provided", token);
         return;
     }
-    auto toLimit = CV::Execute(toPIns, execCtx, prog, cursor);
+    auto toLimit = CV::Execute(toPIns, execCtx, prog, cursor, st);
     if(cursor->error){
         return;
     }
@@ -1412,46 +1422,58 @@ static void __CV_CORE_LOOP_FOR(
     auto from = std::static_pointer_cast<CV::TypeNumber>(fromIndex);
     auto to = std::static_pointer_cast<CV::TypeNumber>(toLimit);
     auto code = GetNonPrefixedIns(args);
-    auto cf = std::make_shared<CV::ControlFlow>();
     bool running = true;
-    cf->ctx = CV::ControlFlowState::CONTINUE;
     while(running && from->v != to->v){
         auto deepExecCtx = prog->createContext(execCtx);
 
         // Run code
         for(int i = 0; i < code.size(); ++i){
-            auto toLimit = CV::Execute(code[i], deepExecCtx, prog, cursor, cf);
+            auto toLimit = CV::Execute(code[i], deepExecCtx, prog, cursor, st);
             if(cursor->error){
                 return;
             }    
             result = toLimit;
             // RETURN breaks flow upwards
-            if(cf->state == CV::ControlFlowState::RETURN){
-                st->state = CV::ControlFlowState::RETURN;
-                st->payload = cf->payload;
+            if(st->state == CV::ControlFlowState::RETURN){
                 running = false;
-                result = cf->payload;
+                result = st->payload;
                 break;
             }
             // SKIP skips every other branch afterwards
-            if(cf->state == CV::ControlFlowState::SKIP){
-                cf->state = CV::ControlFlowState::CONTINUE;
+            if(st->state == CV::ControlFlowState::SKIP){
+                st->state = CV::ControlFlowState::CONTINUE;
                 break;
             }
             // YIELD breaks flow
-            if(cf->state == CV::ControlFlowState::YIELD){
+            if(st->state == CV::ControlFlowState::YIELD){
                 running = false;
-                st->payload = cf->payload;
-                result = cf->payload;
+                result = st->payload;
                 break;
             }
         }
         // Run provided step or add one to 'to'
         if(running){
             if(stepPIns.get()){
-                auto toLimit = CV::Execute(stepPIns, deepExecCtx, prog, cursor, cf);
+                auto toLimit = CV::Execute(stepPIns, deepExecCtx, prog, cursor, st);
                 if(cursor->error){
                     return;
+                }
+                // RETURN breaks flow upwards
+                if(st->state == CV::ControlFlowState::RETURN){
+                    running = false;
+                    result = st->payload;
+                    break;
+                }
+                // SKIP skips every other branch afterwards
+                if(st->state == CV::ControlFlowState::SKIP){
+                    st->state = CV::ControlFlowState::CONTINUE;
+                    break;
+                }
+                // YIELD breaks flow
+                if(st->state == CV::ControlFlowState::YIELD){
+                    running = false;
+                    result = st->payload;
+                    break;
                 }
             }else{
                 ++from->v;

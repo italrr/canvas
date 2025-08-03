@@ -111,7 +111,7 @@ static void __CV_STD_JSON_WRITE(
     }
     
     // Get store param
-    auto param0 = CV::Execute(args[0], execCtx, prog, cursor);
+    auto param0 = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
         dataCtx->memory[dataId] = dataCtx->buildNumber(0);
         return;
@@ -123,7 +123,7 @@ static void __CV_STD_JSON_WRITE(
     }
 
     // Get filename param
-    auto param1Filename = CV::Execute(args[1], execCtx, prog, cursor);
+    auto param1Filename = CV::Execute(args[1], execCtx, prog, cursor, st);
     if(cursor->error){
         dataCtx->memory[dataId] = dataCtx->buildNumber(0);  
         return;
@@ -173,7 +173,7 @@ static void __CV_STD_JSON_PARSE_FILE(
     }
 
     // Get filename param
-    auto param0Filename = CV::Execute(args[0], execCtx, prog, cursor);
+    auto param0Filename = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
         dataCtx->memory[dataId] = dataCtx->buildNumber(0);  
         return;

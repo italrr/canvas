@@ -517,7 +517,7 @@
         void SetUseColor(bool v);
         std::string GetLogo();
         void InitializeCore(const CV::ProgramType &prog);
-        std::shared_ptr<CV::Quant> Execute(const CV::InsType &entry, const CV::ContextType &ctx, const CV::ProgramType &prog, const CV::CursorType &cursor, CFType cf = CFType(NULL));
+        std::shared_ptr<CV::Quant> Execute(const CV::InsType &entry, const CV::ContextType &ctx, const CV::ProgramType &prog, const CV::CursorType &cursor, CFType cf);
         CV::InsType Compile(const std::string &input, const CV::ProgramType &prog, const CV::CursorType &cursor);
         CV::InsType Compile(const CV::TokenType &input, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor);
         CV::InsType Translate(const CV::TokenType &token, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor);
