@@ -48,3 +48,6 @@ mvLib(io)
 # json
 add_library(json SHARED src/libs/json.cpp src/libs/thirdparty/json11.cpp src/CV.cpp src/Core.cpp)
 mvLib(json)
+# bmp
+add_library(bmp SHARED src/libs/bmp.cpp src/CV.cpp src/Core.cpp)
+mvLib(bmp)

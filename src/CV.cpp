@@ -128,6 +128,22 @@ namespace CV {
             return false;
         }     
 
+        std::string lower(const std::string &str){
+            std::string out;
+            for(int i = 0; i < str.size(); i++){
+                out += tolower(str.at(i));
+            }
+            return out;
+        }
+        
+        std::string upper(const std::string &str){
+            std::string out;
+            for(int i = 0; i < str.size(); i++){
+                out += toupper(str.at(i));
+            }
+            return out;
+        }
+
         bool isValidVarName(const std::string &name){
             if(name.size() == 0){
                 return false;
@@ -416,6 +432,8 @@ CV::Cursor::Cursor(){
 void CV::Cursor::clear(){
     this->error = false;
     this->used = false;
+    this->used = false;
+    this->subject = CV::TokenType(NULL);
     this->message = "";
 }
 

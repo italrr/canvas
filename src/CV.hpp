@@ -503,6 +503,8 @@
             std::string readFile(const std::string &path);
             bool isReservedWord(const std::string &name);
             bool isValidVarName(const std::string &name);
+            std::string lower(const std::string &in);
+            std::string upper(const std::string &in);
         }
 
         ////////////////////////////
