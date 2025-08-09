@@ -235,16 +235,13 @@ static void __CV_STD_BMP_WRITE(
 
     // Write
     if(CV::Tools::lower(format) == "bmp"){
-        
+        stbi_write_bmp(filename.c_str(), width, height, nchannel, img);
     }else
     if(CV::Tools::lower(format) == "png"){
         stbi_write_png(filename.c_str(), width, height, nchannel, img, width * nchannel);
     }else
     if(CV::Tools::lower(format) == "jpg" || CV::Tools::lower(format) == "jpeg"){
-        
-    }else
-    if(CV::Tools::lower(format) == "ppm"){
-
+        stbi_write_jpg(filename.c_str(), width, height, nchannel, img, 100);  
     }else{
         cursor->setError("Invalid Image Format", "Parameter 1 Image Format ('"+format+"') is invalid or unsupported", token);
         dataCtx->memory[dataId] = dataCtx->buildNumber(0);
