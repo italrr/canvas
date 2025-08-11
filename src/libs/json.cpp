@@ -99,36 +99,36 @@ static void __CV_STD_JSON_WRITE(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
 
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 2, name, {"STORE/LIST", "FILENAME"}, token, cursor)){
-        dataCtx->memory[dataId] = dataCtx->buildNumber(0);
+        dataCtx->set(dataId,  dataCtx->buildNumber(0));
         return;
     }
     
     // Get store param
     auto param0 = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
-        dataCtx->memory[dataId] = dataCtx->buildNumber(0);
+        dataCtx->set(dataId,  dataCtx->buildNumber(0));
         return;
     }
     if(param0->type != CV::QuantType::LIST && param0->type != CV::QuantType::STORE){
         cursor->setError(CV_ERROR_MSG_WRONG_TYPE, "Imperative '"+name+"' expects LIST or STORE operand at first position", token);   
-        dataCtx->memory[dataId] = dataCtx->buildNumber(0);
+        dataCtx->set(dataId,  dataCtx->buildNumber(0));
         return;
     }
 
     // Get filename param
     auto param1Filename = CV::Execute(args[1], execCtx, prog, cursor, st);
     if(cursor->error){
-        dataCtx->memory[dataId] = dataCtx->buildNumber(0);  
+        dataCtx->set(dataId,  dataCtx->buildNumber(0));  
         return;
     }
     if(!CV::ErrorCheck::ExpectsTypeAt(param1Filename->type, CV::QuantType::STRING, 1, name, token, cursor)){
-        dataCtx->memory[dataId] = dataCtx->buildNumber(0);
+        dataCtx->set(dataId,  dataCtx->buildNumber(0));
         return;
     }    
 
@@ -137,7 +137,7 @@ static void __CV_STD_JSON_WRITE(
     // Build Json hierarchy
     auto obj = buildNode(name, param0, token, cursor);
     if(cursor->error){
-        dataCtx->memory[dataId] = dataCtx->buildNumber(0);
+        dataCtx->set(dataId,  dataCtx->buildNumber(0));
         return;
     }
 
@@ -146,7 +146,7 @@ static void __CV_STD_JSON_WRITE(
     outFile << json11::Json(obj).dump();
     outFile.close();   
 
-    dataCtx->memory[dataId] = dataCtx->buildNumber(1);
+    dataCtx->set(dataId,  dataCtx->buildNumber(1));
 }
 
 static void __CV_STD_JSON_PARSE_FILE(
@@ -161,24 +161,24 @@ static void __CV_STD_JSON_PARSE_FILE(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
 
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, {"FILENAME"}, token, cursor)){
-        dataCtx->memory[dataId] = dataCtx->buildNumber(0);
+        dataCtx->set(dataId,  dataCtx->buildNumber(0));
         return;
     }
 
     // Get filename param
     auto param0Filename = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
-        dataCtx->memory[dataId] = dataCtx->buildNumber(0);  
+        dataCtx->set(dataId,  dataCtx->buildNumber(0));  
         return;
     }
     if(!CV::ErrorCheck::ExpectsTypeAt(param0Filename->type, CV::QuantType::STRING, 0, name, token, cursor)){
-        dataCtx->memory[dataId] = dataCtx->buildNumber(0);
+        dataCtx->set(dataId,  dataCtx->buildNumber(0));
         return;
     }    
 
@@ -186,7 +186,7 @@ static void __CV_STD_JSON_PARSE_FILE(
 
     if(!CV::Tools::fileExists(filename)){
         cursor->setError("File Not Found", "File '"+filename+"' does not exist", token);
-        dataCtx->memory[dataId] = dataCtx->buildNumber(0);
+        dataCtx->set(dataId,  dataCtx->buildNumber(0));
         return;
     }
     auto source = CV::Tools::readFile(filename);
@@ -194,11 +194,11 @@ static void __CV_STD_JSON_PARSE_FILE(
     auto json = json11::Json::parse(source, err);
     if(err.size() > 0){
         cursor->setError("Bad JSON Input", "Imperative '"+name+"' was provided an invalid JSON input: '"+err+"'", token);
-        dataCtx->memory[dataId] = dataCtx->buildNumber(0);
+        dataCtx->set(dataId,  dataCtx->buildNumber(0));
         return;
     }
 
-    dataCtx->memory[dataId] = unwrapJson(name, json, token, dataCtx, cursor);
+    dataCtx->set(dataId,  unwrapJson(name, json, token, dataCtx, cursor));
 }
 
 extern "C" void _CV_REGISTER_LIBRARY(const std::shared_ptr<CV::Program> &prog, const CV::ContextType &ctx, const CV::CursorType &cursor){

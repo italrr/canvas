@@ -154,7 +154,7 @@ namespace CV {
         bool isReservedWord(const std::string &name){
             static const std::vector<std::string> reserved {
                 "let", "bring", "bring:dynamic-library", "~", ".", "|", "`", "cc", "mut", "fn",
-                "return", "yield", "skip", "l:list"
+                "return", "yield", "skip", "b:list", "b:store", "untether", "async"
             };
             for(int i = 0; i < reserved.size(); ++i){
                 if(reserved[i] == name){
@@ -868,8 +868,8 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
         if(nameRef.size() == 0){
             return false;
         }
-        auto &cctx = prog->ctx[nameRef[0]];
-        auto &quant = cctx->memory[nameRef[1]];  
+        auto &cctx = prog->getCtx(nameRef[0]);
+        auto &quant = cctx->get(nameRef[1]);  
         return  quant->type == CV::QuantType::FUNCTION ||
                 quant->type == CV::QuantType::BINARY_FUNCTION ||
                 quant->type == CV::QuantType::STORE;
@@ -916,13 +916,13 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
         /*
             s:store
         */
-        if(token->first == "s:store"){
+        if(token->first == "b:store"){
             return bStoreConstruct(token->first, token, token->inner, ctx);
         }else
         /*
             l:list
         */
-        if(token->first == "l:list"){
+        if(token->first == "b:list"){
             return bListConstruct(token, token->inner, ctx);
         }else
         /*
@@ -1049,7 +1049,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                 return prog->createInstruction(CV::InstructionType::NOOP, token);
             }
             auto fn = std::make_shared<CV::TypeFunction>();
-            ctx->memory[fn->id] = fn;
+            ctx->set(fn->id, fn);
             auto fctx = prog->createContext(ctx);
             fn->ctxId = fctx->id;
             fn->body = token->inner[1];
@@ -1068,7 +1068,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                 }  
                 fn->params.push_back(name);
                 auto v = fctx->buildNil();
-                fctx->names[name] = v->id;
+                fctx->setName(name, v->id);
             }
 
             auto target = CV::Translate(token->inner[1], prog, fctx, cursor);
@@ -1163,9 +1163,9 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
 
             
             if(target->type == CV::InstructionType::PROXY_STATIC){
-                auto &targetData = prog->ctx[target->data[0]]->memory[target->data[1]];
-                ctx->memory[targetData->id] = targetData;
-                ctx->names[name] = targetData->id;  
+                auto &targetData = prog->getCtx(target->data[0])->get(target->data[1]);
+                ctx->set(targetData->id, targetData);
+                ctx->setName(name, targetData->id);  
                 return target;
             }else{
                 auto targetData = ctx->buildNil();
@@ -1176,7 +1176,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                 ins->data.push_back(targetData->id);
                 ins->params.push_back(target->id);
 
-                ctx->names[name] = targetData->id;  
+                ctx->setName(name, targetData->id);  
 
                 return ins;
             }
@@ -1269,18 +1269,18 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                 }                        
                 // Pre-set ghost name 
                 if(fetched->type == CV::InstructionType::PROXY_STATIC){
-                    ghostData = prog->ctx[fetched->data[0]]->memory[fetched->data[1]];
+                    ghostData = prog->getCtx(fetched->data[0])->get(fetched->data[1]);
                 }else{
                     ghostData = ctx->buildNil();
                 }
-                if(ctx->names.count(name) == 0){
-                    ctx->names[name] = ghostData->id;
+                if(ctx->getName(name, true).size() == 0){
+                    ctx->setName(name, ghostData->id);
                 }
                 ins->params.push_back(fetched->id);
             }else{
                 ghostData = ctx->buildNil();
-                if(ctx->names.count(name) == 0){
-                    ctx->names[name] = ghostData->id;
+                if(ctx->getName(name, true).size() == 0){
+                    ctx->setName(name, ghostData->id);
                 }
             }
             // Pass rest of data to ins
@@ -1296,14 +1296,14 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
             auto nameRef = ctx->getName(token->first);
             if(nameRef.size() > 0){
                 // TODO: Check for PROMISE names
-                auto fctx = prog->ctx[nameRef[0]];
+                auto fctx = prog->getCtx(nameRef[0]);
                 auto &dataId = nameRef[1];
-                auto &quant = fctx->memory[dataId];     
+                auto &quant = fctx->get(dataId);     
 
                 switch(quant->type){
                     case CV::QuantType::FUNCTION: {
                         auto fn = std::static_pointer_cast<CV::TypeFunction>(quant);
-                        auto &fnCtx = prog->ctx[fn->ctxId];
+                        auto &fnCtx = prog->getCtx(fn->ctxId);
                         if(fn->params.size() != token->inner.size()){
                             cursor->setError(CV_ERROR_MSG_MISUSED_FUNCTION, "'"+token->first+"' expects exactly "+std::to_string(fn->params.size())+". Provided "+std::to_string(token->inner.size()), token);
                             return prog->createInstruction(CV::InstructionType::NOOP, token);                
@@ -1567,19 +1567,19 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
             auto ctxId = ins->data[0];
             auto dataId = ins->data[1];
             std::string mname = ins->literal[0];
-            auto &quant = prog->ctx[ctxId]->memory[dataId];
+            auto &quant = prog->getCtx(ctxId)->get(dataId);
             auto store = std::static_pointer_cast<CV::TypeStore>(quant);
             // TODO: Perhaps some error checking?
             return store->v[mname];
         };
         case CV::InstructionType::PROXY_NAMER: {
-            if(ctx->prefetched.count(ins->id) > 0){
-                auto dir = ctx->prefetched[ins->id];
-                return prog->ctx[dir[0]]->memory[dir[1]];
+            if(ctx->isPrefetched(ins->id)){
+                auto dir = ctx->getPrefetch(ins->id);
+                return prog->getCtx(dir[0])->get(dir[1]);
             }
             std::shared_ptr<CV::Quant> quant;
             if(ins->params.size() > 0){
-                auto &entrypoint = prog->instructions[ins->params[0]];
+                auto &entrypoint = prog->getIns(ins->params[0]);
                 quant = CV::Execute(entrypoint, ctx, prog, cursor, st);
                 if(cursor->error){
                     st->state = CV::ControlFlowState::CRASH;
@@ -1589,36 +1589,36 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
                 if(ins->data.size() > 2){
                     auto ghostDataId = ins->data[3];
                     auto ghostDataCtxId = ins->data[2];
-                    auto &cctx = prog->ctx[ghostDataCtxId];
-                    cctx->memory[ghostDataId] = quant; 
+                    auto &cctx = prog->getCtx(ghostDataCtxId);
+                    cctx->set(ghostDataId, quant); 
                 }  
             }else{
-                quant = prog->ctx[ins->data[2]]->memory[ins->data[3]];
+                quant = prog->getCtx(ins->data[2])->get(ins->data[3]);
             }
-            ctx->prefetched[ins->id] = {(unsigned)ctx->id, (unsigned)quant->id};
+            ctx->setPrefetch(ins->id, {(unsigned)ctx->id, (unsigned)quant->id});
             return quant;
         };
         case CV::InstructionType::PROXY_STATIC: {
             auto ctxId = ins->data[0];
             auto dataId = ins->data[1];
-            return prog->ctx[ctxId]->memory[dataId];
+            return prog->getCtx(ctxId)->get(dataId);
         };
         case CV::InstructionType::PROXY_PROMISE: {
             // if(ctx->prefetched.count(ins->id) > 0){
             //     auto dir = ctx->prefetched[ins->id];
             //     return prog->ctx[dir[0]]->memory[dir[1]];
             // }
-            auto cctx = prog->ctx[ins->data[0]];
+            auto cctx = prog->getCtx(ins->data[0]);
             auto targetDataId = ins->data[1];
             // Execute (The instruction needs to fulfill the promise on its side)
-            auto &entrypoint = prog->instructions[ins->params[0]];
+            auto &entrypoint = prog->getIns(ins->params[0]);
             auto quant = CV::Execute(entrypoint, cctx, prog, cursor, st);
             if(cursor->error){
                 st->state = CV::ControlFlowState::CRASH;
-                return cctx->memory[targetDataId];
+                return cctx->get(targetDataId);
             }            
             // ctx->prefetched[ins->id] = {(unsigned)cctx->id, (unsigned)targetDataId};
-            return cctx->memory[targetDataId];
+            return cctx->get(targetDataId);
         };                    
 
 
@@ -1626,11 +1626,11 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
             CONSTRUCTORS        
         */
         case CV::InstructionType::CONSTRUCT_LIST: {
-            auto &cctx = prog->ctx[ins->data[0]];
-            auto &qlist = cctx->memory[ins->data[1]];
+            auto &cctx = prog->getCtx(ins->data[0]);
+            auto &qlist = cctx->get(ins->data[1]);
             auto list = std::static_pointer_cast<CV::TypeList>(qlist);
             for(int i = 0; i < ins->params.size(); ++i){
-                auto quant = CV::Execute(prog->instructions[ins->params[i]], cctx, prog, cursor, st);
+                auto quant = CV::Execute(prog->getIns(ins->params[i]), cctx, prog, cursor, st);
                 if(cursor->error){
                     st->state = CV::ControlFlowState::CRASH;
                     return ctx->buildNil();
@@ -1640,11 +1640,11 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
             return std::static_pointer_cast<CV::Quant>(list);
         };
         case CV::InstructionType::CONSTRUCT_STORE: {
-            auto &cctx = prog->ctx[ins->data[0]];
-            auto &qstore = cctx->memory[ins->data[1]];
+            auto &cctx = prog->getCtx(ins->data[0]);
+            auto &qstore = cctx->get(ins->data[1]);
             auto store = std::static_pointer_cast<CV::TypeStore>(qstore);
             for(int i = 0; i < ins->params.size(); ++i){
-                auto quant = CV::Execute(prog->instructions[ins->params[i]], cctx, prog, cursor, st);
+                auto quant = CV::Execute(prog->getIns(ins->params[i]), cctx, prog, cursor, st);
                 if(cursor->error){
                     st->state = CV::ControlFlowState::CRASH;
                     return ctx->buildNil();
@@ -1656,17 +1656,17 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
 
         case CV::InstructionType::MUT: {
             
-            if(ctx->prefetched.count(ins->id) > 0){
-                auto dir = ctx->prefetched[ins->id];
-                return prog->ctx[dir[0]]->memory[dir[1]];
+            if(ctx->isPrefetched(ins->id)){
+                auto dir = ctx->getPrefetch(ins->id);
+                return prog->getCtx(dir[0])->get(dir[1]);
             }
             
             auto &targetDataCtxId = ins->data[0];
             auto &targetDataId = ins->data[1];
             auto &execCtxId = ins->data[2];
-            auto &execCtx = prog->ctx[execCtxId];
-            auto &data = prog->ctx[targetDataCtxId]->memory[targetDataId];
-            auto &entrypoint = prog->instructions[ins->params[0]];
+            auto &execCtx = prog->getCtx(execCtxId);
+            auto &data = prog->getCtx(targetDataCtxId)->get(targetDataId);
+            auto &entrypoint = prog->getIns(ins->params[0]);
 
             auto v = CV::Execute(entrypoint, execCtx, prog, cursor, st);
             if(cursor->error){
@@ -1700,7 +1700,7 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
                 } break;
             }
 
-            ctx->prefetched[ins->id] = {(unsigned)targetDataCtxId, (unsigned)targetDataId};
+            ctx->setPrefetch(ins->id, {(unsigned)targetDataCtxId, (unsigned)targetDataId});
 
 
             return data;
@@ -1708,38 +1708,38 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
 
         case CV::InstructionType::LET: {
 
-            if(ctx->prefetched.count(ins->id) > 0){
-                auto dir = ctx->prefetched[ins->id];
-                return prog->ctx[dir[0]]->memory[dir[1]];
+            if(ctx->isPrefetched(ins->id)){
+                auto dir = ctx->getPrefetch(ins->id);
+                return prog->getCtx(dir[0])->get(dir[1]);
             }
 
-            auto &cctx = prog->ctx[ins->data[0]];
+            auto &cctx = prog->getCtx(ins->data[0]);
             auto targetDataID = ins->data[1];
             auto &name = ins->literal[0];
-            auto &entrypoint = prog->instructions[ins->params[0]];
+            auto &entrypoint = prog->getIns(ins->params[0]);
 
             auto v = CV::Execute(entrypoint, cctx, prog, cursor, st);
             if(cursor->error){
                 st->state = CV::ControlFlowState::CRASH;
                 return v;
             }
-            cctx->memory[targetDataID] = v;
+            cctx->set(targetDataID, v);
 
-            ctx->prefetched[ins->id] = {(unsigned)cctx->id, (unsigned)targetDataID};
+            ctx->setPrefetch(ins->id, {(unsigned)cctx->id, (unsigned)targetDataID});
 
             return v;
         };
 
         case CV::InstructionType::CARBON_COPY: {
-            if(ctx->prefetched.count(ins->id) > 0){
-                auto dir = ctx->prefetched[ins->id];
-                return prog->ctx[dir[0]]->memory[dir[1]];
+            if(ctx->isPrefetched(ins->id)){
+                auto dir = ctx->getPrefetch(ins->id);
+                return prog->getCtx(dir[0])->get(dir[1]);
             }
 
-            auto &cctx = prog->ctx[ins->data[0]];
-            auto &nv = cctx->memory[ins->data[1]];
+            auto &cctx = prog->getCtx(ins->data[0]);
+            auto &nv = cctx->get(ins->data[1]);
 
-            auto &entrypoint = prog->instructions[ins->params[0]];
+            auto &entrypoint = prog->getIns(ins->params[0]);
 
             auto v = CV::Execute(entrypoint, cctx, prog, cursor, st);
             if(cursor->error){
@@ -1747,9 +1747,9 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
                 return v;
             }
             auto copied = cctx->buildCopy(v);
-            cctx->memory[ins->data[1]] = copied;
+            cctx->set(ins->data[1], copied);
 
-            ctx->prefetched[ins->id] = {(unsigned)cctx->id, (unsigned)copied->id};
+            ctx->setPrefetch(ins->id, {(unsigned)cctx->id, (unsigned)copied->id});
         
             return copied;
         };
@@ -1773,8 +1773,8 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
                 } break;
             }
             if(ins->params.size() > 0){
-                auto &payloadCtx = prog->ctx[ins->data[1]];
-                auto v = CV::Execute(prog->instructions[ins->params[0]], payloadCtx, prog, cursor, st);
+                auto &payloadCtx = prog->getCtx(ins->data[1]);
+                auto v = CV::Execute(prog->getIns(ins->params[0]), payloadCtx, prog, cursor, st);
                 if(cursor->error){
                     st->state = CV::ControlFlowState::CRASH;
                     return v;
@@ -1789,19 +1789,19 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
             auto fnId = ins->data[1];
             auto paramCtxId = ins->data[2];
 
-            auto fn = std::static_pointer_cast<CV::TypeFunction>(prog->ctx[fnCtxId]->memory[fnId]);
-            auto &topExecCtx = prog->ctx[fn->ctxId];
-            auto &paramCtx = prog->ctx[paramCtxId];
+            auto fn = std::static_pointer_cast<CV::TypeFunction>(prog->getCtx(fnCtxId)->get(fnId));
+            auto &topExecCtx = prog->getCtx(fn->ctxId);
+            auto &paramCtx = prog->getCtx(paramCtxId);
 
             int targetCtxId = ins->data[3];
             int targetDataId = ins->data[4];
 
             // topExecCtx->memory.clear();
-            topExecCtx->prefetched.clear();
+            topExecCtx->clearPrefetch();
 
             // Prepare Context
             for(int i = 0; i < ins->params.size(); ++i){
-                auto &cins = prog->instructions[ins->params[i]];
+                auto &cins = prog->getIns(ins->params[i]);
                 auto v = CV::Execute(cins, paramCtx, prog, cursor, st);
                 if(cursor->error){
                     st->state = CV::ControlFlowState::CRASH;
@@ -1809,14 +1809,14 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
                 }   
                 // Is it prefix?
                 if(CV::Test::IsItPrefixInstruction(cins)){
-                    topExecCtx->memory[topExecCtx->names[cins->literal[0]]] = v;
+                    topExecCtx->set(topExecCtx->getName(cins->literal[0], true)[1], v);
                 }else{
-                    topExecCtx->memory[topExecCtx->names[fn->params[i]]] = v;
+                    topExecCtx->set(topExecCtx->getName(fn->params[i], true)[1], v);
                 }
             }
             // Execute
             auto execCtx = prog->createContext(topExecCtx);
-            auto v = CV::Execute(prog->instructions[fn->entrypoint], execCtx, prog, cursor, st);
+            auto v = CV::Execute(prog->getIns(fn->entrypoint), execCtx, prog, cursor, st);
             if(cursor->error){
                 st->state = CV::ControlFlowState::CRASH;
             }else  
@@ -1826,17 +1826,17 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
             }
 
             // Fulfill target
-            prog->ctx[targetCtxId]->memory[targetDataId] = v;
+            prog->getCtx(targetCtxId)->set(targetDataId, v);
 
             prog->deleteContext(execCtx->id);
             
             return std::shared_ptr<CV::Quant>(NULL);
         } break;
         case CV::InstructionType::CF_INVOKE_BINARY_FUNCTION: {
-            auto &fnData = prog->ctx[ins->data[0]]->memory[ins->data[1]];
+            auto &fnData = prog->getCtx(ins->data[0])->get(ins->data[1]);
             auto fn = std::static_pointer_cast<CV::TypeFunctionBinary>(fnData);
 
-            auto &paramCtx = prog->ctx[ins->data[2]];
+            auto &paramCtx = prog->getCtx(ins->data[2]);
 
             int targetCtxId = ins->data[4];
             int targetDataId = ins->data[5];
@@ -1845,7 +1845,7 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
             int nArgs = ins->data[3];
             std::vector<std::shared_ptr<CV::Instruction>> arguments;
             for(int i = 0; i < nArgs; ++i){
-                arguments.push_back(prog->instructions[ins->params[i]]);
+                arguments.push_back(prog->getIns(ins->params[i]));
             }
             
             // Cast ref into pointer function
@@ -1914,7 +1914,7 @@ std::shared_ptr<CV::Quant> CV::Execute(const CV::InsType &entry, const CV::Conte
             return result;
         }
         if(ins->next != CV::InstructionType::INVALID){
-            ins = prog->instructions[ins->next];
+            ins = prog->getIns(ins->next);
             continue;
         }
         break;
@@ -1955,20 +1955,26 @@ std::shared_ptr<CV::Quant> CV::Context::buildCopy(const std::shared_ptr<CV::Quan
             }
         };
     }
+    this->memoryMutex.lock();
     this->memory[c->id] = c;
+    this->memoryMutex.unlock();
     return c;
 }
 
 std::shared_ptr<CV::TypeNumber> CV::Context::buildNumber(number n){
     auto t = std::make_shared<CV::TypeNumber>();
+    this->memoryMutex.lock();
     this->memory[t->id] = t;
+    this->memoryMutex.unlock();
     t->v = n;
     return t;
 }
 
 std::shared_ptr<CV::Quant> CV::Context::buildNil(){
     auto t = std::make_shared<CV::Quant>();
+    this->memoryMutex.lock();
     this->memory[t->id] = t;
+    this->memoryMutex.unlock();
     return t;
 }
 
@@ -1995,14 +2001,18 @@ std::shared_ptr<CV::Quant> CV::Context::buildType(int type){
 
 std::shared_ptr<CV::TypeString> CV::Context::buildString(const std::string &s){
     auto t = std::make_shared<CV::TypeString>();
+    this->memoryMutex.lock();
     this->memory[t->id] = t;
+    this->memoryMutex.unlock();
     t->v = s;
     return t;
 }
 
 std::shared_ptr<CV::TypeList> CV::Context::buildList(const std::vector<std::shared_ptr<CV::Quant>> &list){
     auto t = std::make_shared<TypeList>();
+    this->memoryMutex.lock();
     this->memory[t->id] = t;
+    this->memoryMutex.unlock();
     for(int i = 0; i < list.size(); ++i){
         t->v.push_back(list[i]);
     }
@@ -2011,15 +2021,58 @@ std::shared_ptr<CV::TypeList> CV::Context::buildList(const std::vector<std::shar
 
 std::shared_ptr<CV::TypeStore> CV::Context::buildStore(const std::unordered_map<std::string, std::shared_ptr<CV::Quant>> &store){
     auto t = std::make_shared<TypeStore>();
+    this->memoryMutex.lock();
     this->memory[t->id] = t;
+    this->memoryMutex.unlock();
     for(auto &it : store){
         t->v[it.first] = it.second;
     }
     return t;
 }
 
-std::shared_ptr<CV::Quant> CV::Context::get(int id){
-    return std::shared_ptr<CV::Quant>(NULL);
+std::shared_ptr<CV::Quant> &CV::Context::get(int id){
+    memoryMutex.lock();
+    auto &v = this->memory[id];
+    memoryMutex.unlock();
+    return v;
+}
+
+void CV::Context::set(int id, const std::shared_ptr<CV::Quant> &q){
+    memoryMutex.lock();
+    this->memory[id] = q;
+    memoryMutex.unlock();
+}
+
+void CV::Context::setName(const std::string &name, unsigned id){
+    nameMutex.lock();
+    this->names[name] = id;
+    nameMutex.unlock();
+}
+
+void CV::Context::setPrefetch(unsigned id, const std::vector<unsigned> &v){
+    prefetchMutex.lock();
+    this->prefetched[id] = v;
+    prefetchMutex.unlock();
+}
+
+std::vector<unsigned> CV::Context::getPrefetch(unsigned id){
+    prefetchMutex.lock();
+    std::vector<unsigned> vs = this->prefetched[id];
+    prefetchMutex.unlock();
+    return vs;
+}  
+
+bool CV::Context::isPrefetched(unsigned id){
+    prefetchMutex.lock();
+    auto v = this->prefetched.count(id);
+    prefetchMutex.unlock();
+    return v > 0;
+}
+
+void CV::Context::clearPrefetch(){
+    prefetchMutex.lock();
+    this->prefetched.clear();
+    prefetchMutex.unlock();
 }
 
 std::shared_ptr<CV::TypeFunctionBinary> CV::Context::registerBinaryFuntion(const std::string &name, void *ref){
@@ -2027,14 +2080,25 @@ std::shared_ptr<CV::TypeFunctionBinary> CV::Context::registerBinaryFuntion(const
     fn->ref = ref;
     fn->ctxId = this->id;
     fn->name = name;
+    this->memoryMutex.lock();
     this->memory[fn->id] = fn;
+    this->memoryMutex.unlock();
     this->names[name] = fn->id;
     return fn;
 }
 
 // Name's context Id and data Id upwards
-std::vector<int> CV::Context::getName(const std::string &name){
-    return this->names.count(name) > 0 ? std::vector<int>({this->id, this->memory[this->names[name]]->id}) : (this->head.get() ? this->head->getName(name) : std::vector<int>({}));
+std::vector<int> CV::Context::getName(const std::string &name, bool local){
+    this->nameMutex.lock();
+    if(this->names.count(name) > 0){
+        std::vector<int> ids;
+        ids.push_back(this->id);
+        ids.push_back(this->get(this->names[name])->id);
+        this->nameMutex.unlock();
+        return ids;
+    }
+    this->nameMutex.unlock();
+    return (this->head.get() && !local ? this->head->getName(name) : std::vector<int>({}));
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2049,22 +2113,43 @@ CV::InsType CV::Program::createInstruction(unsigned type, const std::shared_ptr<
     ins->id = GEN_ID();
     ins->type = type;
     ins->token = token;
+    insMutex.lock();
     this->instructions[ins->id] = ins;
+    insMutex.unlock();
     return ins;
 }
 
 std::shared_ptr<CV::Context> CV::Program::createContext(const std::shared_ptr<CV::Context> &head){
     auto nctx = std::make_shared<CV::Context>(head);
+    ctxMutex.lock();
     this->ctx[nctx->id] = nctx;
+    ctxMutex.unlock();
     return nctx;
 }
 
 bool CV::Program::deleteContext(int id){
+    ctxMutex.lock();
     if(this->ctx.count(id) > 0){
         this->ctx.erase(id); // Careful!! TODO: Check
+        ctxMutex.unlock();
         return true;
     }
+    ctxMutex.unlock();
     return false;
+}
+
+std::shared_ptr<CV::Context> &CV::Program::getCtx(int id){
+    ctxMutex.lock();
+    auto &c = this->ctx[id];
+    ctxMutex.unlock();
+    return c;
+}
+
+std::shared_ptr<CV::Instruction> &CV::Program::getIns(int id){
+    this->insMutex.lock();
+    auto &i = this->instructions[id];
+    this->insMutex.unlock();
+    return i;
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

@@ -93,8 +93,8 @@ static void __CV_CORE_ARITHMETIC_ADDITION(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor)){
@@ -105,7 +105,7 @@ static void __CV_CORE_ARITHMETIC_ADDITION(
     auto result = dataCtx->buildNumber();
 
     // Fulfill promise in context
-    dataCtx->memory[dataId] = result;
+    dataCtx->set(dataId, result);
 
     // Do the operation
     for(int i = 0; i < args.size(); ++i){
@@ -132,8 +132,8 @@ static void __CV_CORE_ARITHMETIC_SUB(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor)){
@@ -144,7 +144,7 @@ static void __CV_CORE_ARITHMETIC_SUB(
     auto result = dataCtx->buildNumber();
 
     // Fulfill promise in context
-    dataCtx->memory[dataId] = result;
+    dataCtx->set(dataId, result);
 
     auto fv = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
@@ -179,8 +179,8 @@ static void __CV_CORE_ARITHMETIC_MULT(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor)){
@@ -191,7 +191,7 @@ static void __CV_CORE_ARITHMETIC_MULT(
     auto result = dataCtx->buildNumber();
 
     // Fulfill promise in context
-    dataCtx->memory[dataId] = result;
+    dataCtx->set(dataId, result);
 
     auto fv = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
@@ -227,8 +227,8 @@ static void __CV_CORE_ARITHMETIC_DIV(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor)){
@@ -239,7 +239,7 @@ static void __CV_CORE_ARITHMETIC_DIV(
     auto result = dataCtx->buildNumber();
 
     // Fulfill promise in context
-    dataCtx->memory[dataId] = result;
+    dataCtx->set(dataId, result);
 
     auto fv = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
@@ -280,8 +280,8 @@ static void __CV_CORE_BOOLEAN_AND(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor)){
@@ -292,7 +292,7 @@ static void __CV_CORE_BOOLEAN_AND(
     auto result = dataCtx->buildNumber();
 
     // Fulfill promise in context
-    dataCtx->memory[dataId] = result;
+    dataCtx->set(dataId, result);
 
     // Do the operation
     result->v = 1;
@@ -320,8 +320,8 @@ static void __CV_CORE_BOOLEAN_OR(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
     
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor)){
@@ -332,7 +332,7 @@ static void __CV_CORE_BOOLEAN_OR(
     auto result = dataCtx->buildNumber();
 
     // Fulfill promise in context
-    dataCtx->memory[dataId] = result;
+    dataCtx->set(dataId, result);
 
     // Do the operation
     result->v = 0;
@@ -360,8 +360,8 @@ static void __CV_CORE_BOOLEAN_NOT(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, token, cursor)){
@@ -372,7 +372,7 @@ static void __CV_CORE_BOOLEAN_NOT(
     auto result = dataCtx->buildNumber();
 
     // Fulfill promise in context
-    dataCtx->memory[dataId] = result;
+    dataCtx->set(dataId, result);
 
     // Do the operation
     auto v = CV::Execute(args[0], execCtx, prog, cursor, st);
@@ -403,8 +403,8 @@ static void __CV_CORE_CONDITIONAL_EQ(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor) ||
@@ -416,7 +416,7 @@ static void __CV_CORE_CONDITIONAL_EQ(
     auto result = dataCtx->buildNumber();
 
     // Fulfill promise in context
-    dataCtx->memory[dataId] = result;
+    dataCtx->set(dataId, result);
 
     // Do the operation
     auto ai = CV::Execute(args[0], execCtx, prog, cursor, st);
@@ -443,14 +443,14 @@ static void __CV_CORE_CONDITIONAL_EQ(
         if(cursor->error){
             return;
         }
-        dataCtx->memory[dataId] = trueBranch;
+        dataCtx->set(dataId, trueBranch);
     }else
     if(args.size() > 3 && !result->v){
         auto falseBranch = CV::Execute(args[3], execCtx, prog, cursor, st);
         if(cursor->error){
             return;
         }
-        dataCtx->memory[dataId] = falseBranch;
+        dataCtx->set(dataId, falseBranch);
     }    
 }
 
@@ -466,8 +466,8 @@ static void __CV_CORE_CONDITIONAL_NEQ(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor) ||
@@ -479,7 +479,7 @@ static void __CV_CORE_CONDITIONAL_NEQ(
     auto result = dataCtx->buildNumber();
 
     // Fulfill promise in context
-    dataCtx->memory[dataId] = result;
+    dataCtx->set(dataId, result);
 
     // Do the operation
     auto ai = CV::Execute(args[0], execCtx, prog, cursor, st);
@@ -507,7 +507,7 @@ static void __CV_CORE_CONDITIONAL_NEQ(
         if(cursor->error){
             return;
         }
-        dataCtx->memory[dataId] = trueBranch;
+        dataCtx->set(dataId, trueBranch);
     }else
     // FALSE BRANCH
     if(args.size() > 3 && !result->v){
@@ -515,7 +515,7 @@ static void __CV_CORE_CONDITIONAL_NEQ(
         if(cursor->error){
             return;
         }
-        dataCtx->memory[dataId] = falseBranch;
+        dataCtx->set(dataId, falseBranch);
     }    
 }
 #include <iostream>
@@ -531,8 +531,8 @@ static void __CV_CORE_CONDITIONAL_IF(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor) ||
@@ -544,7 +544,7 @@ static void __CV_CORE_CONDITIONAL_IF(
     auto result = dataCtx->buildNumber();
 
     // Fulfill promise in context
-    dataCtx->memory[dataId] = result;
+    dataCtx->set(dataId, result);
 
     // Do the operation
     auto condi = CV::Execute(args[0], execCtx, prog, cursor, st);
@@ -560,10 +560,10 @@ static void __CV_CORE_CONDITIONAL_IF(
         if(cursor->error){
             return;
         }
-        dataCtx->memory[dataId] = trueBranch;
+        dataCtx->set(dataId, trueBranch);
     }else
     if(args.size() == 2 && !result->v){
-        dataCtx->memory[dataId] = dataCtx->buildNil();
+        dataCtx->set(dataId, dataCtx->buildNil());
     }else
     // FALSE BRANCH
     if(args.size() > 2 && !result->v){
@@ -571,7 +571,7 @@ static void __CV_CORE_CONDITIONAL_IF(
         if(cursor->error){
             return;
         }
-        dataCtx->memory[dataId] = falseBranch;
+        dataCtx->set(dataId, falseBranch);
     }    
 }
 
@@ -589,8 +589,8 @@ static void __CV_CORE_CONDITIONAL_MORE_THAN(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor) ||
@@ -602,7 +602,7 @@ static void __CV_CORE_CONDITIONAL_MORE_THAN(
     auto result = dataCtx->buildNumber();
 
     // Fulfill promise in context
-    dataCtx->memory[dataId] = result;
+    dataCtx->set(dataId, result);
 
     // Do the operation
     auto ai = CV::Execute(args[0], execCtx, prog, cursor, st);
@@ -629,14 +629,14 @@ static void __CV_CORE_CONDITIONAL_MORE_THAN(
         if(cursor->error){
             return;
         }
-        dataCtx->memory[dataId] = trueBranch;
+        dataCtx->set(dataId, trueBranch);
     }else
     if(args.size() > 3 && !result->v){
         auto falseBranch = CV::Execute(args[3], execCtx, prog, cursor, st);
         if(cursor->error){
             return;
         }
-        dataCtx->memory[dataId] = falseBranch;
+        dataCtx->set(dataId, falseBranch);
     }    
 }
 
@@ -652,8 +652,8 @@ static void __CV_CORE_CONDITIONAL_MORE_OR_EQ(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor) ||
@@ -665,7 +665,7 @@ static void __CV_CORE_CONDITIONAL_MORE_OR_EQ(
     auto result = dataCtx->buildNumber();
 
     // Fulfill promise in context
-    dataCtx->memory[dataId] = result;
+    dataCtx->set(dataId, result);
 
     // Do the operation
     auto ai = CV::Execute(args[0], execCtx, prog, cursor, st);
@@ -692,14 +692,14 @@ static void __CV_CORE_CONDITIONAL_MORE_OR_EQ(
         if(cursor->error){
             return;
         }
-        dataCtx->memory[dataId] = trueBranch;
+        dataCtx->set(dataId, trueBranch);
     }else
     if(args.size() > 3 && !result->v){
         auto falseBranch = CV::Execute(args[3], execCtx, prog, cursor, st);
         if(cursor->error){
             return;
         }
-        dataCtx->memory[dataId] = falseBranch;
+        dataCtx->set(dataId, falseBranch);
     }    
 }
 
@@ -716,8 +716,8 @@ static void __CV_CORE_CONDITIONAL_LESS_THAN(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor) ||
@@ -729,7 +729,7 @@ static void __CV_CORE_CONDITIONAL_LESS_THAN(
     auto result = dataCtx->buildNumber();
 
     // Fulfill promise in context
-    dataCtx->memory[dataId] = result;
+    dataCtx->set(dataId, result);
 
     // Do the operation
     auto ai = CV::Execute(args[0], execCtx, prog, cursor, st);
@@ -756,14 +756,14 @@ static void __CV_CORE_CONDITIONAL_LESS_THAN(
         if(cursor->error){
             return;
         }
-        dataCtx->memory[dataId] = trueBranch;
+        dataCtx->set(dataId, trueBranch);
     }else
     if(args.size() > 3 && !result->v){
         auto falseBranch = CV::Execute(args[3], execCtx, prog, cursor, st);
         if(cursor->error){
             return;
         }
-        dataCtx->memory[dataId] = falseBranch;
+        dataCtx->set(dataId, falseBranch);
     }    
 }
 
@@ -779,8 +779,8 @@ static void __CV_CORE_CONDITIONAL_LESS_OR_EQUAL(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor) ||
@@ -792,7 +792,7 @@ static void __CV_CORE_CONDITIONAL_LESS_OR_EQUAL(
     auto result = dataCtx->buildNumber();
 
     // Fulfill promise in context
-    dataCtx->memory[dataId] = result;
+    dataCtx->set(dataId, result);
 
     // Do the operation
     auto ai = CV::Execute(args[0], execCtx, prog, cursor, st);
@@ -819,14 +819,14 @@ static void __CV_CORE_CONDITIONAL_LESS_OR_EQUAL(
         if(cursor->error){
             return;
         }
-        dataCtx->memory[dataId] = trueBranch;
+        dataCtx->set(dataId, trueBranch);
     }else
     if(args.size() > 3 && !result->v){
         auto falseBranch = CV::Execute(args[3], execCtx, prog, cursor, st);
         if(cursor->error){
             return;
         }
-        dataCtx->memory[dataId] = falseBranch;
+        dataCtx->set(dataId, falseBranch);
     }    
 }
 
@@ -849,8 +849,8 @@ static void __CV_CORE_LIST_NTH(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 2, name, token, cursor)){
@@ -891,7 +891,7 @@ static void __CV_CORE_LIST_NTH(
     auto &subject = list->v[index];
 
     // Fulfill promise in context
-    dataCtx->memory[dataId] = subject;
+    dataCtx->set(dataId, subject);
 }
 
 static void __CV_CORE_LIST_LENGTH(
@@ -906,8 +906,8 @@ static void __CV_CORE_LIST_LENGTH(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, token, cursor)){
@@ -928,7 +928,7 @@ static void __CV_CORE_LIST_LENGTH(
     auto result = dataCtx->buildNumber(list->v.size());
 
     // Fulfill promise in context
-    dataCtx->memory[dataId] = result;
+    dataCtx->set(dataId, result);
 
 }
 
@@ -944,8 +944,8 @@ static void __CV_CORE_LIST_PUSH(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 2, name, token, cursor)){
@@ -973,7 +973,7 @@ static void __CV_CORE_LIST_PUSH(
     target->v.push_back(subjectBranch);
 
     // Fulfill promise in context
-    dataCtx->memory[dataId] = target;
+    dataCtx->set(dataId, target);
 }
 
 static void __CV_CORE_LIST_POP(
@@ -988,8 +988,8 @@ static void __CV_CORE_LIST_POP(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, token, cursor)){
@@ -1006,7 +1006,7 @@ static void __CV_CORE_LIST_POP(
     auto list = std::static_pointer_cast<CV::TypeList>(listBranch);
 
     if(list->v.size() == 0){
-        dataCtx->memory[dataId] = list;
+        dataCtx->set(dataId, list);
     }
 
     auto subject = list->v[list->v.size()-1];
@@ -1014,7 +1014,7 @@ static void __CV_CORE_LIST_POP(
     list->v.erase(list->v.end()-1);
 
     // Fulfill promise in context
-    dataCtx->memory[dataId] = subject;
+    dataCtx->set(dataId, subject);
 
 }
 
@@ -1031,8 +1031,8 @@ static void __CV_CORE_LIST_SPLICE(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsOperands(args.size(), 2, name, token, cursor)){
@@ -1057,7 +1057,7 @@ static void __CV_CORE_LIST_SPLICE(
     }
 
     // Fulfill promise in context
-    dataCtx->memory[dataId] = result;
+    dataCtx->set(dataId, result);
 }
 
 
@@ -1073,8 +1073,8 @@ static void __CV_CORE_LIST_RESERVE(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, token, cursor)){
@@ -1096,7 +1096,7 @@ static void __CV_CORE_LIST_RESERVE(
     }
 
     // Fulfill promise in context
-    dataCtx->memory[dataId] = result;
+    dataCtx->set(dataId, result);
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1117,8 +1117,8 @@ static void __CV_CORE_MUT_PLUSPLUS(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, token, cursor)){
@@ -1138,7 +1138,7 @@ static void __CV_CORE_MUT_PLUSPLUS(
     ++std::static_pointer_cast<CV::TypeNumber>(subjectBranch)->v;
 
     // Fulfill promise in context
-    dataCtx->memory[dataId] = subjectBranch;
+    dataCtx->set(dataId, subjectBranch);
 }
 
 static void __CV_CORE_MUT_MINUSMINUS(
@@ -1153,8 +1153,8 @@ static void __CV_CORE_MUT_MINUSMINUS(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, token, cursor)){
@@ -1174,7 +1174,7 @@ static void __CV_CORE_MUT_MINUSMINUS(
     --std::static_pointer_cast<CV::TypeNumber>(subjectBranch)->v;
 
     // Fulfill promise in context
-    dataCtx->memory[dataId] = subjectBranch;
+    dataCtx->set(dataId, subjectBranch);
 }
 
 
@@ -1190,8 +1190,8 @@ static void __CV_CORE_MUT_SLASHSLASH(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, token, cursor)){
@@ -1211,7 +1211,7 @@ static void __CV_CORE_MUT_SLASHSLASH(
     std::static_pointer_cast<CV::TypeNumber>(subjectBranch)->v /= static_cast<CV_DEFAULT_NUMBER_TYPE>(2.0);
 
     // Fulfill promise in context
-    dataCtx->memory[dataId] = subjectBranch;
+    dataCtx->set(dataId, subjectBranch);
 }
 
 static void __CV_CORE_MUT_STARSTAR(
@@ -1226,8 +1226,8 @@ static void __CV_CORE_MUT_STARSTAR(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, token, cursor)){
@@ -1247,7 +1247,7 @@ static void __CV_CORE_MUT_STARSTAR(
     std::static_pointer_cast<CV::TypeNumber>(subjectBranch)->v *= std::static_pointer_cast<CV::TypeNumber>(subjectBranch)->v;
 
     // Fulfill promise in context
-    dataCtx->memory[dataId] = subjectBranch;
+    dataCtx->set(dataId, subjectBranch);
 }
 
 
@@ -1269,8 +1269,8 @@ static void __CV_CORE_LOOP_WHILE(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsOperands(args.size(), 1, name, token, cursor)){
@@ -1343,7 +1343,7 @@ static void __CV_CORE_LOOP_WHILE(
     }
     
     // Fulfill promise in context
-    dataCtx->memory[dataId] = result;
+    dataCtx->set(dataId, result);
 }
 
 CV::InsType GetPrefixer(const std::vector<CV::InsType> &src, const std::string &name){
@@ -1379,8 +1379,8 @@ static void __CV_CORE_LOOP_FOR(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
     if( !CV::ErrorCheck::ExpectsOperands(args.size(), 1, name, token, cursor)){
         return;
@@ -1485,7 +1485,7 @@ static void __CV_CORE_LOOP_FOR(
         result = dataCtx->buildNil();
     }
     // Fulfill promise in context
-    dataCtx->memory[dataId] = result;
+    dataCtx->set(dataId, result);
 }
 
 /*
@@ -1508,8 +1508,8 @@ static void __CV_CORE_PRINT(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
     if(!CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor)){
         return;
@@ -1532,7 +1532,7 @@ static void __CV_CORE_PRINT(
     printf("%s\n", v.c_str());
 
     // Fulfill promise in context
-    dataCtx->memory[dataId] = dataCtx->buildNil();
+    dataCtx->set(dataId, dataCtx->buildNil());
 }
 
 

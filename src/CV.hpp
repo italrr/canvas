@@ -411,9 +411,9 @@
 
         struct Context {
             int id;
-            std::unordered_map<unsigned, std::shared_ptr<CV::Quant>> memory;
-            std::unordered_map<std::string, unsigned> names;
-            std::unordered_map<unsigned, std::vector<unsigned>> prefetched;
+            std::mutex memoryMutex;
+            std::mutex nameMutex;
+            std::mutex prefetchMutex;
             std::shared_ptr<CV::Context> head;
             Context();
             Context(const std::shared_ptr<CV::Context> &head);
@@ -424,20 +424,36 @@
             std::shared_ptr<CV::TypeList> buildList(const std::vector<std::shared_ptr<CV::Quant>> &list = {});
             std::shared_ptr<CV::TypeStore> buildStore(const std::unordered_map<std::string, std::shared_ptr<CV::Quant>> &list = {});
             std::shared_ptr<CV::TypeString> buildString(const std::string &s = "");
-            std::shared_ptr<CV::Quant> get(int id);
             std::shared_ptr<TypeFunctionBinary> registerBinaryFuntion(const std::string &name, void *ref);
-            std::vector<int> getName(const std::string &name);
+            std::vector<int> getName(const std::string &name, bool local = false);
+            std::shared_ptr<CV::Quant> &get(int id);
+            void set(int id, const std::shared_ptr<CV::Quant> &q);
+            void setName(const std::string &name, unsigned id);
+            void setPrefetch(unsigned id, const std::vector<unsigned> &v);
+            std::vector<unsigned> getPrefetch(unsigned id);
+            bool isPrefetched(unsigned id);
+            void clearPrefetch();
+            std::unordered_map<unsigned, std::vector<unsigned>> prefetched;
+            std::unordered_map<std::string, unsigned> names;
+            std::unordered_map<unsigned, std::shared_ptr<CV::Quant>> memory;
         };
 
-        struct Program {
+        class Program {
+            public:
+            std::mutex ctxMutex;
             unsigned entrypointIns;
             std::shared_ptr<Context> rootContext;
             std::unordered_map<unsigned, void*> loadedDynamicLibs;
-            std::unordered_map<unsigned, std::shared_ptr<CV::Context>> ctx; 
-            std::unordered_map<unsigned, std::shared_ptr<CV::Instruction>> instructions;
             std::shared_ptr<CV::Instruction> createInstruction(unsigned type, const std::shared_ptr<CV::Token> &token);
             std::shared_ptr<Context> createContext(const std::shared_ptr<CV::Context> &head = std::shared_ptr<CV::Context>(NULL));
             bool deleteContext(int id);
+            std::shared_ptr<CV::Context> &getCtx(int id);
+            std::mutex insMutex;
+            std::shared_ptr<CV::Instruction> &getIns(int id);
+            private:
+            std::unordered_map<unsigned, std::shared_ptr<CV::Instruction>> instructions;
+            std::unordered_map<unsigned, std::shared_ptr<CV::Context>> ctx; 
+
         };
 
         struct ControlFlow {

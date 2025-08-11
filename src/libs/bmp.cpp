@@ -104,21 +104,21 @@ static void __CV_STD_BMP_LOAD(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, {"FILENAME"}, token, cursor)){
-        dataCtx->memory[dataId] = dataCtx->buildNil();
+        dataCtx->set(dataId, dataCtx->buildNil());
         return;
     }
     auto param0Filename = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
-        dataCtx->memory[dataId] = dataCtx->buildNumber(0);
+        dataCtx->set(dataId, dataCtx->buildNumber(0));
         return;
     }
     if(!CV::ErrorCheck::ExpectsTypeAt(param0Filename->type, CV::QuantType::STRING, 0, name, token, cursor)){
-        dataCtx->memory[dataId] = dataCtx->buildNil();
+        dataCtx->set(dataId, dataCtx->buildNil());
         return;
     }
 
@@ -126,7 +126,7 @@ static void __CV_STD_BMP_LOAD(
 
     if(!CV::Tools::fileExists(filename)){
         cursor->setError("File Not Found", "File '"+filename+"' does not exist", token);
-        dataCtx->memory[dataId] = dataCtx->buildNil();
+        dataCtx->set(dataId, dataCtx->buildNil());
         return;
     }
 
@@ -135,7 +135,7 @@ static void __CV_STD_BMP_LOAD(
 
     if(!data){
         cursor->setError("Bad Image Format", "File '"+filename+"' is an invalid image or not compatible with this library", token);
-        dataCtx->memory[dataId] = dataCtx->buildNil();
+        dataCtx->set(dataId, dataCtx->buildNil());
         return;
     }
 
@@ -154,7 +154,7 @@ static void __CV_STD_BMP_LOAD(
 
     delete data;
 
-    dataCtx->memory[dataId] = handle;
+    dataCtx->set(dataId,  handle);
 }
 
 
@@ -170,28 +170,28 @@ static void __CV_STD_BMP_WRITE(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 3, name, {"BMP", "FORMAT", "FILENAME"}, token, cursor)){
-        dataCtx->memory[dataId] = dataCtx->buildNumber(0);
+        dataCtx->set(dataId, dataCtx->buildNumber(0));
         return;
     }
     // Get BMP Store
     auto param0Store = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
-        dataCtx->memory[dataId] = dataCtx->buildNumber(0);
+        dataCtx->set(dataId, dataCtx->buildNumber(0));
         return;
     }
     if(!CV::ErrorCheck::ExpectsTypeAt(param0Store->type, CV::QuantType::STORE, 0, name, token, cursor)){
-        dataCtx->memory[dataId] = dataCtx->buildNumber(0);
+        dataCtx->set(dataId, dataCtx->buildNumber(0));
         return;
     }
     std::string p0err;
     if(!isValidBmpStore(param0Store, p0err)){
         cursor->setError("Invalid BMP Store", p0err, token);
-        dataCtx->memory[dataId] = dataCtx->buildNumber(0);
+        dataCtx->set(dataId, dataCtx->buildNumber(0));
         return;
     }
     auto store = std::static_pointer_cast<CV::TypeStore>(param0Store);
@@ -203,11 +203,11 @@ static void __CV_STD_BMP_WRITE(
     // Get Format
     auto param1Format = CV::Execute(args[1], execCtx, prog, cursor, st);
     if(cursor->error){
-        dataCtx->memory[dataId] = dataCtx->buildNumber(0);
+        dataCtx->set(dataId, dataCtx->buildNumber(0));
         return;
     }
     if(!CV::ErrorCheck::ExpectsTypeAt(param1Format->type, CV::QuantType::STRING, 1, name, token, cursor)){
-        dataCtx->memory[dataId] = dataCtx->buildNumber(0);
+        dataCtx->set(dataId, dataCtx->buildNumber(0));
         return;
     }
     auto &format = std::static_pointer_cast<CV::TypeString>(param1Format)->v;
@@ -215,11 +215,11 @@ static void __CV_STD_BMP_WRITE(
     // Get Filename
     auto param2Filename = CV::Execute(args[2], execCtx, prog, cursor, st);
     if(cursor->error){
-        dataCtx->memory[dataId] = dataCtx->buildNumber(0);
+        dataCtx->set(dataId, dataCtx->buildNumber(0));
         return;
     }
     if(!CV::ErrorCheck::ExpectsTypeAt(param2Filename->type, CV::QuantType::STRING, 2, name, token, cursor)){
-        dataCtx->memory[dataId] = dataCtx->buildNumber(0);
+        dataCtx->set(dataId, dataCtx->buildNumber(0));
         return;
     }
     auto &filename = std::static_pointer_cast<CV::TypeString>(param2Filename)->v;
@@ -244,14 +244,14 @@ static void __CV_STD_BMP_WRITE(
         stbi_write_jpg(filename.c_str(), width, height, nchannel, img, 100);  
     }else{
         cursor->setError("Invalid Image Format", "Parameter 1 Image Format ('"+format+"') is invalid or unsupported", token);
-        dataCtx->memory[dataId] = dataCtx->buildNumber(0);
+        dataCtx->set(dataId, dataCtx->buildNumber(0));
         delete img; 
         return;
     }
 
     delete img;
 
-    dataCtx->memory[dataId] = dataCtx->buildNumber(1);
+    dataCtx->set(dataId,  dataCtx->buildNumber(1));
 }
 
 
@@ -268,28 +268,28 @@ static void __CV_STD_BMP_SET_PIXEL_AT(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 3, name, {"BMP", "POS", "PIXEL"}, token, cursor)){
-        dataCtx->memory[dataId] = dataCtx->buildNumber(0);
+        dataCtx->set(dataId, dataCtx->buildNumber(0));
         return;
     }
     // Get BMP Store
     auto param0Store = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
-        dataCtx->memory[dataId] = dataCtx->buildNumber(0);
+        dataCtx->set(dataId, dataCtx->buildNumber(0));
         return;
     }
     if(!CV::ErrorCheck::ExpectsTypeAt(param0Store->type, CV::QuantType::STORE, 0, name, token, cursor)){
-        dataCtx->memory[dataId] = dataCtx->buildNumber(0);
+        dataCtx->set(dataId, dataCtx->buildNumber(0));
         return;
     }
     std::string p0err;
     if(!isValidBmpStore(param0Store, p0err)){
         cursor->setError("Invalid BMP Store", p0err, token);
-        dataCtx->memory[dataId] = dataCtx->buildNumber(0);
+        dataCtx->set(dataId, dataCtx->buildNumber(0));
         return;
     }
     auto store = std::static_pointer_cast<CV::TypeStore>(param0Store);
@@ -302,34 +302,34 @@ static void __CV_STD_BMP_SET_PIXEL_AT(
     // Get Pixel Position
     auto param1Pos = CV::Execute(args[1], execCtx, prog, cursor, st);
     if(cursor->error){
-        dataCtx->memory[dataId] = dataCtx->buildNumber(0);
+        dataCtx->set(dataId, dataCtx->buildNumber(0));
         return;
     }
     if(!CV::ErrorCheck::ExpectsTypeAt(param1Pos->type, CV::QuantType::LIST, 1, name, token, cursor)){
-        dataCtx->memory[dataId] = dataCtx->buildNumber(0);
+        dataCtx->set(dataId, dataCtx->buildNumber(0));
         return;
     }
     std::string p1err;
     if(!isValidPosition(width, height, param1Pos, p1err)){
         cursor->setError("Invalid Position", p1err, token);
-        dataCtx->memory[dataId] = dataCtx->buildNumber(0);
+        dataCtx->set(dataId, dataCtx->buildNumber(0));
     }
     auto pos = std::static_pointer_cast<CV::TypeList>(param1Pos);
 
     // Get Pixel
     auto param2Pos = CV::Execute(args[2], execCtx, prog, cursor, st);
     if(cursor->error){
-        dataCtx->memory[dataId] = dataCtx->buildNumber(0);
+        dataCtx->set(dataId, dataCtx->buildNumber(0));
         return;
     }
     if(!CV::ErrorCheck::ExpectsTypeAt(param2Pos->type, CV::QuantType::LIST, 2, name, token, cursor)){
-        dataCtx->memory[dataId] = dataCtx->buildNumber(0);
+        dataCtx->set(dataId, dataCtx->buildNumber(0));
         return;
     }
     std::string p2err;
     if(!isValidPixel(nchannel, param2Pos, p2err)){
         cursor->setError("Invalid Pixel", p2err, token);
-        dataCtx->memory[dataId] = dataCtx->buildNumber(0);
+        dataCtx->set(dataId, dataCtx->buildNumber(0));
     }
     auto pixel = std::static_pointer_cast<CV::TypeList>(param2Pos);
 
@@ -344,7 +344,7 @@ static void __CV_STD_BMP_SET_PIXEL_AT(
         data[index + i] = std::static_pointer_cast<CV::TypeNumber>(pixel->v[i]);
     }
 
-    dataCtx->memory[dataId] = dataCtx->buildNumber(1);
+    dataCtx->set(dataId, dataCtx->buildNumber(1));
 }
 
 extern "C" void _CV_REGISTER_LIBRARY(const std::shared_ptr<CV::Program> &prog, const CV::ContextType &ctx, const CV::CursorType &cursor){

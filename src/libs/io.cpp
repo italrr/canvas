@@ -27,8 +27,8 @@ static void __CV_STD_IO_OUT(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsOperands(args.size(), 1, name, token, cursor)){
@@ -50,7 +50,7 @@ static void __CV_STD_IO_OUT(
     ___WRITE_STDOUT(out);
 
 
-    dataCtx->memory[dataId] = dataCtx->buildNil();
+    dataCtx->set(dataId, dataCtx->buildNil());
 }
 
 static void __CV_STD_IO_ERR(
@@ -65,8 +65,8 @@ static void __CV_STD_IO_ERR(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsOperands(args.size(), 1, name, token, cursor)){
@@ -88,7 +88,7 @@ static void __CV_STD_IO_ERR(
     ___WRITE_STDERR(out);
 
 
-    dataCtx->memory[dataId] = dataCtx->buildNil();
+    dataCtx->set(dataId, dataCtx->buildNil());
 }
 
 static void __CV_STD_IO_IN(
@@ -103,8 +103,8 @@ static void __CV_STD_IO_IN(
     const CV::CFType &st
 ){
     // Fetch context & data target
-    auto &dataCtx = prog->ctx[ctxId];
-    auto &execCtx = prog->ctx[execCtxId];
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ){
         return;
@@ -113,7 +113,7 @@ static void __CV_STD_IO_IN(
     std::string input;
     ___GET_STDIN(input);
 
-    dataCtx->memory[dataId] = dataCtx->buildString(input);
+    dataCtx->set(dataId, dataCtx->buildString(input));
 }
 
 extern "C" void _CV_REGISTER_LIBRARY(const std::shared_ptr<CV::Program> &prog, const CV::ContextType &ctx, const CV::CursorType &cursor){
