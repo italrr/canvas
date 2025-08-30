@@ -51,15 +51,43 @@ canvas[~] v1.0.0 X86_64 [WINDOWS] released in Oct. 1st 2025
 [5 9 2]
 ```
 
-The takeaway is that the user is highly encouraged to be explicit when needed to avoid unexpected behaviors.
+The takeaway is that the user is highly encouraged to be explicit when needed to avoid unexpected behavior.
 
 ### Prefixers
 
-Prefixers are special syntactic tools that pretend to increase expressiveness. One of the prefixers is the Positional Prefixer (~). It simplifies passing parameters to functions by name ignoring the order.
+Prefixers are special syntactic tools that pretend to increase expressiveness. One of the prefixers is the Namer (~). What the namer does is, it gives a name/symbol to a type within the current context.
 
-For example, let's say I have a "func" function that takes 2 arguments: param1 and param2. Boths of these arguments are defined as Positional. This means I can execute this function the following way
+## Namer
+
+As previously mentioned, the namer simply defines a name for us to refer to a type. The namer is usually used in Store definitions and Positional Parameters
+
+### Explicit Store definition
+```
+[~]> [[b:store [~j 200]]]
+[[~j 200]]
+```
+
+### Implicit Stores
+```
+[~]> [[[~n 10][~k 25.5]]] # Similar to lists, if we define items in what could be an implicit array, but these are named,
+                          # it interprets it as a Store definition.
+[[~k 25.5] [~n 10]]
+```
+
+### Positional Parameter / Let
+For example, let's say I have a "func" function that takes 2 paramters: param1 and param2, in that order. I can execute this function the following way
 
 ```func [~param2 VALUE2] [~param1 VALUE1]```
+
+Function invocations create a context on the fly, so the interpreter allows me to fulfill a parameter requirenment by giving a name to type during runtime.
+
+The Namer can also be used as a replacement for `let`:
+
+```
+[~var 19200] # This defines a name/symbol called `var` that points the type number `19200`.
+```
+
+It doesn't work as well for `mut`, because canvas doesn't really deal with data in names, but references, so even though you might replace a variable's name with another type, the created references will still point to the original value. This is because Namer is mostly a runtime instruction.
 
 ## Dependencies
 `canvas` does not require any special dependency. It only requires a C++11 capable compiler, preferably GCC (or MINGW), but other Unix-like compilers can work. Visual Studio Compiler wouldn't compile without some work as `canvas` expects a Unix-like compiler/environment. For Windows it's highly recommended using MINGW.

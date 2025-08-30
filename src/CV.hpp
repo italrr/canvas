@@ -339,6 +339,7 @@
                 PROXY_PROMISE,                              // DATA[0] -> CTX_ID, DATA[1] -> PROMISED_DATA_ID |  PARAM[0] -> TARGET_INS, 
                 PROXY_DYNAMIC,                              // DATA[0] -> CTX_ID, DATA[1] -> DATA_ID, DATA[n] -> ...LITERAL, OPTIONAL: PARAM[0] -> preprocess
                 PROXY_NAMER,                                // PARAM[0] -> TARGET_INS | LITERAL[0] -> NAME                            
+                PROXY_EXPANDER,                             // PARAM[0] -> TARGET_INS
                 PROXY_ACCESS,                               // DATA[0] -> CTX_ID, DATA[1] -> DATA_ID, LITERAL[0] -> NAME
             };
         }

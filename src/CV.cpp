@@ -806,8 +806,22 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                 cursor->subject = origin;
                 return prog->createInstruction(CV::InstructionType::NOOP, origin);
             }
-            ins->params.push_back(fetched->id);
-            list->v.push_back(std::shared_ptr<CV::Quant>(NULL));
+            if(fetched->type == CV::InstructionType::PROXY_EXPANDER){
+                auto targetIns = prog->getIns(fetched->params[0]);
+                if( targetIns->type == CV::InstructionType::CONSTRUCT_LIST ||
+                    targetIns->type == CV::InstructionType::CONSTRUCT_STORE){
+                    for(int j = 0; j < targetIns->params.size(); ++j){
+                        ins->params.push_back(targetIns->params[j]);
+                        list->v.push_back(std::shared_ptr<CV::Quant>(NULL));
+                    }
+                }else{
+                    ins->params.push_back(fetched->id);
+                    list->v.push_back(std::shared_ptr<CV::Quant>(NULL));                    
+                }
+            }else{
+                ins->params.push_back(fetched->id);
+                list->v.push_back(std::shared_ptr<CV::Quant>(NULL));
+            }
         }
         return ins;
     };
@@ -826,6 +840,11 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
             }
             if(fetched->type != CV::InstructionType::PROXY_NAMER){
                 cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "'"+name+"' may only be able to construct named types using NAMER prefixer", origin);
+                return prog->createInstruction(CV::InstructionType::NOOP, origin);
+            }
+            // Deny expander usage in Stores
+            if(fetched->type != CV::InstructionType::PROXY_EXPANDER){
+                cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "Expander Prefixer cannot be used while constructing Stores", inc);
                 return prog->createInstruction(CV::InstructionType::NOOP, origin);
             }
             ins->params.push_back(fetched->id);
@@ -1225,6 +1244,33 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                 return ins;
             }
         }else
+        // EXPANDER
+        if(token->first[0] == '^'){
+            if(token->first.length() > 1){
+                std::string subpart(token->first.begin() + 1, token->first.end());
+                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "Expander Prefix '"+token->first+"' may not be appended with '"+subpart+"'", token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);                            
+            }
+            if(token->inner.size() != 1){
+                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "Expander Prefix '"+token->first+"' expects exactly one value", token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);                                            
+            }
+
+            auto ins = prog->createInstruction(CV::InstructionType::PROXY_EXPANDER, token);
+            ins->data.push_back(CV_INS_PREFIXER_IDENTIFIER_INSTRUCTION);
+            ins->data.push_back(CV::Prefixer::NAMER);
+            std::shared_ptr<CV::Quant> ghostData;
+
+            auto &inc = token->inner[0];
+            auto fetched = CV::Translate(inc, prog, ctx, cursor);
+            if(cursor->error){
+                cursor->subject = token;
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
+            ins->params.push_back(fetched->id);
+
+            return ins;
+        }else
         // NAMER
         if(token->first[0] == '~'){
             auto name = std::string(token->first.begin()+1, token->first.end());
@@ -1320,7 +1366,19 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                                 cursor->subject = token;
                                 return prog->createInstruction(CV::InstructionType::NOOP, token);
                             }                        
-                            ins->params.push_back(fetched->id);
+                            if(fetched->type == CV::InstructionType::PROXY_EXPANDER){
+                                auto targetIns = prog->getIns(fetched->params[0]);
+                                if( targetIns->type == CV::InstructionType::CONSTRUCT_LIST ||
+                                    targetIns->type == CV::InstructionType::CONSTRUCT_STORE){
+                                    for(int j = 0; j < targetIns->params.size(); ++j){
+                                        ins->params.push_back(targetIns->params[j]);
+                                    }
+                                }else{
+                                    ins->params.push_back(fetched->id);
+                                }
+                            }else{
+                                ins->params.push_back(fetched->id);
+                            }
                         }
 
                         auto childIns = prog->createInstruction(CV::InstructionType::PROXY_PROMISE, token);
@@ -1343,16 +1401,29 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                         ins->data.push_back(quant->id);
                         // Where the params to the function are stored 
                         ins->data.push_back(tempCtx->id); // With the store parameters to the function
-                        ins->data.push_back(token->inner.size());
                         for(int i = 0; i < token->inner.size(); ++i){
                             auto &inc = token->inner[i];
                             auto fetched = CV::Translate(inc, prog, tempCtx, cursor);
                             if(cursor->error){
                                 cursor->subject = token;
                                 return prog->createInstruction(CV::InstructionType::NOOP, token);
-                            }                        
-                            ins->params.push_back(fetched->id);
+                            }
+                            if(fetched->type == CV::InstructionType::PROXY_EXPANDER){
+                                auto targetIns = prog->getIns(fetched->params[0]);
+
+                                if( targetIns->type == CV::InstructionType::CONSTRUCT_LIST ||
+                                    targetIns->type == CV::InstructionType::CONSTRUCT_STORE){
+                                    for(int j = 0; j < targetIns->params.size(); ++j){
+                                        ins->params.push_back(targetIns->params[j]);
+                                    }
+                                }else{
+                                    ins->params.push_back(fetched->id);
+                                }
+                            }else{
+                                ins->params.push_back(fetched->id);
+                            }
                         }
+                        ins->data.push_back(ins->params.size());
                         // Build Promise Proxy to store result value 
                         auto childIns = prog->createInstruction(CV::InstructionType::PROXY_PROMISE, token);
                         auto targetData = hctx->buildNil();
@@ -1572,6 +1643,21 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
             // TODO: Perhaps some error checking?
             return store->v[mname];
         };
+        case CV::InstructionType::PROXY_EXPANDER: {
+            if(ctx->isPrefetched(ins->id)){
+                auto dir = ctx->getPrefetch(ins->id);
+                return prog->getCtx(dir[0])->get(dir[1]);
+            }
+            std::shared_ptr<CV::Quant> quant;
+            auto &entrypoint = prog->getIns(ins->params[0]);
+            quant = CV::Execute(entrypoint, ctx, prog, cursor, st);
+            if(cursor->error){
+                st->state = CV::ControlFlowState::CRASH;
+                return ctx->buildNil();
+            }
+            ctx->setPrefetch(ins->id, {(unsigned)ctx->id, (unsigned)quant->id});
+            return quant;            
+        };
         case CV::InstructionType::PROXY_NAMER: {
             if(ctx->isPrefetched(ins->id)){
                 auto dir = ctx->getPrefetch(ins->id);
@@ -1630,12 +1716,21 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
             auto &qlist = cctx->get(ins->data[1]);
             auto list = std::static_pointer_cast<CV::TypeList>(qlist);
             for(int i = 0; i < ins->params.size(); ++i){
-                auto quant = CV::Execute(prog->getIns(ins->params[i]), cctx, prog, cursor, st);
+                auto cins = prog->getIns(ins->params[i]);
+                bool isExpander = cins->type == CV::InstructionType::PROXY_EXPANDER;
+                auto quant = CV::Execute(cins, cctx, prog, cursor, st);
                 if(cursor->error){
                     st->state = CV::ControlFlowState::CRASH;
                     return ctx->buildNil();
                 }
-                list->v[i] = quant;
+                if(isExpander && quant->type == CV::QuantType::LIST){
+                    auto subject = std::static_pointer_cast<CV::TypeList>(quant);
+                    for(int j = 0; j < subject->v.size(); ++j){
+                        list->v.push_back(subject->v[j]);
+                    }
+                }else{
+                    list->v[i] = quant;
+                }
             }   
             return std::static_pointer_cast<CV::Quant>(list);
         };
@@ -1800,6 +1895,7 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
             topExecCtx->clearPrefetch();
 
             // Prepare Context
+            int namei = 0;
             for(int i = 0; i < ins->params.size(); ++i){
                 auto &cins = prog->getIns(ins->params[i]);
                 auto v = CV::Execute(cins, paramCtx, prog, cursor, st);
@@ -1808,10 +1904,25 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
                     return v;
                 }   
                 // Is it prefix?
-                if(CV::Test::IsItPrefixInstruction(cins)){
+                if(CV::Test::IsItPrefixInstruction(cins) && cins->type == CV::InstructionType::PROXY_NAMER){
                     topExecCtx->set(topExecCtx->getName(cins->literal[0], true)[1], v);
+                }else
+                if( CV::Test::IsItPrefixInstruction(cins) &&
+                    cins->type == CV::InstructionType::PROXY_EXPANDER &&
+                    v->type == CV::QuantType::LIST){
+                    auto inner = std::static_pointer_cast<CV::TypeList>(v);
+                    for(int j = 0; j < inner->v.size(); ++j){
+                        int fin = namei + j;
+                        if(fin >= fn->params.size()){
+                            cursor->setError(CV_ERROR_MSG_WRONG_OPERANDS, "Provided wrong number of parameters("+std::to_string(fin)+") through the Expander", ins->token);
+                            return ctx->buildNil();
+                        }
+                        topExecCtx->set(topExecCtx->getName(fn->params[fin], true)[1], inner->v[j]);
+                    }
+                    namei += inner->v.size();
                 }else{
-                    topExecCtx->set(topExecCtx->getName(fn->params[i], true)[1], v);
+                    topExecCtx->set(topExecCtx->getName(fn->params[namei], true)[1], v);
+                    ++namei;
                 }
             }
             // Execute
@@ -1845,9 +1956,22 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
             int nArgs = ins->data[3];
             std::vector<std::shared_ptr<CV::Instruction>> arguments;
             for(int i = 0; i < nArgs; ++i){
-                arguments.push_back(prog->getIns(ins->params[i]));
+                auto cins = prog->getIns(ins->params[i]);
+                if(cins->type == CV::InstructionType::PROXY_EXPANDER){
+                    auto innerIns = prog->getIns(cins->params[0]);
+                    if(innerIns->type == CV::InstructionType::CONSTRUCT_LIST){
+                        for(int j = 0; j < innerIns->params.size(); ++j){
+                            arguments.push_back( prog->getIns(innerIns->params[j]) );
+                        }
+                    }else{
+                        arguments.push_back(cins);
+                    }
+                }else{
+                    arguments.push_back(cins);
+                }
             }
-            
+
+
             // Cast ref into pointer function
             void (*ref)(CV_BINARY_FN_PARAMS) = (void (*)(CV_BINARY_FN_PARAMS))fn->ref;
 
