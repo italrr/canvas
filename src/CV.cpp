@@ -1,37 +1,131 @@
-#include <fstream>
-#include <set>
-#include <sys/stat.h>
-#include <stdarg.h>
-#include <string.h>
-#include <sys/stat.h>
+// SYSTEM INCLUDES
+#include <iostream>
 #include <stdio.h>
-#include <stdlib.h>
+#include <stdarg.h>
+#include <functional>
+#include <sys/stat.h>
+#include <fstream>
+
+// LOCAL INCLUDES
 #include "CV.hpp"
 
-#define __CV_DEBUG 1
-#define SHARED std::shared_ptr
-#define VECTOR std::vector
-
-#if __CV_DEBUG == 1
-    #include <iostream>
+// DYNAMIC LIBRARY STUFF
+#if (_CV_PLATFORM == _CV_PLATFORM_TYPE_LINUX)
+    #include <dlfcn.h> 
+#elif  (_CV_PLATFORM == _CV_PLATFORM_TYPE_WINDOWS)
+    // should prob move the entire DLL loading routines to its own file
+    #include <Libloaderapi.h>
 #endif
 
+static bool UseColorOnText = false;
 
-static const std::string GENERIC_UNDEFINED_SYMBOL_ERROR = "Undefined constructor or name within this context or above";
-static bool useColorOnText = true;
+struct InvokeThread {
+    CV::TypeThread *core;
+    CV::ProgramType prog;
+    CV::CursorType upcursor;
+    CV::TokenType root;
+};
 
-/* -------------------------------------------------------------------------------------------------------------------------------- */
-// Tools
+static void RUN_THREAD(std::shared_ptr<InvokeThread> handle){
+
+    auto &prog = handle->prog;
+    auto core = handle->core;
+    auto &upcursor = handle->upcursor;
+    auto &root = handle->root;
+    auto &entrypoint = prog->getIns( core->entrypoint );
+
+    auto ctx = prog->getCtx( core->ctxId );
+    auto st = std::make_shared<CV::ControlFlow>();
+    st->state = CV::ControlFlowState::CONTINUE;
+    auto cursor = std::make_shared<CV::Cursor>();
+    auto r = CV::Execute(entrypoint, ctx, prog, cursor, st);
+    if(cursor->error){
+        st->state = CV::ControlFlowState::CRASH;
+        upcursor->setError(cursor->title, "Crash in Thread "+std::to_string(core->threadId)+": "+cursor->message, root);
+    }
+    ctx->set(r->id, r);
+    core->returnId = r->id;
+    core->setState(CV::ThreadState::FINISHED);
+    handle->prog->deleteThread(core->threadId);
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//  TOOLS
+// 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace CV {
-    namespace Tools {
-        
-        #if __CV_DEBUG == 1
-        static void printList(const VECTOR<std::string> &list){
-            for(unsigned i = 0; i < list.size(); ++i){
-                std::cout << "'" << list[i] << "'" << std::endl;
+    namespace Test {
+        bool areAllNumbers(const std::vector<std::shared_ptr<CV::Quant>> &arguments){
+            for(int i = 0; i < arguments.size(); ++i){
+                if(arguments[i]->type != CV::QuantType::NUMBER){
+                    return false;
+                }
             }
+            return true;
         }
-        #endif
+        bool IsItPrefixInstruction(const std::shared_ptr<CV::Instruction> &ins){
+            return ins->data.size() >= 2 && ins->data[0] == CV_INS_PREFIXER_IDENTIFIER_INSTRUCTION;
+        }
+    }
+    namespace Tools {
+
+        namespace ColorTable {
+
+            static std::unordered_map<int, std::string> TextColorCodes = {
+                {CV::Tools::Color::BLACK,   "\e[0;30m"},
+                {CV::Tools::Color::RED,     "\e[0;31m"},
+                {CV::Tools::Color::GREEN,   "\e[0;32m"},
+                {CV::Tools::Color::YELLOW,  "\e[0;33m"},
+                {CV::Tools::Color::BLUE,    "\e[0;34m"},
+                {CV::Tools::Color::MAGENTA,  "\e[0;35m"},
+                {CV::Tools::Color::CYAN,    "\e[0;36m"},
+                {CV::Tools::Color::WHITE,   "\e[0;37m"},
+                {CV::Tools::Color::RESET,   "\e[0m"}
+            };
+
+            static std::unordered_map<int, std::string> BoldTextColorCodes = {
+                {CV::Tools::Color::BLACK,   "\e[1;30m"},
+                {CV::Tools::Color::RED,     "\e[1;31m"},
+                {CV::Tools::Color::GREEN,   "\e[1;32m"},
+                {CV::Tools::Color::YELLOW,  "\e[1;33m"},
+                {CV::Tools::Color::BLUE,    "\e[1;34m"},
+                {CV::Tools::Color::MAGENTA, "\e[1;35m"},
+                {CV::Tools::Color::CYAN,    "\e[1;36m"},
+                {CV::Tools::Color::WHITE,   "\e[1;37m"},
+                {CV::Tools::Color::RESET,   "\e[0m"}
+            };        
+
+            static std::unordered_map<int, std::string> BackgroundColorCodes = {
+                {CV::Tools::Color::BLACK,   "\e[40m"},
+                {CV::Tools::Color::RED,     "\e[41m"},
+                {CV::Tools::Color::GREEN,   "\e[42m"},
+                {CV::Tools::Color::YELLOW,  "\e[43m"},
+                {CV::Tools::Color::BLUE,    "\e[44m"},
+                {CV::Tools::Color::MAGENTA, "\e[45m"},
+                {CV::Tools::Color::CYAN,    "\e[46m"},
+                {CV::Tools::Color::WHITE,   "\e[47m"},
+                {CV::Tools::Color::RESET,   "\e[0m"}
+            };     
+        }   
+  
+        void sleep(uint64_t t){
+            std::this_thread::sleep_for(std::chrono::milliseconds(t));
+        }
+        std::string setTextColor(int color, bool bold){
+            if(!UseColorOnText){
+                return "";
+            }
+            return (bold ? ColorTable::BoldTextColorCodes.find(color)->second : ColorTable::TextColorCodes.find(color)->second);
+        }
+
+        std::string setBackgroundColor(int color){
+            if(!UseColorOnText){
+                return "";
+            }
+
+            return ColorTable::BackgroundColorCodes.find(color)->second;
+        }
 
         std::string format(const std::string &_str, ...){
             va_list arglist;
@@ -67,6 +161,42 @@ namespace CV {
             return false;
         }     
 
+        std::string lower(const std::string &str){
+            std::string out;
+            for(int i = 0; i < str.size(); i++){
+                out += tolower(str.at(i));
+            }
+            return out;
+        }
+        
+        std::string upper(const std::string &str){
+            std::string out;
+            for(int i = 0; i < str.size(); i++){
+                out += toupper(str.at(i));
+            }
+            return out;
+        }
+
+        bool isValidVarName(const std::string &name){
+            if(name.size() == 0){
+                return false;
+            }
+            return !isNumber(std::string("")+name[0]) && name[0] != '.' && name[0] != '~';
+        }
+
+        bool isReservedWord(const std::string &name){
+            static const std::vector<std::string> reserved {
+                "let", "bring", "bring:dynamic-library", "~", ".", "|", "`", "cc", "mut", "fn",
+                "return", "yield", "skip", "b:list", "b:store", "untether", "async"
+            };
+            for(int i = 0; i < reserved.size(); ++i){
+                if(reserved[i] == name){
+                    return true;
+                }
+            }
+            return false;
+        }
+
         static std::string removeTrailingZeros(double d){
             size_t len = std::snprintf(0, 0, "%.8f", d);
             std::string s(len+1, 0);
@@ -81,99 +211,49 @@ namespace CV {
 
         static std::string compileList(const std::vector<std::string> &strings){
             std::string out;
-
             for(int i = 0; i < strings.size(); ++i){
                 out += strings[i];
                 if(i < strings.size()-1){
                     out += " ";
                 }
             }
-
             return out;
         }
 
-        namespace UnixColor {
-
-            static std::unordered_map<int, std::string> TextColorCodes = {
-                {CV::Tools::Color::BLACK,   "\e[0;30m"},
-                {CV::Tools::Color::RED,     "\e[0;31m"},
-                {CV::Tools::Color::GREEN,   "\e[0;32m"},
-                {CV::Tools::Color::YELLOW,  "\e[0;33m"},
-                {CV::Tools::Color::BLUE,    "\e[0;34m"},
-                {CV::Tools::Color::MAGENTA, "\e[0;35m"},
-                {CV::Tools::Color::CYAN,    "\e[0;36m"},
-                {CV::Tools::Color::WHITE,   "\e[0;37m"},
-                {CV::Tools::Color::RESET,   "\e[0m"}
-            };
-
-            static std::unordered_map<int, std::string> BoldTextColorCodes = {
-                {CV::Tools::Color::BLACK,   "\e[1;30m"},
-                {CV::Tools::Color::RED,     "\e[1;31m"},
-                {CV::Tools::Color::GREEN,   "\e[1;32m"},
-                {CV::Tools::Color::YELLOW,  "\e[1;33m"},
-                {CV::Tools::Color::BLUE,    "\e[1;34m"},
-                {CV::Tools::Color::MAGENTA, "\e[1;35m"},
-                {CV::Tools::Color::CYAN,    "\e[1;36m"},
-                {CV::Tools::Color::WHITE,   "\e[1;37m"},
-                {CV::Tools::Color::RESET,   "\e[0m"}
-            };        
-
-            static std::unordered_map<int, std::string> BackgroundColorCodes = {
-                {CV::Tools::Color::BLACK,   "\e[40m"},
-                {CV::Tools::Color::RED,     "\e[41m"},
-                {CV::Tools::Color::GREEN,   "\e[42m"},
-                {CV::Tools::Color::YELLOW,  "\e[43m"},
-                {CV::Tools::Color::BLUE,    "\e[44m"},
-                {CV::Tools::Color::MAGENTA, "\e[45m"},
-                {CV::Tools::Color::CYAN,    "\e[46m"},
-                {CV::Tools::Color::WHITE,   "\e[47m"},
-                {CV::Tools::Color::RESET,   "\e[0m"}
-            };     
-        }   
-  
-
-        static std::string setTextColor(int color, bool bold = false){
-            return useColorOnText ? (bold ? UnixColor::BoldTextColorCodes.find(color)->second : UnixColor::TextColorCodes.find(color)->second) : "";
-        }
-
-        static std::string setBackgroundColor(int color){
-            return useColorOnText ? (UnixColor::BackgroundColorCodes.find(color)->second) : "";
-        }
-
-        std::vector<std::string> splitTokenByScope(const CV::Token &token){
-            auto colonp = token.first.find(":");
-            if(colonp == std::string::npos){
-                return {};
+        static std::string removeOutterBrackets(const std::string &input){
+            if(input.size() < 3){
+                return input;
             }
-            return {
-                token.first.substr(0, colonp),
-                token.first.substr(colonp+1, token.first.size())
-            };
+            auto r = input;
+            if(input[0] == '['){
+                r = std::string(r.begin() + 1, r.end());
+            }
+            if(input[input.size()-1] == ']'){
+                r = std::string(r.begin(), r.end() - 1);
+            }
+            return r;
         }
-
-        static bool isScoped(const CV::Token &token){
-            bool inString = false;
-            bool inComment = false;
-            auto &input = token.first;
-            for(int i = 0; i < input.length(); ++i){
-                char c = input[i];
-                if(c == '\''){
-                    return false;
-                }else
-                if(c == '#' && !inComment){
-                    return false;
-                }else
+        
+        std::string cleanSpecialCharacters(const std::string &v){
+            std::string result;
+            for(int i = 0; i < v.size(); ++i){
+                auto c = v[i];
                 if(c == '\n'){
-                    return false;
+                    result += "\\n";
+                    continue;
                 }else
-                if(c == ' '){
-                    return false;
+                if(c == '\t'){
+                    result += "\\t";
+                    continue;
                 }else
-                if(c == ':'){
-                    return true;
+                if(c == '\r'){
+                    result += "\\r";
+                    continue;
                 }
+
+                result += c;              
             }
-            return false;
+            return result;
         }
 
         std::string solveEscapedCharacters(const std::string &v){
@@ -186,11 +266,27 @@ namespace CV {
                     ++i;
                     continue;
                 }  
+                if(c == '\n'){
+                    result += "\\n";
+                    ++i;
+                    continue;
+                }  
                 result += c;              
             }
             return result;
         }
-        
+
+        std::string cleanTokenInput(const std::string &str){
+            std::string out;
+            for(int i = 0; i < str.size(); ++i){
+                if(str[i] == ' ' || str[i] == '\n' || str[i] == '\t' || str[i] == '\r'){
+                    continue;
+                }
+                out += str[i];
+            }
+            return out;
+        }
+
         bool fileExists(const std::string &path){
 			struct stat tt;
 			stat(path.c_str(), &tt);
@@ -203,23 +299,190 @@ namespace CV {
             for(std::string line; std::getline(file, line);){
                 if(line.size() > 0){
                     buffer += line+"\n";
+                }else{
+                    buffer += "\n";
                 }
             }    
             return buffer;
-        }        
+        } 
+
     }
 }
 
-#if __CV_DEBUG == 1
-    static void printTokenList(const VECTOR<CV::Token> &list){
-        for(unsigned i = 0; i < list.size(); ++i){
-            std::cout << "'" << list[i].first << "' " << (int)list[i].solved << std::endl;
+static int GEN_ID(){
+    static std::mutex access;
+    static int v = 0;
+    access.lock();
+    int r = ++v;
+    access.unlock();
+    return r;
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//  TYPES
+// 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// BASE
+CV::Quant::Quant(){
+    this->id = GEN_ID();
+    this->type = CV::QuantType::NIL;
+}
+
+std::shared_ptr<CV::Quant> CV::Quant::copy(){
+    return std::make_shared<CV::Quant>();
+}
+
+// NUMBER
+CV::TypeNumber::TypeNumber() : CV::Quant() {
+    this->type = CV::QuantType::NUMBER;
+}
+
+bool CV::TypeNumber::clear(){
+    v = 0;
+    return true;
+}
+
+std::shared_ptr<CV::Quant> CV::TypeNumber::copy(){
+    auto cpy = std::make_shared<CV::TypeNumber>();
+    cpy->v = this->v;
+    return cpy;
+}
+
+// STRING
+CV::TypeString::TypeString() : CV::Quant() {
+    this->type = CV::QuantType::STRING;
+}
+
+bool CV::TypeString::clear(){
+    v = "";
+    return true;
+}
+
+std::shared_ptr<CV::Quant> CV::TypeString::copy(){
+    auto cpy = std::make_shared<CV::TypeString>();
+    cpy->v = this->v;
+    return cpy;
+}
+
+// LIST
+CV::TypeList::TypeList() : CV::Quant() {
+    this->type = CV::QuantType::LIST;
+}
+bool CV::TypeList::clear(){
+    v.clear();
+    return true;
+}
+bool CV::TypeList::isInit(){
+    for(int i = 0; i < this->v.size(); ++i){
+        if(v[i].get() == NULL){
+            return false;
         }
     }
-#endif
+    return true;
+}
 
-/* -------------------------------------------------------------------------------------------------------------------------------- */
-// Cursor Stuff
+std::shared_ptr<CV::Quant> CV::TypeList::copy(){
+    auto cpy = std::make_shared<CV::TypeList>();
+    return cpy;
+}
+
+// STORE
+CV::TypeStore::TypeStore(){
+    this->type = CV::QuantType::STORE;
+}
+
+bool CV::TypeStore::clear(){
+    v.clear();
+    return true;
+}
+
+bool CV::TypeStore::isInit(){
+    for(auto &it : this->v){
+        if(it.second.get() == NULL){
+            return false;
+        }
+    }
+    return true;
+}
+
+std::shared_ptr<CV::Quant> CV::TypeStore::copy(){
+    auto cpy = std::make_shared<CV::TypeStore>();
+    return cpy;
+}
+
+// FUNCTION
+CV::TypeFunction::TypeFunction() : CV::Quant(){
+    this->type = CV::QuantType::FUNCTION;
+}
+
+bool CV::TypeFunction::clear(){
+    return true;
+}
+
+std::shared_ptr<CV::Quant> CV::TypeFunction::copy(){
+    auto cpy = std::make_shared<CV::TypeFunction>();
+    cpy->name = this->name;
+    cpy->entrypoint = this->entrypoint;
+    cpy->ctxId = this->ctxId;
+    cpy->body = this->body->copy();
+    return cpy;
+}
+
+// BINARY FUNCTION
+CV::TypeFunctionBinary::TypeFunctionBinary(){
+    this->type = CV::QuantType::BINARY_FUNCTION;
+}
+
+bool CV::TypeFunctionBinary::clear(){
+    return true;
+}
+
+std::shared_ptr<CV::Quant> CV::TypeFunctionBinary::copy(){
+    auto cpy = std::make_shared<CV::TypeFunctionBinary>();
+    cpy->name = this->name;
+    cpy->entrypoint = this->entrypoint;
+    cpy->ctxId = this->ctxId;
+    cpy->ref = this->ref;
+    cpy->body = this->body->copy();
+    return cpy;
+}
+
+// THREAD
+CV::TypeThread::TypeThread(){
+    this->entrypoint = 0;
+    this->ctxId = 0;
+    this->threadId = 0;
+    this->state = CV::ThreadState::CREATED;
+    this->type = CV::QuantType::THREAD;
+}
+
+bool CV::TypeThread::clear(){
+    return true;
+}
+
+void CV::TypeThread::setState(int nstate){
+    this->accessMutex.lock();
+    this->state = nstate;
+    this->accessMutex.unlock();
+}
+
+std::shared_ptr<CV::Quant> CV::TypeThread::copy(){
+    auto cpy = std::make_shared<CV::TypeThread>();
+    cpy->entrypoint = this->entrypoint;
+    cpy->ctxId = this->ctxId;
+    cpy->threadId = this->threadId;
+    cpy->state = this->state;
+    cpy->returnId = this->returnId;
+    return cpy;
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//  CURSOR
+// 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 CV::Cursor::Cursor(){
     this->error = false;
@@ -228,29 +491,43 @@ CV::Cursor::Cursor(){
     this->autoprint = true;
 }
 
-void CV::Cursor::setError(const std::string &title, const std::string &message, unsigned line){
+void CV::Cursor::clear(){
+    this->error = false;
+    this->used = false;
+    this->used = false;
+    this->subject = CV::TokenType(NULL);
+    this->message = "";
+}
+
+void CV::Cursor::setError(const std::string &title, const std::string &message, const std::shared_ptr<CV::Token> &subject){
     accessMutex.lock();
     this->title = title;
     this->message = message;
-    this->line = line;
-    this->subject = NULL;
+    this->line = subject->line;
+    this->subject = subject;
     this->error = true;
     accessMutex.unlock();
 }
 
-void CV::Cursor::setError(const std::string &title, const std::string &message, unsigned line, CV::Item *subject){
+void CV::Cursor::setError(const std::string &title, const std::string &message, int line){
     accessMutex.lock();
     this->title = title;
     this->message = message;
     this->line = line;
     this->subject = subject;
     this->error = true;
-    this->used = true;
     accessMutex.unlock();
 }
 
 std::string CV::Cursor::getRaised(){
-    return "[Line #"+std::to_string(this->line)+"] "+this->title+": "+this->message;
+    std::string in = "";
+    if(this->subject.get()){
+        in = " in '"+this->subject->str()+"'";
+        this->line = this->subject->line;
+    }
+    return      CV::Tools::setTextColor(CV::Tools::Color::RED, false) +
+                CV::Tools::cleanSpecialCharacters("[Line #"+std::to_string(this->line)+"] "+this->title+": "+this->message+in)+
+                CV::Tools::setTextColor(CV::Tools::Color::RESET, false);
 }
 
 bool CV::Cursor::raise(){
@@ -262,20 +539,20 @@ bool CV::Cursor::raise(){
         accessMutex.unlock();
         return false;
     }
-    if(this->autoprint){
-        fprintf(stderr, "%s[Line #%i]%s %s: %s%s%s.\n",
-                (
-                    CV::Tools::setTextColor(CV::Tools::Color::BLACK, true) +
-                    CV::Tools::setBackgroundColor(CV::Tools::Color::WHITE)
-                ).c_str(),
-                this->line,
-                CV::Tools::setTextColor(CV::Tools::Color::RESET, false).c_str(),
-                this->title.c_str(),
-                CV::Tools::setTextColor(CV::Tools::Color::RED, false).c_str(),
-                this->message.c_str(),
-                CV::Tools::setTextColor(CV::Tools::Color::RESET, false).c_str()
-        );
-    }
+    // if(this->autoprint){
+    //     fprintf(stderr, "%s[Line #%i]%s %s: %s%s%s.\n",
+    //             (
+    //                 CV::Tools::setTextColor(CV::Tools::Color::BLACK, true) +
+    //                 CV::Tools::setBackgroundColor(CV::Tools::Color::WHITE)
+    //             ).c_str(),
+    //             this->line,
+    //             CV::Tools::setTextColor(CV::Tools::Color::RESET, false).c_str(),
+    //             this->title.c_str(),
+    //             CV::Tools::setTextColor(CV::Tools::Color::RED, false).c_str(),
+    //             this->message.c_str(),
+    //             CV::Tools::setTextColor(CV::Tools::Color::RESET, false).c_str()
+    //     );
+    // }
     if(this->shouldExit){
         std::exit(1);
     }
@@ -289,186 +566,125 @@ void  CV::Cursor::reset(){
     error = false;
 }
 
-/* -------------------------------------------------------------------------------------------------------------------------------- */
-// Inner stuff
-#include <iostream>
-/* -------------------------------------------------------------------------------------------------------------------------------- */
-// Types
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//  TYPE TO STRING
+// 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-// ITEM
-CV::Item::Item(){
-    type = CV::NaturalType::NIL;
-    data = NULL;
-    size = 0;
-    proxy = false;
-}
+std::string CV::QuantToText(const std::shared_ptr<CV::Quant> &t){
+    switch(t->type){
+        
+        default:
+        case CV::QuantType::NIL: {
+            return Tools::setTextColor(Tools::Color::BLUE)+"nil"+Tools::setTextColor(Tools::Color::RESET);
+        };
 
-void CV::Item::clear(){
-    if(this->proxy){
-        return;
-    }
-    if(this->type == CV::NaturalType::NIL){
-        return;
-    }
-    if(data){
-        free(data);
-    }
-    this->data = NULL;
-    this->size = 0;
-    this->type = CV::NaturalType::NIL;
-}
+        case CV::QuantType::NUMBER: {
+            return      CV::Tools::setTextColor(Tools::Color::CYAN)+
+                        CV::Tools::removeTrailingZeros(std::static_pointer_cast<CV::TypeNumber>(t)->v)+
+                        CV::Tools::setTextColor(Tools::Color::RESET);
+        };
 
-std::shared_ptr<CV::Item> CV::Item::copy(){
-    auto item = std::make_shared<CV::Item>();
-    item->type = this->type;
-    item->proxy = this->proxy;
-    item->size = this->size;
-    item->bsize = this->bsize;
-    item->id = this->id;
-    if(!proxy){
-        item->data = malloc(this->bsize);
-        memcpy(item->data, this->data, this->bsize);
-    }else{
-        item->data = this->data;
-    }
-    return item;
-}
+        case CV::QuantType::STRING: {
+            auto out = std::static_pointer_cast<CV::TypeString>(t)->v;
 
-void CV::Item::restore(std::shared_ptr<CV::Item> &item){
-    this->type = item->type;
-    this->size = item->size;
-    this->proxy = item->proxy;
-    this->bsize = item->bsize;
-    this->id = item->id;
-    if(!proxy){
-        memcpy(this->data, item->data, item->bsize);
-    }else{
-        this->data = item->data;
-    }
-}
+            return  Tools::setTextColor(Tools::Color::GREEN)+
+                    "'"+out+
+                    "'"+Tools::setTextColor(Tools::Color::RESET);
+        };     
 
-// NUMBER
-void CV::NumberType::set(__CV_DEFAULT_NUMBER_TYPE v){
-    if(this->type == CV::NaturalType::NIL){
-        clear();
-        this->type = CV::NaturalType::NUMBER;
-        this->bsize = sizeof(__CV_DEFAULT_NUMBER_TYPE);
-        this->data = malloc(sizeof(__CV_DEFAULT_NUMBER_TYPE));
-        this->size = sizeof(__CV_DEFAULT_NUMBER_TYPE);
-    }
-    memcpy(this->data, &v, sizeof(__CV_DEFAULT_NUMBER_TYPE));
-}
+        case CV::QuantType::FUNCTION: {
+            auto fn = std::static_pointer_cast<CV::TypeFunction>(t);      
 
-__CV_DEFAULT_NUMBER_TYPE CV::NumberType::get(){
-    if(this->type == CV::NaturalType::NIL){
-        fprintf(stderr, "Dereferenced NIL Item %i\n", this->id);
-        std::exit(1);
-    }
-    __CV_DEFAULT_NUMBER_TYPE r;
-    memcpy(&r, this->data, sizeof(__CV_DEFAULT_NUMBER_TYPE));
-    return r;
-}
+            std::string start = Tools::setTextColor(Tools::Color::RED, true)+"["+Tools::setTextColor(Tools::Color::RESET);
+            std::string end = Tools::setTextColor(Tools::Color::RED, true)+"]"+Tools::setTextColor(Tools::Color::RESET);
+            std::string name = Tools::setTextColor(Tools::Color::RED, true)+"fn"+Tools::setTextColor(Tools::Color::RESET);
+            std::string binary = Tools::setTextColor(Tools::Color::BLUE, true)+"BINARY"+Tools::setTextColor(Tools::Color::RESET);
+            std::string body = Tools::setTextColor(Tools::Color::BLUE, true)+fn->body->str()+Tools::setTextColor(Tools::Color::RESET);
 
-// STRING
-void CV::StringType::set(const std::string &_v){
-    if(this->proxy){
-        auto castStr = static_cast<std::string*>(this->data);
-        *castStr = _v;
-        return;
-    }    
-    clear();
-    auto v = CV::Tools::solveEscapedCharacters(_v);
-    this->type = CV::NaturalType::STRING;
-    this->data = malloc(v.length());
-    this->size = v.length();
-    this->bsize = v.length();
-    for(int i = 0; i < v.size(); ++i){
-        auto *c = static_cast<char*>((void*)((size_t)(this->data) + i));
-        *c = v[i]; 
-    }
-}
+            return start+name+" "+start+CV::Tools::compileList(fn->params)+end+" "+( body )+end;
+        };
 
-unsigned CV::StringType::getSize(){
-    if(this->proxy){
-        auto castStr = static_cast<std::string*>(this->data);
-        return (*castStr).size();
-    }else{
-        return this->size;
+        case CV::QuantType::LIST: {
+            std::string output = Tools::setTextColor(Tools::Color::MAGENTA)+"["+Tools::setTextColor(Tools::Color::RESET);
+
+            auto list = std::static_pointer_cast<CV::TypeList>(t);
+
+            int total = list->v.size();
+            int limit = total > 30 ? 10 : total;
+            for(int i = 0; i < limit; ++i){
+                auto &q = list->v[i];
+                output += CV::QuantToText(q);
+                if(i < list->v.size()-1){
+                    output += " ";
+                }
+            }
+            if(limit != total){
+                output += Tools::setTextColor(Tools::Color::YELLOW)+"...("+std::to_string(total-limit)+" hidden)"+Tools::setTextColor(Tools::Color::RESET);
+
+
+            }
+                        
+            return output + Tools::setTextColor(Tools::Color::MAGENTA)+"]"+Tools::setTextColor(Tools::Color::RESET);
+        };
+
+        case CV::QuantType::STORE: {
+            std::string output = Tools::setTextColor(Tools::Color::MAGENTA)+"["+Tools::setTextColor(Tools::Color::RESET);
+
+            auto store = std::static_pointer_cast<CV::TypeStore>(t);
+
+            int total = store->v.size();
+            int limit = total > 30 ? 10 : total;
+            int i = 0;
+            for(auto &it : store->v){
+                auto &q = it.second;
+                output +=   Tools::setTextColor(Tools::Color::YELLOW)+"["+Tools::setTextColor(Tools::Color::RESET)+
+                            "~"+it.first+" "+CV::QuantToText(q)+
+                            Tools::setTextColor(Tools::Color::YELLOW)+"]"+Tools::setTextColor(Tools::Color::RESET);
+                if(i < store->v.size()-1){
+                    output += " ";
+                }
+                ++i;
+            }
+            if(limit != total){
+                output += Tools::setTextColor(Tools::Color::YELLOW)+"...("+std::to_string(total-limit)+" hidden)"+Tools::setTextColor(Tools::Color::RESET);
+
+            }
+                        
+            return output + Tools::setTextColor(Tools::Color::MAGENTA)+"]"+Tools::setTextColor(Tools::Color::RESET);
+        };        
+
+        case CV::QuantType::THREAD: {
+            auto thread = std::static_pointer_cast<CV::TypeThread>(t);
+
+            return Tools::setTextColor(Tools::Color::YELLOW)
+                                +"[THREAD "+std::to_string(thread->id)+" "
+                                +Tools::setTextColor(Tools::Color::GREEN)
+                                +"'"+CV::ThreadState::name(thread->state)
+                                +"'"
+                                +Tools::setTextColor(Tools::Color::YELLOW)+"]"
+                                +Tools::setTextColor(Tools::Color::RESET);
+        };
+
     }
 }
 
-std::string CV::StringType::get(){
-    if(this->proxy){
-        auto castStr = static_cast<std::string*>(this->data);
-        return *castStr;
-    }       
-    if(this->type == CV::NaturalType::NIL){
-        fprintf(stderr, "Dereferenced NIL Item %i\n", this->id);
-        std::exit(1);
-    }
-    std::string r;
-    for(int i = 0; i < this->size; ++i){
-        auto *c = static_cast<char*>((void*)((size_t)(this->data) + i));
-        r += *c;
-    }
-    return r;
-}
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//  PARSING
+// 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-// LIST
-void CV::ListType::build(unsigned n){
-    clear();
-    auto bsize = sizeof(unsigned) * 2 * n;
-    this->bsize = bsize;
-    this->type = CV::NaturalType::LIST;
-    this->size = n;
-    this->data = malloc(bsize);
-    memset(this->data, '0', bsize);
-}
-
-void CV::ListType::build(const std::vector<std::shared_ptr<CV::Item>> &items){
-    build(items.size());
-    for(int i = 0; i < items.size(); ++i){
-        this->set(i, items[i]->ctx, items[i]->id);
-    }
-}
-
-void CV::ListType::set(unsigned index, unsigned ctxId, unsigned dataId){
-    memcpy((void*)((size_t)this->data + index * sizeof(unsigned) * 2 + sizeof(unsigned) * 0), &ctxId, sizeof(unsigned));
-    memcpy((void*)((size_t)this->data + index * sizeof(unsigned) * 2 + sizeof(unsigned) * 1), &dataId, sizeof(unsigned));
-}
-
-std::shared_ptr<CV::Item> CV::ListType::get(const CV::Stack *stack, unsigned index){
-    unsigned ctxId, dataId;
-    memcpy(&ctxId, (void*)((size_t)this->data + index * sizeof(unsigned) * 2 + sizeof(unsigned) * 0), sizeof(unsigned));
-    memcpy(&dataId, (void*)((size_t)this->data + index * sizeof(unsigned) * 2 + sizeof(unsigned) * 1), sizeof(unsigned));    
-    return stack->getContext(ctxId)->get(dataId);
-}
-
-std::shared_ptr<CV::Item> CV::ListType::get(const std::shared_ptr<CV::Stack> &stack, unsigned index){
-    return this->get(stack.get(), index);
-}
-
-// FUNCTION
-std::shared_ptr<CV::Item> CV::FunctionType::copy(){
-    return std::shared_ptr<CV::Item>(NULL);
-}
-
-void CV::FunctionType::restore(std::shared_ptr<CV::Item> &item){
-    // Does nothing (cannot be copied)
-}
-
-/* -------------------------------------------------------------------------------------------------------------------------------- */
-// Parser
-
-static VECTOR<CV::Token> parseTokens(std::string input, char sep, SHARED<CV::Cursor> &cursor){
-    VECTOR<CV::Token> tokens; 
+static std::vector<CV::TokenType> parseTokens(std::string input, char sep, const std::shared_ptr<CV::Cursor> &cursor, int startLine){
+    std::vector<std::shared_ptr<CV::Token>> tokens; 
     std::string buffer;
     int open = 0;
     bool onString = false;
     bool onComment = false;
     int leftBrackets = 0;
     int rightBrackets = 0;
-    int cline = 0;
+    int cline = startLine;
     int quotes = 0;
     // Count outer brackets
     for(int i = 0; i < input.size(); ++i){
@@ -508,7 +724,7 @@ static VECTOR<CV::Token> parseTokens(std::string input, char sep, SHARED<CV::Cur
         cursor->setError("Syntax Error", "Mismatching quotes", cline);
         return {};
     }
-    cline = 1;
+    cline = startLine;
     // Add missing brackets for simple statements
     if(((leftBrackets+rightBrackets)/2 > 1) || (leftBrackets+rightBrackets) == 0 || input[0] != '[' || input[input.length()-1] != ']'){
         input = "[" + input + "]";
@@ -516,6 +732,7 @@ static VECTOR<CV::Token> parseTokens(std::string input, char sep, SHARED<CV::Cur
     // For debugging:
     // std::cout << "To Parse '" << input << "' " << leftBrackets+rightBrackets << std::endl;
     // Parse
+    
     for(int i = 0; i < input.size(); ++i){
         char c = input[i];
         if(i < input.size()-1 && c == '\\' && input[i+1] == '\'' && onString){
@@ -559,21 +776,24 @@ static VECTOR<CV::Token> parseTokens(std::string input, char sep, SHARED<CV::Cur
             }            
             --open;
             if(open == 1 || i == input.size()-1 && buffer.length() > 0){
+                // std::cout << "[1] \"" << buffer << "\"" << std::endl;
                 if(buffer != ""){
-                    tokens.push_back(CV::Token(buffer, cline));
+                    tokens.push_back(std::make_shared<CV::Token>(buffer, cline));
                 }
                 buffer = "";
             }
         }else
         if(i == input.size()-1){
+            // std::cout << "[2] " << buffer+c << std::endl;
             if(buffer != ""){
-                tokens.push_back(CV::Token(buffer+c, cline));
+                tokens.push_back(std::make_shared<CV::Token>(buffer+c, cline));
             }
             buffer = "";
         }else
         if(c == sep && open == 1 && !onString){
+            // std::cout << "[3] \"" << buffer << "\"" << std::endl;
             if(buffer != ""){
-                tokens.push_back(CV::Token(buffer, cline));
+                tokens.push_back(std::make_shared<CV::Token>(buffer, cline));
             }
             buffer = "";
         }else{
@@ -584,2612 +804,1767 @@ static VECTOR<CV::Token> parseTokens(std::string input, char sep, SHARED<CV::Cur
     return tokens;
 };
 
-/* -------------------------------------------------------------------------------------------------------------------------------- */
-// JIT
-
-static CV::Instruction *compileTokens(const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor);
-static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, std::shared_ptr<CV::Context> &ctx, SHARED<CV::Cursor> &cursor);
-
-static void DefConstructor(     std::shared_ptr<CV::Stack> &stack,
-                                const std::string &name,
-                                const std::function<CV::Instruction*(   
-                                                                        const std::string &name,
-                                                                        const VECTOR<CV::Token> &tokens,
-                                                                        const SHARED<CV::Stack> &stack,
-                                                                        SHARED<CV::Context> &ctx,
-                                                                        SHARED<CV::Cursor> &cursor
-                                                                    )> &method
-                          ){
-    stack->constructors[name] = method;
-}
-
-static bool CheckConstructor(const std::shared_ptr<CV::Stack> &stack, const std::string &name){
-    return stack->constructors.find(name) != stack->constructors.end();
-}
-
-static CV::Instruction *interpretToken(const CV::Token &token, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
-    if(!token.solved){
-        auto tokens = parseTokens(token.first, ' ', cursor);
-        // Update line number
-        for(int i = 0; i < tokens.size(); ++i){
-            tokens[i].line = token.line;
-        }
-        return compileTokens(tokens, stack, ctx, cursor);
+static std::vector<CV::TokenType> rebuildTokenHierarchy(const std::vector<CV::TokenType> &input, char sep, const CV::CursorType &cursor){
+    
+    if(input.size() == 0){
+        cursor->setError("NOOP", CV_ERROR_MSG_NOOP_NO_INSTRUCTIONS, 1);
+        return {};
     }
 
-    auto buildList = [&](){
-        auto nins = stack->createInstruction(CV::InstructionType::CONSTRUCT_LIST, tokens[0]);
-        auto list = std::make_shared<CV::ListType>();        
-        list->build(tokens.size());
-        nins->data.push_back(ctx->id);
-        nins->data.push_back(ctx->store(stack, list));
-        nins->data.push_back(tokens.size());
-        for(int i = 0; i < tokens.size(); ++i){
-            auto cins = interpretToken(tokens[i], {tokens[i]}, stack, ctx, cursor);
-            if(cursor->raise()){
-                return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-            }
-            
-            nins->parameter.push_back(cins->id);
-            nins->data.push_back(ctx->id);
+    std::function<CV::TokenType(const CV::TokenType &token)> unwrap = [&](const CV::TokenType &token){
+        auto innerTokens = parseTokens(token->first, sep, cursor, token->line);
+        if(cursor->error){
+            return CV::TokenType(NULL);
         }
-        return nins;      
+
+        if(innerTokens.size() == 0){
+            auto empty = token->copy();
+            empty->first = "";
+            empty->inner.clear();
+            empty->refresh();
+            return empty;
+        }
+        auto target = innerTokens[0];
+
+        if(!target->solved){
+            target->inner.push_back(unwrap(target));
+            target->first = "";
+            if(cursor->error){
+                return CV::TokenType(NULL);
+            }
+        }
+        for(int i = 1; i < innerTokens.size(); ++i){
+            target->inner.push_back(unwrap(innerTokens[i]));
+        }
+        target->refresh();
+        return target;
     };
 
-    auto &imp = token.first;
-
-    // Infere for natural types
-    if(imp == "nil" && tokens.size() == 1){
-        auto ins = stack->createInstruction(CV::InstructionType::STATIC_PROXY, token);
-        auto number = std::make_shared<CV::Item>();
-        ins->data.push_back(ctx->id);
-        ins->data.push_back(ctx->store(stack, number));
-        return ins;
-    }else    
-    if(CV::Tools::isNumber(imp) && tokens.size() == 1){
-        auto ins = stack->createInstruction(CV::InstructionType::STATIC_PROXY, token);
-        auto number = std::make_shared<CV::NumberType>();
-        number->set(std::stod(imp));
-        ins->data.push_back(ctx->id);
-        ins->data.push_back(ctx->store(stack, std::static_pointer_cast<CV::Item>(number)));
-        return ins;
-    }else
-    if(CV::Tools::isString(imp) && tokens.size() == 1){
-        auto ins = stack->createInstruction(CV::InstructionType::STATIC_PROXY, token);
-        auto string = std::make_shared<CV::StringType>();
-        string->set(imp.substr(1, imp.length() - 2));
-        ins->data.push_back(ctx->id);
-        ins->data.push_back(ctx->store(stack, std::static_pointer_cast<CV::Item>(string)));
-        return ins;
-    }else
-    // Used to dynamically load libraries
-    if(imp == "__cv_load_dynamic_library"){
-        // look into ./lib/ only for now
-        // TODO: add ability to load from system files
-        if(tokens.size() != 2){
-            cursor->setError(imp, "Expected exactly 1 argument ("+imp+" FILENAME (no .so or .dll))", token.line);
-            return stack->createInstruction(CV::InstructionType::NOOP, token);   
-        }  
-        // Pre-process argument 0
-        auto p0entry = compileTokens({tokens[1]}, stack, ctx, cursor);
-        if(cursor->raise()){
-            return stack->createInstruction(CV::InstructionType::NOOP, token);   
-        }
-        // Execute
-        auto p0result = CV::Execute(p0entry, stack, ctx, cursor).value;
-        if(cursor->raise()){
-            return stack->createInstruction(CV::InstructionType::NOOP, token);   
-        }
-        if(p0result->type != CV::NaturalType::STRING){
-            cursor->setError(imp, "Argument 0 expected to be STRING", token.line);
-            return stack->createInstruction(CV::InstructionType::NOOP, token);   
-        }
-
-        auto fname = std::static_pointer_cast<CV::StringType>(p0result)->get();
-
-        std::string path = "./lib/" + fname;
-        switch(CV::PLATFORM){
-            case CV::SupportedPlatform::LINUX: {
-                path += ".so";
-            } break; 
-            case CV::SupportedPlatform::WINDOWS: {
-                path += ".dll";
-            } break;
-            case CV::SupportedPlatform::OSX: {
-                // TODO
-            } break;                
-            default:
-            case CV::SupportedPlatform::UNKNOWN: {
-                fprintf(stderr, "%s: Unable to load dyanmic library for this platform (UNKNOWN/UNDEFINED).", imp.c_str());
-                std::exit(1);
-            } break;                        
-        }
-
-        if(!CV::Tools::fileExists(path)){
-            cursor->setError(imp, "No dynamic library '"+fname+"' was found", token.line);
-            return stack->createInstruction(CV::InstructionType::NOOP, token);   
-        }
-
-        // Load library (depending on the platform)
-        CV::Tools::importBinaryLibrary(path, fname, stack);
-
-        return stack->createInstruction(CV::InstructionType::NOOP, token);   
-    }else
-    // Import?
-    if(imp == "import"){
-        if(tokens.size() != 2){
-            cursor->setError(imp, "Expected exactly 1 argument (import NAME)", token.line);
-            return stack->createInstruction(CV::InstructionType::NOOP, token);   
-        }   
-
-        // Pre-process argument 0
-        auto p0entry = compileTokens({tokens[1]}, stack, ctx, cursor);
-        if(cursor->raise()){
-            return stack->createInstruction(CV::InstructionType::NOOP, token);   
-        }
-
-        // Execute
-        auto p0result = CV::Execute(p0entry, stack, ctx, cursor).value;
-        if(cursor->raise()){
-            return stack->createInstruction(CV::InstructionType::NOOP, token);   
-        }
-
-        if(p0result->type != CV::NaturalType::STRING){
-            cursor->setError(imp, "Argument 0 expected to be STRING", token.line);
-            return stack->createInstruction(CV::InstructionType::NOOP, token);   
-        }
-
-        auto fname = std::static_pointer_cast<CV::StringType>(p0result)->get();
-
-        if(!CV::Tools::fileExists(fname)){
-            cursor->setError(imp, "No import named '"+fname+"' was found", token.line);
-            return stack->createInstruction(CV::InstructionType::NOOP, token);   
-        }
-
-        auto file = CV::Tools::readFile(fname);
-
-        // Gather tokens
-        auto tokens = parseTokens(file,  ' ', cursor);
-        if(cursor->raise()){
-            return stack->createInstruction(CV::InstructionType::NOOP, token);   
-        }
-
-        // Compile tokens into its bytecode
-        auto entry = compileTokens(tokens, stack, ctx, cursor);
-        if(cursor->raise()){
-            return stack->createInstruction(CV::InstructionType::NOOP, token);   
-        }
-
-        // Load it up (execute)
-        auto result = CV::Execute(entry, stack, ctx, cursor).value;
-        if(cursor->raise()){
-            return stack->createInstruction(CV::InstructionType::NOOP, token);   
-        }
-
-        return stack->createInstruction(CV::InstructionType::NOOP, token);   
-    }else
-    // Is it a constructor?
-    if(CheckConstructor(stack, imp)){
-        auto cons = stack->constructors[imp];
-        return cons(imp, tokens, stack, ctx, cursor);
-    }else
-    if(auto bf = stack->getRegisteredFunction(stack, token)){        
-        auto ins = stack->createInstruction(CV::InstructionType::CF_INVOKE_BINARY_FUNCTION, token);
-        auto nctx = stack->createContext(ctx.get());
-        ins->data.push_back(nctx->id);
-        ins->data.push_back(bf->id);
-        for(int i = 1; i < tokens.size(); ++i){
-            auto cins = interpretToken(tokens[i], {tokens[i]}, stack, nctx, cursor);
-            if(cursor->raise()){
-                return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-            }
-            ins->parameter.push_back(cins->id);
-        } 
-        nctx->solidify();
-        return ins;
-    }else{
-        // Is it a name?
-        if(ctx->check(stack, token)){
-            auto pair = ctx->getIdByName(stack, token);
-            if(pair.ctx == 0 || pair.id == 0){
-                cursor->setError("Fatal Error referencing name '"+imp+"'", "Name was not found on this context or above", token.line);
-                return stack->createInstruction(CV::InstructionType::NOOP, token);     
-            }
-            auto markedType = ctx->getMarked(pair.id);
-
-            // Invoke a function
-            if(markedType == CV::NaturalType::FUNCTION){
-                auto fn = std::static_pointer_cast<CV::FunctionType>(stack->contexts[pair.ctx]->data[pair.id]);
-                // Basic Error Checking
-                if(!fn->variadic && tokens.size()-1 != fn->args.size()){
-                    auto errmsg = "Expects "+std::to_string(fn->args.size())+" argument(s), "+std::to_string(tokens.size()-1)+" were provided";
-                    cursor->setError("Function '"+imp+"'", errmsg, token.line);
-                    return stack->createInstruction(CV::InstructionType::NOOP, token);     
-                }
-                // Create temporary context
-                auto nctx = stack->createContext(ctx.get());
-                // Create instruction
-                auto ins = stack->createInstruction(CV::InstructionType::CF_INVOKE_FUNCTION, token);
-                ins->data.push_back(pair.ctx);
-                ins->data.push_back(pair.id);                
-                ins->data.push_back(nctx->id);
-                ins->data.push_back(fn->args.size());
-                ins->data.push_back(fn->variadic);
-
-                // Gather parameters
-                if(fn->variadic){
-                    auto list = std::make_shared<CV::ListType>();
-                    list->build(tokens.size()-1);
-                    auto argId = nctx->store(stack, list);
-                    ins->data.push_back(argId);       
-                    nctx->setName("@", argId);
-                }else{
-                    for(int i = 0; i < fn->args.size(); ++i){
-                        auto argId = nctx->promise(stack);
-                        ins->data.push_back(argId);       
-                        auto &name = fn->args[i];
-                        nctx->setName(name, argId);
-                    }
-                }
-
-                // Process Body
-                // auto body = interpretToken(fn->body, {fn->body}, stack, nctx, cursor);
-                // if(cursor->raise()){
-                //     return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
-                // } 
-                // ins->parameter.push_back(body->id);
-
-                // Process
-                for(int i = 1; i < tokens.size(); ++i){
-                    auto cins = interpretToken(tokens[i], {tokens[i]}, stack, ctx, cursor);
-                    if(cursor->raise()){
-                        return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-                    }
-                    ins->parameter.push_back(cins->id);
-                }                   
-
-                nctx->solidify();
-                return ins;
-            }else
-            // Is it a list?
-            if(tokens.size() > 1){
-                return buildList();
-            }else{
-            // Otherwise return type
-                auto ins = stack->createInstruction(CV::InstructionType::STATIC_PROXY, token);
-                ins->data.push_back(pair.ctx);
-                ins->data.push_back(pair.id);
-                return ins;                  
-            }   
-        }else
-        // Can it be a list?
-        if(tokens.size() > 1){
-            return buildList();
-        // I just don't know then
-        }else{
-            cursor->setError("Unexpected Error on '"+imp+"'", GENERIC_UNDEFINED_SYMBOL_ERROR, token.line);
-        }
-    }
+    std::vector<CV::TokenType> result;
     
-    return stack->createInstruction(CV::InstructionType::NOOP, token);
+    for(int i = 0; i < input.size(); ++i){
+        auto built = unwrap(input[i]);
+        if(cursor->error){
+            return {};
+        }
+        result.push_back(built);
+    }
+
+    return result;
 }
 
-static CV::Instruction* compileTokens(const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
-    VECTOR<CV::Instruction*> ins;
-    // Single token or simple imperative token
-    if(tokens.size() == 1 || tokens.size() > 1 && tokens[0].solved){
-        auto nins = interpretToken(tokens[0], tokens, stack, ctx, cursor);
-        if(cursor->raise()){
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-        }
-        ins.push_back(nins);
-    }else
-    // Chained complex tokens
-    if(tokens.size() > 1 && !tokens[0].solved){
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//  JIT
+// 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor){
+    
+    if(token->first.size() == 0 && token->inner.size() == 0){
+        cursor->setError("NOOP", CV_ERROR_MSG_NOOP_NO_INSTRUCTIONS, token);
+        return prog->createInstruction(CV::InstructionType::NOOP, token);
+    }
+
+    auto bListConstruct = [prog, cursor](const CV::TokenType &origin, std::vector<CV::TokenType> &tokens, const CV::ContextType &ctx){
+        auto ins = prog->createInstruction(CV::InstructionType::CONSTRUCT_LIST, origin);
+        auto list = ctx->buildList();
+        ins->data.push_back(ctx->id);
+        ins->data.push_back(list->id);
         for(int i = 0; i < tokens.size(); ++i){
-            auto nins = interpretToken(tokens[i], tokens, stack, ctx, cursor);
-            if(cursor->raise()){
-                return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-            }            
-            if(i > 0){
-                nins->previous = ins[ins.size()-1]->id;
-                ins[ins.size()-1]->next = nins->id;
+            auto &inc = tokens[i];
+            auto fetched = CV::Translate(inc, prog, ctx, cursor);
+            if(cursor->error){
+                cursor->subject = origin;
+                return prog->createInstruction(CV::InstructionType::NOOP, origin);
             }
-            ins.push_back(nins);
+            if(fetched->type == CV::InstructionType::PROXY_EXPANDER){
+                auto targetIns = prog->getIns(fetched->params[0]);
+                if( targetIns->type == CV::InstructionType::CONSTRUCT_LIST ||
+                    targetIns->type == CV::InstructionType::CONSTRUCT_STORE){
+                    for(int j = 0; j < targetIns->params.size(); ++j){
+                        ins->params.push_back(targetIns->params[j]);
+                        list->v.push_back(std::shared_ptr<CV::Quant>(NULL));
+                    }
+                }else{
+                    ins->params.push_back(fetched->id);
+                    list->v.push_back(std::shared_ptr<CV::Quant>(NULL));                    
+                }
+            }else{
+                ins->params.push_back(fetched->id);
+                list->v.push_back(std::shared_ptr<CV::Quant>(NULL));
+            }
+        }
+        return ins;
+    };
+
+    auto bStoreConstruct = [prog, cursor](const std::string &name, const CV::TokenType &origin, std::vector<CV::TokenType> &tokens, const CV::ContextType &ctx){
+        auto ins = prog->createInstruction(CV::InstructionType::CONSTRUCT_STORE, origin);
+        auto store = ctx->buildStore();
+        ins->data.push_back(ctx->id);
+        ins->data.push_back(store->id);
+        for(int i = 0; i < tokens.size(); ++i){
+            auto &inc = tokens[i];
+            auto fetched = CV::Translate(inc, prog, ctx, cursor);
+            if(cursor->error){
+                cursor->subject = origin;
+                return prog->createInstruction(CV::InstructionType::NOOP, origin);
+            }
+            if(fetched->type != CV::InstructionType::PROXY_NAMER){
+                cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "'"+name+"' may only be able to construct named types using NAMER prefixer", origin);
+                return prog->createInstruction(CV::InstructionType::NOOP, origin);
+            }
+            // Deny expander usage in Stores
+            if(fetched->type == CV::InstructionType::PROXY_EXPANDER){
+                cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "Expander Prefixer cannot be used while constructing Stores", inc);
+                return prog->createInstruction(CV::InstructionType::NOOP, origin);
+            }
+            ins->params.push_back(fetched->id);
+            auto vname = fetched->literal[0];
+            if(!CV::Tools::isValidVarName(vname)){
+                cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "'"+name+"' is attempting to construct store with invalidly named type '"+vname+"'", origin);
+                return prog->createInstruction(CV::InstructionType::NOOP, origin);                   
+            }
+            if(CV::Tools::isReservedWord(vname)){
+                cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "'"+name+"' is attempting to construct store with reserved name named type '"+vname+"'", origin);
+                return prog->createInstruction(CV::InstructionType::NOOP, origin);                
+            }
+            ins->literal.push_back(vname);
+            store->v[vname] = std::shared_ptr<CV::Quant>(NULL);
+        }
+        return ins;
+    };
+
+    auto bListConstructFromToken = [bListConstruct, prog, cursor](const CV::TokenType &origin, const CV::ContextType &ctx){
+        auto cpy = origin->emptyCopy();
+        std::vector<CV::TokenType> inners { cpy };
+        for(int i = 0; i < origin->inner.size(); ++i){
+            inners.push_back(origin->inner[i]);
+        }
+        return bListConstruct(origin, inners, ctx);
+    };
+
+    auto isName = [](const CV::TokenType &token, const CV::ContextType &ctx){
+        return ctx->getName(token->first).size() > 0;
+    };
+    
+    auto isNameFunction = [prog](const CV::TokenType &token, const CV::ContextType &ctx){
+        if(!token->solved){
+            return false;
+        }
+        if(CV::Tools::isReservedWord(token->first)){
+            return true;
+        }
+        auto nameRef = ctx->getName(token->first);
+        if(nameRef.size() == 0){
+            return false;
+        }
+        auto &cctx = prog->getCtx(nameRef[0]);
+        auto &quant = cctx->get(nameRef[1]);  
+        return  quant->type == CV::QuantType::FUNCTION ||
+                quant->type == CV::QuantType::BINARY_FUNCTION ||
+                quant->type == CV::QuantType::STORE;
+    };
+    
+    auto areAllFunctions = [isNameFunction](const CV::TokenType &token, const CV::ContextType &ctx){
+        if(token->inner.size() < 1){
+            return false;
+        } 
+        
+        for(int i = 0; i < token->inner.size(); ++i){
+            if(token->inner[i]->first.size() == 0 || !isNameFunction(token->inner[i], ctx)){
+                return false;
+            } 
+        }
+        return true;
+    };
+
+    auto areAllNames = [isNameFunction](const CV::TokenType &token, const CV::ContextType &ctx){
+        if(token->inner.size() < 1){
+            return false;
+        } 
+        
+        for(int i = 0; i < token->inner.size(); ++i){
+            if(token->inner[i]->first.size() < 2 || token->inner[i]->first[0] != '~'){
+                return false;
+            } 
+        }
+        return true;
+    };
+
+    if(token->first.size() == 0){
+        // Instruction list
+        if(areAllFunctions(token, ctx) && token->inner.size() >= 2){
+            return CV::Compile(token, prog, ctx, cursor);
+        }else
+        if(areAllNames(token, ctx)){
+            return bStoreConstruct(token->first, token, token->inner, ctx);
+        }else{
+        // Or list?
+            return bListConstruct(token, token->inner, ctx);
         }
     }else{
-        if(tokens.size() == 0){
-            fprintf(stderr, "Invalid syntax used or malformed token\n");
-            std::exit(1);
-        }
-        cursor->setError("Failed to parse token", "Invalid syntax used or malformed token", tokens[0].line);
-        return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-    }
-
-    return ins[0];
-}
-
-static void __addStandardConstructors(std::shared_ptr<CV::Stack> &stack){
-    /*
-    
-        STANDARD CONSTRUCTORS
-
-        Constructors are embedded instructions that enable a variety of fundamental features such
-        as the ability to store a variable into memory (current context) using a name, mutate already existing variables,
-        invoke interruptors, flow control, defining functions, and of course, native operators such as sum, sub, mult and div.
-
-    */
-
-
-    /*
-        LET
-    */
-    DefConstructor(stack, "let", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
-        if(tokens.size() != 3){
-            cursor->setError(name, "Expects exactly 2 arguments ("+name+" NAME VALUE)", tokens[0].line);
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-        }
-        
-        // TODO: Check for valid variable names
-
-        // Interpret data instruction
-        auto dataIns = interpretToken(tokens[2], {tokens[2]}, stack, ctx, cursor);
-        if(cursor->raise()){
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
-        }
-
-        // Allocate promise in current context
-        auto dataId = 0;
-        unsigned type; 
-        if( dataIns->type == CV::InstructionType::STATIC_PROXY ||
-            dataIns->type == CV::InstructionType::PROMISE_PROXY || 
-            dataIns->type == CV::InstructionType::REFERRED_PROXY ||
-            dataIns->type == CV::InstructionType::STORE_PROXY){
-            dataId = dataIns->data[1];
-            type = 0; // direct, no need for promise
-        }else{
-            dataId = ctx->promise(stack);
-            type = 1; // needs to be executed
-        }
-        ctx->setName(tokens[1].first, dataId);
-
-        // Create instruction
-        auto ins = stack->createInstruction(CV::InstructionType::LET, tokens[1]);
-        ins->data.push_back(type);
-        ins->data.push_back(ctx->id);
-        ins->data.push_back(dataId);
-        ins->parameter.push_back(dataIns->id);
-
-        return ins;
-    });
-
-
-    /*
-        MUT
-    */
-    DefConstructor(stack, "mut", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
-        if(tokens.size() != 3){
-            cursor->setError(name, "Expects exactly 2 arguments ("+name+" NAME VALUE)", tokens[0].line);
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-        }
-        // Process item to replace
-        auto originIns = interpretToken(tokens[1], {tokens[1]}, stack, ctx, cursor);
-        if(cursor->raise()){
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
-        }
-
-        // Interpret replacement data instruction
-        auto dataIns = interpretToken(tokens[2], {tokens[2]}, stack, ctx, cursor);
-        if(cursor->raise()){
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
-        }       
-
-        // Create instruction
-        auto ins = stack->createInstruction(CV::InstructionType::MUT, tokens[1]);
-        ins->parameter.push_back(originIns->id);
-        ins->parameter.push_back(dataIns->id);
-
-        return ins;
-    }); 
-
-
-    /*
-        FN
-        [CC]  (Creates Context)
-    */
-    DefConstructor(stack, "fn", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
-
-        if(tokens.size() != 3){
-            cursor->setError(name, "Expects exactly 2 arguments ("+name+" [args] [code])", tokens[0].line);
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-        }
-
-        bool variadic = false;
-        std::vector<std::string> argNames;
-        
-        // Get find arguments
-        auto argTokens = parseTokens(tokens[1].first, ' ', cursor);
-        if(argTokens.size() == 1 && argTokens[0].first == ".."){
-            variadic = true;
-            argNames.push_back("@");            
-        }else{
-            for(int i = 0; i < argTokens.size(); ++i){
-                argNames.push_back(argTokens[i].first);
+        /*
+            s:store
+        */
+        if(token->first == "b:store"){
+            return bStoreConstruct(token->first, token, token->inner, ctx);
+        }else
+        /*
+            l:list
+        */
+        if(token->first == "b:list"){
+            return bListConstruct(token, token->inner, ctx);
+        }else
+        /*
+            SKIP / RETURN / YIELD
+        */
+        if(token->first == "skip" || token->first == "return" || token->first == "yield"){
+            if(token->inner.size() > 1){
+                cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "'"+token->first+"' expects no more than 1 operand ("+token->first+" VALUE)", token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
             }
-        }
 
-        // Create Item
-        auto fn = std::make_shared<CV::FunctionType>();
-        fn->type = CV::NaturalType::FUNCTION;
-        fn->variadic = variadic;
-        fn->args = argNames;
-        fn->body = tokens[2];
-        auto fnId = ctx->store(stack, fn);
-        
-        // Create instruction
-        auto ins = stack->createInstruction(CV::InstructionType::STATIC_PROXY, tokens[0]);
-        ins->data.push_back(ctx->id);
-        ins->data.push_back(fnId);
-        ctx->markPromise(fnId, CV::NaturalType::FUNCTION);
-
-        return ins;   
-        
-    });           
-
-    /*
-        NTH
-    */
-    DefConstructor(stack, "nth", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
-        if(tokens.size() < 3){
-            cursor->setError(name, "Expects at least 2 arguments", tokens[0].line);
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-        }
-        // Process index
-        auto index = interpretToken(tokens[1], {tokens[1]}, stack, ctx, cursor);
-        if(cursor->raise()){
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
-        }       
-        // Process 
-        auto list = interpretToken(tokens[2], {tokens[1]}, stack, ctx, cursor);
-        if(cursor->raise()){
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
-        }              
-
-        // Create Context
-        auto ins = stack->createInstruction(CV::InstructionType::NTH_PROXY, tokens[0]);
-
-        ins->parameter.push_back(index->id);
-        ins->parameter.push_back(list->id);
-        
-        return ins;
-    });  
-
-    /*
-        length
-    */
-    DefConstructor(stack, "length", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
-        if(tokens.size() != 2){
-            cursor->setError(name, "Expects exactly 1 argument", tokens[0].line);
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-        }
-        // Process subject
-        auto subject = interpretToken(tokens[1], {tokens[1]}, stack, ctx, cursor);
-        if(cursor->raise()){
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
-        }       
-        // Process code
-        auto ins = stack->createInstruction(CV::InstructionType::OP_DESC_LENGTH, tokens[0]);
-        ins->parameter.push_back(subject->id);
-        return ins;
-    });   
-
-
-    /*
-        type
-    */
-    DefConstructor(stack, "type", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
-        if(tokens.size() != 2){
-            cursor->setError(name, "Expects exactly 1 argument", tokens[0].line);
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-        }
-        // Process subject
-        auto subject = interpretToken(tokens[1], {tokens[1]}, stack, ctx, cursor);
-        if(cursor->raise()){
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
-        }       
-        // Process code
-        auto ins = stack->createInstruction(CV::InstructionType::OP_DESC_TYPE, tokens[0]);
-        ins->parameter.push_back(subject->id);
-        return ins;
-    });          
-
-
-    /*
-        >>
-    */
-    DefConstructor(stack, ">>", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
-        if(tokens.size() < 3){
-            cursor->setError(name, "Expects at least 2 arguments", tokens[0].line);
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-        }
-          
-        auto ins = stack->createInstruction(CV::InstructionType::OP_LIST_PUSH, tokens[0]);
-
-        // Process items
-        for(int i = 1; i < tokens.size(); ++i){
-            auto item = interpretToken(tokens[i], {tokens[i]}, stack, ctx, cursor);
-            if(cursor->raise()){
-                return stack->createInstruction(CV::InstructionType::NOOP, tokens[i]);
-            }        
-            ins->parameter.push_back(item->id);
-        }
-
-        return ins;
-    });    
-
-
-
-    /*
-        <<
-    */
-    DefConstructor(stack, "<<", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
-        if(tokens.size() < 3){
-            cursor->setError(name, "Expects at least 2 arguments", tokens[0].line);
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-        }
-          
-        auto ins = stack->createInstruction(CV::InstructionType::OP_LIST_POP, tokens[0]);
-
-        // Process items
-        for(int i = 1; i < tokens.size(); ++i){
-            auto item = interpretToken(tokens[i], {tokens[i]}, stack, ctx, cursor);
-            if(cursor->raise()){
-                return stack->createInstruction(CV::InstructionType::NOOP, tokens[i]);
-            }        
-            ins->parameter.push_back(item->id);
-        }
-
-        return ins;
-    });         
-
-
-    /*
-        list-ranged
-    */
-    DefConstructor(stack, "list-ranged", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
-        static const std::string guide = name+" START END (at 1)";
-        if(tokens.size() != 3 && tokens.size() != 5){
-            cursor->setError(name, "Expects at least 2 arguments ("+guide+")", tokens[0].line);
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-        }
-
-        if(tokens.size() == 5 && tokens[4].first == "at"){
-            cursor->setError(name, "Expected word 'at' as argument 3 ("+guide+")", tokens[0].line);
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);               
-        }
-
-        // start
-        auto start = interpretToken(tokens[1], {tokens[1]}, stack, ctx, cursor);
-        if(cursor->raise()){
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
-        }        
-
-        // end
-        auto end = interpretToken(tokens[2], {tokens[2]}, stack, ctx, cursor);
-        if(cursor->raise()){
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
-        }  
-
-        unsigned stepIns = 0;
-
-        // step
-        if(tokens.size() == 5){
-            auto step = interpretToken(tokens[4], {tokens[4]}, stack, ctx, cursor);
-            if(cursor->raise()){
-                return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
-            }
-            stepIns = step->id;            
-        }
-
-        auto dataId = ctx->promise(stack);
-
-
-        // Create instruction
-        auto consIns = stack->createInstruction(CV::InstructionType::CONSTRUCT_RANGED_LIST, tokens[0]);
-        consIns->data.push_back(ctx->id);
-        consIns->data.push_back(dataId);
-        consIns->parameter.push_back(start->id);
-        consIns->parameter.push_back(end->id);
-        consIns->parameter.push_back(stepIns);
-
-        // Create proxy instruction
-        auto ins = stack->createInstruction(CV::InstructionType::PROMISE_PROXY, tokens[0]);
-        ins->data.push_back(ctx->id);
-        ins->data.push_back(dataId);
-        ins->parameter.push_back(consIns->id);
-        return ins;
-    });     
-
-
-    /*
-        list-bulk
-    */
-    DefConstructor(stack, "list-bulk", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
-        static const std::string guide = name+" AMOUNT VALUE";
-        if(tokens.size() != 3){
-            cursor->setError(name, "Expects at least 2 arguments ("+guide+")", tokens[0].line);
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-        }
-
-        // amount
-        auto amount = interpretToken(tokens[1], {tokens[1]}, stack, ctx, cursor);
-        if(cursor->raise()){
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
-        }        
-
-        // value
-        auto value = interpretToken(tokens[2], {tokens[2]}, stack, ctx, cursor);
-        if(cursor->raise()){
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
-        }  
-
-        auto dataId = ctx->promise(stack);
-        // Create instruction
-        auto consIns = stack->createInstruction(CV::InstructionType::CONSTRUCT_BULK_LIST, tokens[0]);
-        consIns->data.push_back(ctx->id);
-        consIns->data.push_back(dataId);
-        consIns->parameter.push_back(amount->id);
-        consIns->parameter.push_back(value->id);
-
-        // Create proxy instruction
-        auto ins = stack->createInstruction(CV::InstructionType::PROMISE_PROXY, tokens[0]);
-        ins->data.push_back(ctx->id);
-        ins->data.push_back(dataId);
-        ins->parameter.push_back(consIns->id);
-        return ins;
-    });   
-
-    /*
-        list
-    */
-    DefConstructor(stack, "list", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
-        if(tokens.size() < 2){
-            cursor->setError(name, "Expects at least 1 argument", tokens[0].line);
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-        }
-       
-        auto nins = stack->createInstruction(CV::InstructionType::CONSTRUCT_LIST, tokens[0]);
-        auto list = std::make_shared<CV::ListType>();        
-        list->build(tokens.size()-1);
-        nins->data.push_back(ctx->id);
-        nins->data.push_back(ctx->store(stack, list));
-        nins->data.push_back(tokens.size()-1);
-        for(int i = 1; i < tokens.size(); ++i){
-            auto cins = interpretToken(tokens[i], {tokens[i]}, stack, ctx, cursor);
-            if(cursor->raise()){
-                return stack->createInstruction(CV::InstructionType::NOOP, tokens[i]);
-            }
+            auto ins = prog->createInstruction(CV::InstructionType::CF_INTERRUPT, token);
             
-            nins->parameter.push_back(cins->id);
-            nins->data.push_back(ctx->id);
-        }
-
-        return nins;
-    }); 
-
-    /*
-        do
-        [CC]  (Creates Context)
-    */
-    DefConstructor(stack, "do", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
-        if(tokens.size() < 3){
-            cursor->setError(name, "Expects at least 2 arguments", tokens[0].line);
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-        }
-        // Create Context
-        auto nctx = stack->createContext(ctx.get());
-
-        // Process conditional branch
-        auto condition = interpretToken(tokens[1], {tokens[1]}, stack, nctx, cursor);
-        if(cursor->raise()){
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
-        } 
-
-        // Process code
-        auto branch = interpretToken(tokens[2], {tokens[2]}, stack, nctx, cursor);
-        if(cursor->raise()){
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
-        }        
-
-        // Create instruction
-        auto ins = stack->createInstruction(CV::InstructionType::CF_LOOP_DO, tokens[0]);
-        ins->data.push_back(nctx->id);
-        ins->parameter.push_back(condition->id);
-        ins->parameter.push_back(branch->id);
-
-        // Seals it
-        nctx->solidify();
-
-        return ins;
-    }); 
-
-    /*
-        iter
-        [CC]  (Creates Context)
-    */
-    DefConstructor(stack, "iter", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
-        static const std::string guide = name+" VAR in SOURCE (at X) [CODE]";
-        if(tokens.size() != 5 && tokens.size() != 7){
-            cursor->setError(name, "Expects at least 4 arguments ("+guide+")", tokens[0].line);
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-        }        
-
-        if(tokens[2].first != "in"){
-            cursor->setError(name, "Expected word 'in' as argument 2 ("+guide+")", tokens[0].line);
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);            
-        }
-
-        if(tokens.size() == 7 && tokens[4].first != "at"){
-            cursor->setError(name, "Expected word 'at' as argument 4 ("+guide+")", tokens[0].line);
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);             
-        }
-
-        auto nctx = stack->createContext(ctx.get());
-        
-        // TODO: verify var name
-        auto stepperId = nctx->promise(stack);
-        nctx->setName(tokens[1].first, stepperId);
-        
-        auto ins = stack->createInstruction(CV::InstructionType::CF_LOOP_ITER, tokens[0]);
-        ins->data.push_back(nctx->id);
-        ins->data.push_back(stepperId);
-
-        // Process source for iter
-        auto source = interpretToken(tokens[3], {tokens[3]}, stack, nctx, cursor);
-        if(cursor->raise()){
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-        }
-        ins->parameter.push_back(source->id);
-        // Process code
-        auto code = interpretToken(tokens[tokens.size()-1], {tokens[tokens.size()-1]}, stack, nctx, cursor);
-        if(cursor->raise()){
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-        }
-        ins->parameter.push_back(code->id);
-        
-        // Process counter
-        if(tokens.size() == 7){
-            auto stepperCountId = interpretToken(tokens[5], {tokens[5]}, stack, nctx, cursor);
-            if(cursor->raise()){
-                return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+            int type = CV::InterruptType::UNDEFINED;
+            if(token->first == "skip"){
+                type = CV::InterruptType::SKIP;
+            }else
+            if(token->first == "yield"){
+                type = CV::InterruptType::YIELD;
+            }else
+            if(token->first == "return"){
+                type = CV::InterruptType::RETURN;
             }
-            ins->parameter.push_back(stepperCountId->id);
-        }else{
-            ins->parameter.push_back(0);
-        }
+            ins->data.push_back(type);
 
-        // Seal context
-        nctx->solidify();
-
-        return ins;
-    });   
-
-    /*
-        for
-        [CC]  (Creates Context)
-    */
-    DefConstructor(stack, "for", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
-        //(for i from X to Y at 2 [CODE])
-        //(for i from X to Y [CODE])
-
-        static const std::string guide = name+" VAR from NUMBER to NUMBER (at X) [CODE]";
-        if(tokens.size() != 7 && tokens.size() != 9){
-            cursor->setError(name, "Expects at least 4 arguments ("+guide+")", tokens[0].line);
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-        }        
-
-        if(tokens[2].first != "from"){
-            cursor->setError(name, "Expected word 'from' as argument 1 ("+guide+")", tokens[0].line);
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);            
-        }
-
-        if(tokens[4].first != "to"){
-            cursor->setError(name, "Expected word 'to' as argument 3 ("+guide+")", tokens[0].line);
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);            
-        }        
-
-        if(tokens.size() == 9 && tokens[6].first != "at"){
-            cursor->setError(name, "Expected word 'at' as argument 6 ("+guide+")", tokens[0].line);
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);             
-        }
-
-        auto nctx = stack->createContext(ctx.get());
-        
-        auto ins = stack->createInstruction(CV::InstructionType::CF_LOOP_FOR, tokens[0]);
-
-        // TODO: verify var name
-
-        // Stepper name
-        auto step = std::make_shared<CV::NumberType>();
-        step->set(0);
-        auto stepperId = nctx->store(stack, step);
-        nctx->setName(tokens[1].first, stepperId);    
-        ins->data.push_back(nctx->id);
-        ins->data.push_back(stepperId);
-
-        // from instruction
-        auto fromIns = interpretToken(tokens[3], {tokens[3]}, stack, nctx, cursor);
-        if(cursor->raise()){
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-        }
-        ins->parameter.push_back(fromIns->id);
-
-        // to instruction
-        auto toIns = interpretToken(tokens[5], {tokens[5]}, stack, nctx, cursor);
-        if(cursor->raise()){
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-        }
-        ins->parameter.push_back(toIns->id);
-
-        // Code
-        auto code = interpretToken(tokens[tokens.size()-1], {tokens[tokens.size()-1]}, stack, nctx, cursor);
-        if(cursor->raise()){
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-        }
-        ins->parameter.push_back(code->id);        
-
-        // Count amount
-        if(tokens.size() == 9){
-            auto stepperCountId = interpretToken(tokens[7], {tokens[7]}, stack, nctx, cursor);
-            if(cursor->raise()){
-                return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-            }
-            ins->parameter.push_back(stepperCountId->id);
-        }else{
-            ins->parameter.push_back(0);
-        }
-
-        // Seal context
-        nctx->solidify();
-
-        return ins;
-    });           
-
-    auto buildInterrupt = [&](const std::string &name, unsigned TYPE){
-        DefConstructor(stack, name, [TYPE](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
-            if(tokens.size() > 2){
-                cursor->setError(name, "Expects no more than 1 argument", tokens[0].line);
-                return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-            }
-
-            CV::Instruction *payload = NULL;
-            if(tokens.size() > 1){
-                payload = interpretToken(tokens[1], {tokens[1]}, stack, ctx, cursor);
-                if(cursor->raise()){
-                    return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-                }                    
-            }
-
-            auto ins = stack->createInstruction(TYPE, tokens[0]);
-            ins->data.push_back(payload != NULL);
-            if(payload){
-                ins->parameter.push_back(payload->id);
+            if(token->inner.size() > 0){
+                ins->data.push_back(ctx->id);
+                auto target = CV::Translate(token->inner[0], prog, ctx, cursor);
+                if(cursor->error){
+                    cursor->subject = token;
+                    return prog->createInstruction(CV::InstructionType::NOOP, token);
+                }
+                ins->params.push_back(target->id);
             }
 
             return ins;
-        });
-    }; 
-    buildInterrupt("return", CV::InstructionType::CF_INT_RETURN);
-    buildInterrupt("yield", CV::InstructionType::CF_INT_YIELD);
-    buildInterrupt("skip", CV::InstructionType::CF_INT_SKIP);
-
-    /*
-        IF
-        [CC]  (Creates Context)
-    */
-    DefConstructor(stack, "if", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
-        if(tokens.size() < 3){
-            cursor->setError(name, "Expects at least 2 arguments", tokens[0].line);
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-        }
-        // Create Context
-        auto nctx = stack->createContext(ctx.get());
-
-        // Process true branch
-        auto condition = interpretToken(tokens[1], {tokens[1]}, stack, nctx, cursor);
-        if(cursor->raise()){
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
-        } 
-
-        // Process false branch
-        auto trueBranch = interpretToken(tokens[2], {tokens[2]}, stack, nctx, cursor);
-        if(cursor->raise()){
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
-        }        
-
-        // Create instruction
-        auto ins = stack->createInstruction(CV::InstructionType::CF_COND_BINARY_BRANCH, tokens[0]);
-        ins->data.push_back(nctx->id);
-        ins->parameter.push_back(condition->id);
-        ins->parameter.push_back(trueBranch->id);
-
-        // Is there false branch?
-        if(tokens.size() >= 4){
-            auto falseBranch = interpretToken(tokens[3], {tokens[3]}, stack, nctx, cursor);
-            if(cursor->raise()){
-                return stack->createInstruction(CV::InstructionType::NOOP, tokens[2]);
-            }
-            ins->parameter.push_back(falseBranch->id);
-        }
-
-        // Seals it
-        nctx->solidify();
-
-        return ins;
-    });     
-
-    /*
-        EMBEDDED OPERATORS (LOGIC & ARITHMETIC)
-    */
-   
-    auto buildOp = [&](const std::string &name, unsigned TYPE, unsigned minArgs = 2){
-        DefConstructor(stack, name, [TYPE, minArgs](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
-            if(tokens.size() < minArgs+1){
-                cursor->setError(name, "Expects at least "+std::to_string(minArgs)+" arguments", tokens[0].line);
-                return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-            }
-
-            auto result = stack->createInstruction(CV::InstructionType::REFERRED_PROXY, tokens[0]);
-
-            auto data = std::make_shared<CV::NumberType>();
-            data->set(0);
-            auto dataId = ctx->store(stack, data);
-            result->data.push_back(ctx->id);
-            result->data.push_back(dataId);
-
-            auto actuator = stack->createInstruction(TYPE, tokens[0]);
-            actuator->data.push_back(ctx->id);
-            actuator->data.push_back(dataId);
-            for(int i = 1; i < tokens.size(); ++i){
-                auto ins = interpretToken(tokens[i], {tokens[i]}, stack, ctx, cursor);
-                if(cursor->raise()){
-                    return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-                }            
-                actuator->parameter.push_back(ins->id);
-            }
-
-            result->parameter.push_back(actuator->id);
-
-            return result;
-        });
-    };   
-    buildOp("+", CV::InstructionType::OP_NUM_ADD);
-    buildOp("-", CV::InstructionType::OP_NUM_SUB);
-    buildOp("*", CV::InstructionType::OP_NUM_MULT);
-    buildOp("/", CV::InstructionType::OP_NUM_DIV);
-    buildOp("eq", CV::InstructionType::OP_COND_EQ);
-    buildOp("neq", CV::InstructionType::OP_COND_NEQ);
-    buildOp("lt", CV::InstructionType::OP_COND_LT);
-    buildOp("lte", CV::InstructionType::OP_COND_LTE);
-    buildOp("gt", CV::InstructionType::OP_COND_GT);
-    buildOp("gte", CV::InstructionType::OP_COND_GTE);
-    buildOp("and", CV::InstructionType::OP_LOGIC_AND);
-    buildOp("or", CV::InstructionType::OP_LOGIC_OR);
-
-    DefConstructor(stack, "not", [](const std::string &name, const VECTOR<CV::Token> &tokens, const SHARED<CV::Stack> &stack, SHARED<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
-        if(tokens.size() != 2){
-            cursor->setError(name, "Expects exactly 1 argument", tokens[0].line);
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-        }
-
-        auto result = stack->createInstruction(CV::InstructionType::REFERRED_PROXY, tokens[0]);
-
-        auto data = std::make_shared<CV::NumberType>();
-        data->set(0);
-        auto dataId = ctx->store(stack, data);
-        result->data.push_back(ctx->id);
-        result->data.push_back(dataId);
-
-        // Instruction
-        auto actuator = stack->createInstruction(CV::InstructionType::OP_LOGIC_NOT, tokens[0]);
-        actuator->data.push_back(ctx->id);
-        actuator->data.push_back(dataId);
-        auto ins = interpretToken(tokens[1], {tokens[1]}, stack, ctx, cursor);
-        if(cursor->raise()){
-            return stack->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-        }            
-        actuator->parameter.push_back(ins->id);
-
-
-        result->parameter.push_back(actuator->id);
-
-        return result;
-    });    
-}
-
-
-/* -------------------------------------------------------------------------------------------------------------------------------- */
-// Context
-
-CV::Context::Context(){
-    top = NULL;
-    solid = false;
-}
-
-void CV::Context::deleteData(unsigned id){
-    // TODO
-}
-
-unsigned CV::Context::store(CV::Stack *stack, const std::shared_ptr<CV::Item> &item){
-    if(solid){
-        // fprintf(stderr, "Context %i: Tried storing new Item %i in a solid context\n", this->id, item->id);
-        // std::exit(1);           
-    }
-    item->id = stack->generateId();
-    item->ctx = this->id;
-    this->data[item->id] = item;
-    return item->id;
-}
-
-unsigned CV::Context::store(const std::shared_ptr<CV::Stack> &stack, const std::shared_ptr<CV::Item> &item){
-    return store(stack.get(), item);
-}
-
-unsigned CV::Context::promise(CV::Stack *stack){
-    auto id = stack->generateId();
-    this->data[id] = NULL;
-    return id;
-}
-
-unsigned CV::Context::promise(const std::shared_ptr<CV::Stack> &stack){
-    return promise(stack.get());
-}
-
-
-void CV::Context::markPromise(unsigned id, unsigned type){
-    this->markedItems[id] = type;
-}
-
-unsigned CV::Context::getMarked(unsigned id){
-    auto it = this->markedItems.find(id);
-    if(it == this->markedItems.end()){
-        return this->top ? this->top->getMarked(id) : CV::NaturalType::UNDEFINED;
-    }
-    return it->second;
-}
-
-void CV::Context::setPromise(unsigned id, std::shared_ptr<CV::Item> &item){
-    if(this->data.count(id) == 0){
-        fprintf(stderr, "Context %i: Closing Promise using non-existing ID %i\n", this->id, id);
-        std::exit(1);        
-    }
-    this->data[id] = item;
-}
-
-CV::ContextDataPair CV::Context::getIdByName(const std::shared_ptr<CV::Stack> &stack, const CV::Token &token){
-    auto it = this->dataIds.find(token.first);
-    if(it == this->dataIds.end()){
-        return this->top ? this->top->getIdByName(stack, token) : CV::ContextDataPair();
-    }
-    return CV::ContextDataPair(this->id, it->second);
-}
-
-bool CV::Context::check(const std::shared_ptr<CV::Stack> &stack, const CV::Token &token){
-    auto dv = this->dataIds.count(token.first);
-    auto bfv = stack->bfIds.count(token.first);      
-    if(dv == 0 && bfv == 0){
-        return this->top && this->top->check(stack, token);
-    }
-    return true;
-}
-
-void CV::Context::setName(const std::string &name, unsigned id){
-    auto it = this->data.find(id);
-    if(it == this->data.end()){
-        fprintf(stderr, "Context %i: Naming non-existing Item %i\n", this->id, id);
-        std::exit(1);
-    }
-    auto item = it->second;
-    this->dataIds[name] = id;
-}
-
-void CV::Context::deleteName(unsigned id){
-    for(auto &it : this->dataIds){
-        if(it.second == id){
-            this->dataIds.erase(it.first);
-            return;
-        }
-    }
-}
-
-std::shared_ptr<CV::Item> CV::Context::getByName(const std::string &name){
-    auto it = this->dataIds.find(name);
-    if(it == this->dataIds.end()){
-        return this->top ? this->top->getByName(name) : NULL;
-    }
-    return this->data[it->second];
-}
-
-std::shared_ptr<CV::Item> CV::Context::get(unsigned id){
-    auto it = this->data.find(id);
-    if(it == this->data.end()){
-        return this->top ? this->top->get(id) : NULL;
-    }
-    return it->second;
-}
-
-void CV::Context::clear(){
-    std::set<std::shared_ptr<CV::Item>> uniqueItems;
-    for(auto &it : this->data){
-        if(it.second == NULL){
-            continue;
-        }
-        uniqueItems.insert(it.second);
-        auto item = it.second;
-        item->clear();
-    }
-    this->data.clear();
-    this->dataIds.clear();
-    // Clear originalData
-    for(int i = 0; i < this->originalData.size(); ++i){
-        if(uniqueItems.count(this->originalData[i]) > 0){
-            continue;
-        }
-        auto item = this->originalData[i];
-        item->clear();
-    }
-    uniqueItems.clear();
-    this->originalData.clear();
-}
-
-std::shared_ptr<CV::Item> CV::Context::buildNil(const std::shared_ptr<CV::Stack> &stack){
-    auto nil = std::make_shared<CV::Item>();
-    this->store(stack, nil);
-    return nil;
-}
-
-std::shared_ptr<CV::Item> CV::Context::buildString(const std::shared_ptr<CV::Stack> &stack, const std::string &v){
-    auto str = std::make_shared<CV::StringType>();
-    str->set(v);
-    this->store(stack, str);
-    return str;
-}
-
-std::shared_ptr<CV::Item> CV::Context::buildNumber(const std::shared_ptr<CV::Stack> &stack, __CV_DEFAULT_NUMBER_TYPE n){
-    auto number = std::make_shared<CV::NumberType>();
-    number->set(n);
-    this->store(stack, number);
-    return number;
-}
-
-std::shared_ptr<CV::Item> CV::Context::buildProxyNumber(const std::shared_ptr<CV::Stack> &stack, void *ref){
-    auto number = std::make_shared<CV::NumberType>();
-    number->type = CV::NaturalType::NUMBER;
-    number->proxy = true;
-    number->size = sizeof(__CV_DEFAULT_NUMBER_TYPE);
-    number->bsize = sizeof(__CV_DEFAULT_NUMBER_TYPE);
-    number->data = ref;
-    this->store(stack, number);
-    return number;
-}
-
-std::shared_ptr<CV::Item> CV::Context::buildProxyString(const std::shared_ptr<CV::Stack> &stack, void *ref){
-    auto str = std::make_shared<CV::StringType>();
-    str->type = CV::NaturalType::STRING;
-    str->proxy = true;
-    str->data = ref;
-    this->store(stack, str);
-    return str;
-}
-
-void CV::Context::transferFrom(CV::Stack *stack, std::shared_ptr<CV::Item> &item){
-    // if it's here already, then we skip this
-    if(this->data.count(item->id) == 1){ 
-        return;
-    }
-    // Find and store it here
-    auto ctx = stack->contexts[item->ctx];
-    item->ctx = this->id;
-    this->data[item->id] = item;
-    // Remove from other
-    ctx->data.erase(id);
-    deleteName(item->id);
-}
-
-void CV::Context::transferFrom(std::shared_ptr<CV::Stack> &stack, std::shared_ptr<CV::Item> &item){
-    transferFrom(stack.get(), item);
-}
-
-void CV::Context::solidify(){
-    if(this->solid){
-        return;
-    }
-    for(auto &it : this->data){ 
-        if(it.second == NULL){
-            continue;
-        }else{
-            originalData.push_back(it.second->copy());
-        }
-    }
-    solid = true;
-}
-
-void CV::Context::revert(){
-    for(int i = 0; i < this->originalData.size(); ++i){
-        auto backup = this->originalData[i];
-        auto local = this->data[backup->id];
-        local->restore(backup);
-    }
-}
-
-/* -------------------------------------------------------------------------------------------------------------------------------- */
-// Stack Management
-
-CV::Stack::Stack(){
-    this->lastGenId = 100;
-}
-
-unsigned CV::Stack::generateId(){
-    idGeneratorMutex.lock();
-    auto id = lastGenId;
-    ++lastGenId;
-    idGeneratorMutex.unlock();
-    return id;
-}
-
-CV::Instruction *CV::Stack::createInstruction(unsigned type, const CV::Token &token){
-    auto *ins = new CV::Instruction();
-    ins->id = this->generateId();
-    ins->type = type;
-    ins->token = token;
-    this->instructions[ins->id] = ins;
-    return ins;
-}
-
-std::shared_ptr<CV::Context> CV::Stack::createContext(CV::Context *top){
-    auto ctx = std::make_shared<CV::Context>();
-    ctx->id = this->generateId();
-    ctx->top = top;
-    this->contexts[ctx->id] = ctx;
-    return ctx;
-}
-
-std::shared_ptr<CV::Context> CV::Stack::getContext(unsigned id) const {
-    auto it = this->contexts.find(id);
-    return it->second;
-}
-
-CV::BinaryFunction *CV::Stack::getRegisteredFunction(const std::shared_ptr<CV::Stack> &stack, const CV::Token &token){
-    auto it = this->bfIds.find(token.first);
-    if(it == this->bfIds.end()){
-        return NULL;
-    }
-    return this->binaryFunctions[it->second].get();
-}
-
-void CV::Stack::registerFunction(const std::string &name, const std::function<std::shared_ptr<CV::Item>(const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>>&, std::shared_ptr<CV::Context>&, std::shared_ptr<CV::Cursor> &cursor)> &fn){
-    auto bf = std::make_shared<CV::BinaryFunction>();
-    bf->id = this->generateId();
-    bf->fn = fn;
-    bf->name = name;
-    this->binaryFunctions[bf->id] = bf;
-    this->bfIds[name] = bf->id;
-
-}
-
-void CV::Stack::setTopContext(std::shared_ptr<CV::Context> &ctx){
-    this->topCtx = ctx;
-}
-
-void CV::Stack::deleteContext(unsigned id){
-    auto it = this->contexts.find(id);
-    if(it == this->contexts.end()){
-        fprintf(stderr, "Context %i: Failed to find such context\n", id);
-        std::exit(1);
-    }
-    auto ctx = it->second;
-    ctx->clear();
-    this->contexts.erase(it);
-}
-
-void CV::Stack::garbageCollect(){
-    int count = 0;
-    for(auto &itctx : this->contexts){
-        auto &ctx = itctx.second;
-        for(auto &itdata : ctx->data){
-            auto &data = itdata.second;
-            if(data.unique()){
-                ctx->data.erase(data->id);
-                ++count;
-            }
-        }
-    }
-}
-
-static CV::ControlFlow __execute(const std::shared_ptr<CV::Stack> &stack, CV::Instruction *ins, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
-    switch(ins->type){
-        default:
-        case CV::InstructionType::INVALID: {
-            fprintf(stderr, "Instruction ID %i of invalid type (%i)\n", ins->id, ins->type);
-            std::exit(1);
-        } break;
-        case CV::InstructionType::NOOP: {
-            return CV::ControlFlow(ctx->buildNil(stack));
-        };
-
+        }else
         /*
-            CONSTRUCTRORS 
+            BRING
         */
-        case CV::InstructionType::LET: {
-            auto &type = ins->data[0];
-            auto &ctxId = ins->data[1];
-            auto &dataId = ins->data[2];
-            
-            auto v = CV::Execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor);
-            if(cursor->raise()){
-                return ctx->buildNil(stack);
+        if(token->first== "bring" || token->first == "bring:dynamic-library"){
+            bool isdotcv = token->first == "bring";
+            if(token->inner.size() != 1){
+                cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "'"+token->first+"' expects exactly 2 tokens ("+token->first+" NAME)", token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
+
+            auto target = CV::Translate(token->inner[0], prog, ctx, cursor);
+            if(cursor->error){
+                cursor->subject = token;
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
             }
             
-            if(type != 0){
-                stack->contexts[ctxId]->setPromise(dataId, v.value);
+            if(!CV::ErrorCheck::ExpectNoPrefixer(token->first, {target}, token, cursor)){
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
+            auto st = std::make_shared<CV::ControlFlow>();
+            auto fnamev = CV::Execute(target, ctx, prog, cursor, st);
+            if(cursor->error){
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
             }
 
-            return v;
-        };
-        case CV::InstructionType::MUT: {
-
-            auto target = CV::Execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor).value;
-            if(cursor->raise()){
-                return ctx->buildNil(stack);
+            if(!CV::ErrorCheck::ExpectsTypeAt(fnamev->type, CV::QuantType::STRING, 0, token->first, token, cursor)){
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
             }
 
-            auto v = CV::Execute(stack->instructions[ins->parameter[1]], stack, ctx, cursor).value;
-            if(cursor->raise()){
-                return ctx->buildNil(stack);
+            // Get symbolic or literal
+            auto fname = std::static_pointer_cast<CV::TypeString>(fnamev)->v;
+
+            // TODO: Solve name (Could be a local or system library, probably using CV_LIB)
+
+            // Load .cv
+            if(isdotcv){
+                if(!CV::Tools::fileExists(fname)){
+                    cursor->setError(CV_ERROR_MSG_LIBRARY_NOT_VALID, "No dynamic library '"+fname+"' was found", token);
+                    return prog->createInstruction(CV::InstructionType::NOOP, token);
+                }
+                int id = CV::Import(fname, prog, ctx, cursor);
+            }else{
+            // Load .so/.dll
+                std::string path = "./lib/" + fname;
+                switch(CV::PLATFORM){
+                    case CV::SupportedPlatform::LINUX: {
+                        path += ".so";
+                    } break; 
+                    case CV::SupportedPlatform::WINDOWS: {
+                        path += ".dll";
+                    } break;
+                    case CV::SupportedPlatform::OSX: {
+                        // TODO
+                    } break;                
+                    default:
+                    case CV::SupportedPlatform::UNKNOWN: {
+                        fprintf(stderr, "%s: Unable to load dyanmic library for this platform (UNKNOWN/UNDEFINED).", token->first.c_str());
+                        std::exit(1);
+                    } break;                        
+                }
+
+                if(!CV::Tools::fileExists(path)){
+                    cursor->setError(CV_ERROR_MSG_LIBRARY_NOT_VALID, "No dynamic library '"+fname+"' was found", token);
+                    return prog->createInstruction(CV::InstructionType::NOOP, token);
+                }
+
+                int id = CV::ImportDynamicLibrary(path, fname, prog, ctx, cursor);
+
+            }
+            if(cursor->error){
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
             }
 
-            if(target->type != v->type){
-                cursor->setError("Illegal Mutation '"+ins->token.first+"'", "Can only mutate variables of the same type", ins->token.line);
-                return ctx->buildNil(stack);
-            }else
-            if(target->type != CV::NaturalType::NUMBER && target->type != CV::NaturalType::STRING){
-                cursor->setError("Illegal Mutation '"+ins->token.first+"'", "Only natural types 'STRING' and 'NUMBER' may be mutated", ins->token.line);
-                return ctx->buildNil(stack);                
+            auto ins = prog->createInstruction(CV::InstructionType::LIBRAY_IMPORT, token);
+            ins->data.push_back(ctx->id);
+            ins->data.push_back(0); // library id, TODO
+            ins->data.push_back(isdotcv);
+            ins->literal.push_back(fname);
+            return ins;
+        }else
+        /*
+            FN
+        */
+        if(token->first == "fn"){
+            if(token->inner.size() != 2){
+                cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "'"+token->first+"' expects exactly 3 tokens (fn [arguments][code])", token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
             }
+            auto fn = std::make_shared<CV::TypeFunction>();
+            ctx->set(fn->id, fn);
+            auto fctx = prog->createContext(ctx);
+            fn->ctxId = fctx->id;
+            fn->body = token->inner[1];
 
-            switch(target->type){
-                case CV::NaturalType::NUMBER: {
-                    auto original = std::static_pointer_cast<CV::NumberType>(target);
-                    auto newValue = std::static_pointer_cast<CV::NumberType>(v);
-                    original->set(newValue->get());
-                } break;
-                case CV::NaturalType::STRING: {
-                    auto original = std::static_pointer_cast<CV::StringType>(target);
-                    auto newValue = std::static_pointer_cast<CV::StringType>(v);                    
-                    original->set(newValue->get());
-                } break;                
-            }
-
-            return target;
-        };
-        case CV::InstructionType::CONSTRUCT_LIST: {
-            auto &lsCtxId = ins->data[0];
-            auto &lsDataId = ins->data[1];            
-            auto list = std::static_pointer_cast<CV::ListType>(stack->contexts[lsCtxId]->data[lsDataId]);
-
-            unsigned nelements = ins->data[2];
-
-            unsigned c = 0;
-            
-            for(int i = 0; i < nelements; ++i){
-                auto elementV = CV::Execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
-                if(cursor->raise()){
-                    return ctx->buildNil(stack);
-                } 
-                unsigned elCtxId = ins->data[3 +  i]; // Bringing context might be unneccesary
-                list->set(i, elementV->ctx, elementV->id);
-            }
-
-            return std::static_pointer_cast<CV::Item>(list);
-        };        
-
-        case CV::InstructionType::CONSTRUCT_RANGED_LIST: {
-            __CV_DEFAULT_NUMBER_TYPE start = 0;
-            __CV_DEFAULT_NUMBER_TYPE end = 0;
-            __CV_DEFAULT_NUMBER_TYPE step = 1;
-
-            // complete promise
-            auto list = std::make_shared<CV::ListType>();
-            auto cctx = stack->contexts[ins->data[0]];
-            auto lItem = std::static_pointer_cast<CV::Item>(list);
-            cctx->setPromise(ins->data[1], lItem);
-
-            // Process start
-            auto startV = CV::Execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor).value;
-            if(cursor->raise()){
-                return ctx->buildNil(stack);
-            }  
-            if(startV->type != CV::NaturalType::NUMBER){
-                cursor->setError("Logic Error At '"+ins->token.first+"'", "START must be a NUMBER", ins->token.line);
-                return ctx->buildNil(stack);                
-            }
-            start = std::static_pointer_cast<CV::NumberType>(startV)->get();
-
-            // Process end
-            auto endV = CV::Execute(stack->instructions[ins->parameter[1]], stack, ctx, cursor).value;
-            if(cursor->raise()){
-                return ctx->buildNil(stack);
-            }  
-            if(endV->type != CV::NaturalType::NUMBER){
-                cursor->setError("Logic Error At '"+ins->token.first+"'", "END must be a NUMBER", ins->token.line);
-                return ctx->buildNil(stack);                
-            }
-            end = std::static_pointer_cast<CV::NumberType>(endV)->get();   
-
-            // Process step if any
-            if(ins->parameter[2] != 0){
-                auto stepV = CV::Execute(stack->instructions[ins->parameter[2]], stack, ctx, cursor).value;
-                if(cursor->raise()){
-                    return ctx->buildNil(stack);
+            auto paramNameList = token->inner[0]->inner;
+            paramNameList.insert(paramNameList.begin(), token->inner[0]);
+            for(int i = 0; i < paramNameList.size(); ++i){
+                auto &name = paramNameList[i]->first;
+                if(!CV::Tools::isValidVarName(name)){
+                    cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "'"+token->first+"' parameter name  '"+name+"' is an invalid", token);
+                    return prog->createInstruction(CV::InstructionType::NOOP, token);                   
+                }
+                if(CV::Tools::isReservedWord(name)){
+                    cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "'"+token->first+"' parameter name '"+name+"' is a name of native constructor which cannot be overriden", token);
+                    return prog->createInstruction(CV::InstructionType::NOOP, token);                
                 }  
-                if(stepV->type != CV::NaturalType::NUMBER){
-                    cursor->setError("Logic Error At '"+ins->token.first+"'", "STEP must be a NUMBER", ins->token.line);
-                    return ctx->buildNil(stack);                
-                }
-                step = std::static_pointer_cast<CV::NumberType>(stepV)->get();                   
+                fn->params.push_back(name);
+                auto v = fctx->buildNil();
+                fctx->setName(name, v->id);
             }
 
-            // Count how many items
-            __CV_DEFAULT_NUMBER_TYPE s = start;
-            __CV_DEFAULT_NUMBER_TYPE e = end;
-            bool lessthan = e > s;
-            std::vector<std::shared_ptr<CV::Item>> elements;
-            while((lessthan && s <= e) || (!lessthan && s >= e)){
-                elements.push_back(cctx->buildNumber(stack, s));
-                s += step;
+            auto target = CV::Translate(token->inner[1], prog, fctx, cursor);
+
+            if(cursor->error){
+                cursor->subject = token;
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
             }
-            list->build(elements);
-            return lItem;
-        };
-
-
-        case CV::InstructionType::CONSTRUCT_BULK_LIST: {
-            __CV_DEFAULT_NUMBER_TYPE amount = 0;
-            __CV_DEFAULT_NUMBER_TYPE value = 0;
-
-            // complete promise
-            auto list = std::make_shared<CV::ListType>();
-            auto cctx = stack->contexts[ins->data[0]];
-            auto lItem = std::static_pointer_cast<CV::Item>(list);
-            cctx->setPromise(ins->data[1], lItem);
-
-            // Process amount
-            auto amountV = CV::Execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor).value;
-            if(cursor->raise()){
-                return ctx->buildNil(stack);
-            }  
-            if(amountV->type != CV::NaturalType::NUMBER){
-                cursor->setError("Logic Error At '"+ins->token.first+"'", "END must be a NUMBER", ins->token.line);
-                return ctx->buildNil(stack);                
-            }
-            amount = std::static_pointer_cast<CV::NumberType>(amountV)->get();  
-            if(amount <= 0){
-                cursor->setError("Logic Error At '"+ins->token.first+"'", "AMOUNT must be a non-zero positive NUMBER", ins->token.line);
-                return ctx->buildNil(stack);  
-            }
-            // Process value
-            auto valueV = CV::Execute(stack->instructions[ins->parameter[1]], stack, ctx, cursor).value;
-            if(cursor->raise()){
-                return ctx->buildNil(stack);
-            }  
-            if(valueV->type != CV::NaturalType::NUMBER){
-                cursor->setError("Logic Error At '"+ins->token.first+"'", "VALUE must be a NUMBER", ins->token.line);
-                return ctx->buildNil(stack);                
-            }
-            value = std::static_pointer_cast<CV::NumberType>(valueV)->get();               
-
-            std::vector<std::shared_ptr<CV::Item>> elements;
-            for(int i = 0; i < amount; ++i){
-                elements.push_back(cctx->buildNumber(stack, value));
-            }
-            list->build(elements);            
-
-            return lItem;
-        };        
-
-        case CV::InstructionType::CONSTRUCT_NAMESPACE: {
-
-            for(int i = 0; i < ins->parameter.size(); ++i){
-                auto type = ins->data[2 + i*3 + 0];
-                auto cctx = ins->data[2 + i*3 + 1];
-                auto memId = ins->data[2 + i*3 + 2];
-                
-                auto v = CV::Execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
-                if(cursor->raise()){
-                    return ctx->buildNil(stack);
-                }    
-                if(type == 1){
-                    ctx->setPromise(memId, v);
-                }
-            }
-
-            return ctx->buildNil(stack);
-        };
-
+            fn->entrypoint = target->id;
+            auto ins = prog->createInstruction(CV::InstructionType::PROXY_STATIC, token);
+            ins->data.push_back(ctx->id); // Where function is stored
+            ins->data.push_back(fn->id);
+            return ins;
+            
+        }else
         /*
-            CONTROL FLOW
+            CC
         */
-        case CV::InstructionType::CF_COND_BINARY_BRANCH: { // CC
-
-            auto nctx = stack->contexts[ins->data[0]];
-
-            auto cond = CV::Execute(stack->instructions[ins->parameter[0]], stack, nctx, cursor).value;
-            if(cursor->raise()){
-                return ctx->buildNil(stack);
-            }       
-
-            bool isTrue = cond->type != CV::NaturalType::NIL && (cond->type == CV::NaturalType::NUMBER ? std::static_pointer_cast<CV::NumberType>(cond)->get() != 0 : true);
-
-            if(isTrue){
-                auto trueBranch = CV::Execute(stack->instructions[ins->parameter[1]], stack, nctx, cursor);
-                if(cursor->raise()){
-                    return ctx->buildNil(stack);
-                }          
-                ctx->transferFrom(stack.get(), trueBranch.value);
-                return trueBranch;
-            }else
-            if(ins->parameter.size() > 2){
-                auto falseBranch = CV::Execute(stack->instructions[ins->parameter[2]], stack, nctx, cursor);
-                if(cursor->raise()){
-                    return ctx->buildNil(stack);
-                }                    
-                ctx->transferFrom(stack.get(), falseBranch.value);   
-                return falseBranch;                
+        if(token->first == "cc"){
+            if(token->inner.size() != 1){
+                cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "'"+token->first+"' expects exactly 2 tokens (cc VALUE)", token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }         
+            auto target = CV::Translate(token->inner[0], prog, ctx, cursor);
+            if(cursor->error){
+                cursor->subject = token;
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
+            auto ins = prog->createInstruction(CV::InstructionType::CARBON_COPY, token);
+            auto nv = ctx->buildNil();
+            ins->data.push_back(ctx->id);
+            ins->data.push_back(nv->id);
+            ins->params.push_back(target->id);
+            return ins;
+        }else
+        /*
+            MUT
+        */
+        if(token->first == "mut"){
+            if(token->inner.size() != 2){
+                cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "'"+token->first+"' expects exactly 3 tokens (mut NAME VALUE)", token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
+            auto nameRef = ctx->getName(token->inner[0]->first);
+            if(nameRef.size() == 0){
+                cursor->setError(CV_ERROR_MSG_UNDEFINED_IMPERATIVE, "Name '"+token->first+"'", token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token); 
+            }
+            auto target = CV::Translate(token->inner[1], prog, ctx, cursor);
+            if(cursor->error){
+                cursor->subject = token;
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            } 
+            auto ins = prog->createInstruction(CV::InstructionType::MUT, token);
+            ins->data.push_back(nameRef[0]);
+            ins->data.push_back(nameRef[1]);
+            ins->data.push_back(ctx->id);
+            ins->params.push_back(target->id);
+            return ins;
+        }else
+        /*
+            LET
+        */
+        if(token->first == "let"){
+            if(token->inner.size() != 2){
+                cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "'"+token->first+"' expects exactly 3 tokens (let NAME VALUE)", token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
             }
 
-            nctx->revert();
+            auto &nameToken = token->inner[0];
+            auto &insToken = token->inner[1];
 
-            return ctx->buildNil(stack);
-        };
-        case CV::InstructionType::CF_INVOKE_BINARY_FUNCTION: {
-            auto nctx = stack->contexts[ins->data[0]];
-            auto bf = stack->binaryFunctions[ins->data[1]];
-            std::vector<std::shared_ptr<CV::Item>> arguments;
-            nctx->revert();
-            for(int i = 0; i < ins->parameter.size(); ++i){
-                auto cins = stack->instructions[ins->parameter[i]];
-                auto v = CV::Execute(cins, stack, ctx, cursor).value;
-                if(cursor->raise()){
-                    return ctx->buildNil(stack);
-                } 
-                arguments.push_back(v);
+            if(nameToken->inner.size() != 0){
+                cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "'"+token->first+"' expects NAME as second operand", token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);                
             }
-            auto result = bf->fn(bf->name, ins->token, arguments, nctx, cursor);
-            nctx->store(stack, result);
+            auto &name = nameToken->first;
+            if(!CV::Tools::isValidVarName(name)){
+                cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "'"+token->first+"' second operand '"+name+"' is an invalid name", token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);                   
+            }
+            if(CV::Tools::isReservedWord(name)){
+                cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "'"+token->first+"' second operand '"+name+"' is a name of native constructor which cannot be overriden", token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);                
+            }            
+
+            auto target = CV::Translate(insToken, prog, ctx, cursor);
+            if(cursor->error){
+                cursor->subject = token;
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }         
+
+            
+            if(target->type == CV::InstructionType::PROXY_STATIC){
+                auto &targetData = prog->getCtx(target->data[0])->get(target->data[1]);
+                ctx->set(targetData->id, targetData);
+                ctx->setName(name, targetData->id);  
+                return target;
+            }else{
+                auto targetData = ctx->buildNil();
+
+                auto ins = prog->createInstruction(CV::InstructionType::LET, token);
+                ins->literal.push_back(name);
+                ins->data.push_back(ctx->id);
+                ins->data.push_back(targetData->id);
+                ins->params.push_back(target->id);
+
+                ctx->setName(name, targetData->id);  
+
+                return ins;
+            }
+
+        }else
+        /*
+            NIL
+        */
+        if(token->first == "nil"){
+            if(token->inner.size() > 0){
+                return bListConstructFromToken(token, ctx);
+            }else{
+                auto ins = prog->createInstruction(CV::InstructionType::PROXY_STATIC, token);
+                auto data = ctx->buildNil();
+                ins->data.push_back(ctx->id);
+                ins->data.push_back(data->id);
+                return ins;
+            } 
+        }else
+        /*
+            NUMBER
+        */
+        if(CV::Tools::isNumber(token->first)){
+            if(token->inner.size() > 0){
+                return bListConstructFromToken(token, ctx);
+            }else{
+                auto ins = prog->createInstruction(CV::InstructionType::PROXY_STATIC, token);
+                auto data = ctx->buildNumber(std::stod(token->first));
+                ins->data.push_back(ctx->id);
+                ins->data.push_back(data->id);
+                return ins;
+            }
+        }else
+        /*
+            STRING
+        */
+        if(CV::Tools::isString(token->first)){
+            if(token->inner.size() > 0){
+                return bListConstructFromToken(token, ctx);
+            }else{            
+                auto ins = prog->createInstruction(CV::InstructionType::PROXY_STATIC, token);
+                auto string = ctx->buildString("");
+                string->v = token->first.substr(1, token->first.length() - 2);
+                ins->data.push_back(ctx->id);
+                ins->data.push_back(string->id);
+                return ins;
+            }
+        }else
+        // PARALLELER
+        if(token->first[0] == '|'){
+
+            if(token->inner.size() != 0){
+                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "Paralleler Prefix '"+token->first+"' expects no values", token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);                                            
+            }
+
+            if(token->first.size() == 1){
+                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "Paralleler Prefix '"+token->first+"' expects an apppended body", token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);                
+            }
+
+            std::string statement = std::string(token->first.begin()+1, token->first.end());
+
+            auto ins = prog->createInstruction(CV::InstructionType::PROXY_PARALELER, token);
+            ins->data.push_back(CV_INS_PREFIXER_IDENTIFIER_INSTRUCTION);
+            ins->data.push_back(CV::Prefixer::PARALELLER);
+            std::shared_ptr<CV::Quant> ghostData;
+
+            auto tctx = prog->createContext(ctx);
+
+            auto entrypoint = CV::Compile(statement, prog, cursor, tctx);
+            if(cursor->error){
+                cursor->subject = token;
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
+
+            auto data = tctx->buildThread();
+            data->ctxId = tctx->id;
+            data->entrypoint = entrypoint->id;
+
+            ins->data.push_back(tctx->id);
+            ins->data.push_back(data->id);
+            ins->params.push_back(entrypoint->id);
+
+            return ins;
+
+        }else
+        // EXPANDER
+        if(token->first[0] == '^'){
+            if(token->inner.size() != 0){
+                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "Expander Prefix '"+token->first+"' expects no values", token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);                                            
+            }
+
+            if(token->first.size() == 1){
+                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "Expander Prefix '"+token->first+"' expects an apppended body", token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);                
+            }
+
+            std::string statement = std::string(token->first.begin()+1, token->first.end());
 
 
+            auto ins = prog->createInstruction(CV::InstructionType::PROXY_EXPANDER, token);
+            ins->data.push_back(CV_INS_PREFIXER_IDENTIFIER_INSTRUCTION);
+            ins->data.push_back(CV::Prefixer::EXPANDER);
+            std::shared_ptr<CV::Quant> ghostData;
 
+            auto entrypoint = CV::Compile(statement, prog, cursor, ctx);
+            if(cursor->error){
+                cursor->subject = token;
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
+            ins->params.push_back(entrypoint->id);
 
-            return result;
-        };
-        case CV::InstructionType::CF_INVOKE_FUNCTION: { // CC
-            auto fnCtxId = ins->data[0];
-            auto fnId = ins->data[1];
-            auto fn = std::static_pointer_cast<CV::FunctionType>(stack->contexts[fnCtxId]->data[fnId]);
+            return ins;
+        }else
+        // NAMER
+        if(token->first[0] == '~'){
+            auto name = std::string(token->first.begin()+1, token->first.end());
 
-            auto nctx = stack->contexts[ins->data[2]];
-            auto nargs = ins->data[3];
-            bool variadic = ins->data[4];
-            nctx->revert();
-            for(int i = 0; i < ins->parameter.size(); ++i){
-                auto cins = stack->instructions[ins->parameter[i]];
-                auto v = CV::Execute(cins, stack, nctx, cursor).value;
-                if(cursor->raise()){
-                    return ctx->buildNil(stack);
-                } 
-                if(variadic){
-                    auto argument = ins->data[5];
-                    auto varList = std::static_pointer_cast<CV::ListType>(nctx->data[argument]);
-                    varList->set(i, ctx->id, v->id);
+            // Test if the first field (name) is a complex token
+            auto testSplit = parseTokens(name, ' ', cursor, token->line);
+            if(cursor->error){
+                return prog->createInstruction(CV::InstructionType::NOOP, token);                   
+            }
+            if(testSplit.size() > 1){
+                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "Namer Prefix '"+token->first+"' cannot take any complex token", token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);            
+            }
+            // Is it a valid name?
+            if(!CV::Tools::isValidVarName(name)){
+                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "'"+token->first+"' prefixer '"+name+"' is an invalid name", token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);                   
+            }
+            // Is it a reserved word?
+            if(CV::Tools::isReservedWord(name)){
+                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "'"+token->first+"' prefixer '"+name+"' is a name of native constructor which cannot be overriden", token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);                
+            }
+            // Only expects a single value
+            if(token->inner.size() > 1){
+                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "Namer Prefix '"+token->first+"' no more than 1 value. Provided "+std::to_string(token->inner.size()), token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);                
+            }
+            // Build position proxy instruction
+            auto ins = prog->createInstruction(CV::InstructionType::PROXY_NAMER, token);
+            ins->literal.push_back(name);
+            ins->data.push_back(CV_INS_PREFIXER_IDENTIFIER_INSTRUCTION);
+            ins->data.push_back(CV::Prefixer::NAMER);
+            std::shared_ptr<CV::Quant> ghostData;
+            // Build referred instruction
+            if(token->inner.size() > 0){
+                auto &inc = token->inner[0];
+                auto fetched = CV::Translate(inc, prog, ctx, cursor);
+                if(cursor->error){
+                    cursor->subject = token;
+                    return prog->createInstruction(CV::InstructionType::NOOP, token);
+                }                        
+                // Pre-set ghost name 
+                if(fetched->type == CV::InstructionType::PROXY_STATIC){
+                    ghostData = prog->getCtx(fetched->data[0])->get(fetched->data[1]);
                 }else{
-                    auto argument = ins->data[i+5];
-                    nctx->setPromise(argument, v);
+                    ghostData = ctx->buildNil();
+                }
+                if(ctx->getName(name, true).size() == 0){
+                    ctx->setName(name, ghostData->id);
+                }
+                ins->params.push_back(fetched->id);
+            }else{
+                ghostData = ctx->buildNil();
+                if(ctx->getName(name, true).size() == 0){
+                    ctx->setName(name, ghostData->id);
                 }
             }
+            // Pass rest of data to ins
+            ins->data.push_back(ctx->id);
+            ins->data.push_back(ghostData->id);
+            return ins;
+        }else{
+            /*
+                IS NAME?        
+            */   
+            auto hctx = ctx;
+            std::string qname = token->first;
+            auto nameRef = ctx->getName(token->first);
+            if(nameRef.size() > 0){
+                // TODO: Check for PROMISE names
+                auto fctx = prog->getCtx(nameRef[0]);
+                auto &dataId = nameRef[1];
+                auto &quant = fctx->get(dataId);     
 
-            auto bodyIns = interpretToken(fn->body, {fn->body}, stack, nctx, cursor);
-            if(cursor->raise()){
-                return ctx->buildNil(stack);
+                switch(quant->type){
+                    case CV::QuantType::FUNCTION: {
+                        auto fn = std::static_pointer_cast<CV::TypeFunction>(quant);
+                        auto &fnCtx = prog->getCtx(fn->ctxId);
+                        if(fn->params.size() != token->inner.size()){
+                            cursor->setError(CV_ERROR_MSG_MISUSED_FUNCTION, "'"+token->first+"' expects exactly "+std::to_string(fn->params.size())+". Provided "+std::to_string(token->inner.size()), token);
+                            return prog->createInstruction(CV::InstructionType::NOOP, token);                
+                        }
+                        auto ins = prog->createInstruction(CV::InstructionType::CF_INVOKE_FUNCTION, token);
+                        ins->data.push_back(nameRef[0]); // Context where the function is contained
+                        ins->data.push_back(nameRef[1]); // Data ID to the function
+                        ins->data.push_back(ctx->id); // Current context where the function is being invoked on
+                        // Fetch params
+                        for(int i = 0; i < token->inner.size(); ++i){
+                            auto &inc = token->inner[i];
+                            auto fetched = CV::Translate(inc, prog, ctx, cursor);
+                            if(cursor->error){
+                                cursor->subject = token;
+                                return prog->createInstruction(CV::InstructionType::NOOP, token);
+                            }                        
+                            if(fetched->type == CV::InstructionType::PROXY_EXPANDER){
+                                auto targetIns = prog->getIns(fetched->params[0]);
+                                if( targetIns->type == CV::InstructionType::CONSTRUCT_LIST ||
+                                    targetIns->type == CV::InstructionType::CONSTRUCT_STORE){
+                                    for(int j = 0; j < targetIns->params.size(); ++j){
+                                        ins->params.push_back(targetIns->params[j]);
+                                    }
+                                }else{
+                                    ins->params.push_back(fetched->id);
+                                }
+                            }else{
+                                ins->params.push_back(fetched->id);
+                            }
+                        }
+
+                        auto childIns = prog->createInstruction(CV::InstructionType::PROXY_PROMISE, token);
+                        auto targetData = hctx->buildNil();
+                        childIns->data.push_back(hctx->id);
+                        childIns->data.push_back(targetData->id);
+                        childIns->params.push_back(ins->id);
+                        // Tell invoke binary function who they're going to fulfill
+                        ins->data.push_back(hctx->id);
+                        ins->data.push_back(targetData->id);
+
+                        return childIns;
+                    };
+                    case CV::QuantType::BINARY_FUNCTION: {
+                        // Build invokation
+                        auto ins = prog->createInstruction(CV::InstructionType::CF_INVOKE_BINARY_FUNCTION, token);
+                        auto tempCtx = prog->createContext(hctx); // build context where we store temporary parameters
+                        // Where the function is stored
+                        ins->data.push_back(fctx->id); // where this function is stored
+                        ins->data.push_back(quant->id);
+                        // Where the params to the function are stored 
+                        ins->data.push_back(tempCtx->id); // With the store parameters to the function
+                        for(int i = 0; i < token->inner.size(); ++i){
+                            auto &inc = token->inner[i];
+                            auto fetched = CV::Translate(inc, prog, tempCtx, cursor);
+                            if(cursor->error){
+                                cursor->subject = token;
+                                return prog->createInstruction(CV::InstructionType::NOOP, token);
+                            }
+                            if(fetched->type == CV::InstructionType::PROXY_EXPANDER){
+                                auto targetIns = prog->getIns(fetched->params[0]);
+
+                                if( targetIns->type == CV::InstructionType::CONSTRUCT_LIST ||
+                                    targetIns->type == CV::InstructionType::CONSTRUCT_STORE){
+                                    for(int j = 0; j < targetIns->params.size(); ++j){
+                                        ins->params.push_back(targetIns->params[j]);
+                                    }
+                                }else{
+                                    ins->params.push_back(fetched->id);
+                                }
+                            }else{
+                                ins->params.push_back(fetched->id);
+                            }
+                        }
+                        ins->data.push_back(ins->params.size());
+                        // Build Promise Proxy to store result value 
+                        auto childIns = prog->createInstruction(CV::InstructionType::PROXY_PROMISE, token);
+                        auto targetData = hctx->buildNil();
+                        childIns->data.push_back(hctx->id);
+                        childIns->data.push_back(targetData->id);
+                        childIns->params.push_back(ins->id);
+                        // Tell invoke binary function who they're going to fulfill
+                        ins->data.push_back(hctx->id);
+                        ins->data.push_back(targetData->id);
+                        return childIns;
+                    };
+                    case CV::QuantType::STORE: {
+                        auto store = std::static_pointer_cast<CV::TypeStore>(quant);
+                        // Does this named proxy come with parameters?
+                        if(token->inner.size() > 0){
+                            // Are they named?
+                            if(areAllNames(token, ctx)){
+                                std::vector<std::string> names;
+                                std::vector<int> ids;
+                                // Gather names
+                                for(int i = 0; i < token->inner.size(); ++i){                               
+                                    auto fetched = CV::Translate(token->inner[i], prog, ctx, cursor);
+                                    if(cursor->error){
+                                        cursor->subject = token;
+                                        return prog->createInstruction(CV::InstructionType::NOOP, token);
+                                    }          
+                                    names.push_back(fetched->literal[0]);
+                                }
+                                // Check if they're indeed part of this
+                                for(int i = 0; i < names.size(); ++i){
+                                    if(store->v.count(names[i]) == 0){
+                                        cursor->setError(CV_ERROR_MSG_STORE_UNDEFINED_MEMBER, "store '"+qname+"' has no member named '"+names[i]+"'", token);
+                                        return prog->createInstruction(CV::InstructionType::NOOP, token);                
+                                    }
+                                }
+                                // Build Access Proxy
+                                auto buildAccessProxy = [token](int ctxId, int dataId, const std::string &mname, const CV::ProgramType &prog){
+                                    auto ins = prog->createInstruction(CV::InstructionType::PROXY_ACCESS, token);
+                                    ins->data.push_back(ctxId);
+                                    ins->data.push_back(dataId);
+                                    ins->literal.push_back(mname);
+                                    return ins;                                     
+                                };
+                                // One name returns the value itself
+                                if(names.size() == 1){
+                                    return buildAccessProxy(nameRef[0], nameRef[1], names[0], prog);
+                                }else{
+                                // Several names returns a list of values
+                                    auto ins = prog->createInstruction(CV::InstructionType::CONSTRUCT_LIST, token);
+                                    auto list = hctx->buildList();
+                                    ins->data.push_back(hctx->id);
+                                    ins->data.push_back(list->id);
+                                    for(int i = 0; i < names.size(); ++i){
+                                        auto fetched = buildAccessProxy(nameRef[0], nameRef[1], names[i], prog);
+                                        ins->params.push_back(fetched->id);
+                                        list->v.push_back(std::shared_ptr<CV::Quant>(NULL));
+                                    }
+                                    return ins;
+                                }
+                            }else{
+                            // Otherwise this must be a list
+                                return bListConstructFromToken(token, ctx);
+                            }
+                        }else{
+                        // Return its static proxy
+                            auto ins = prog->createInstruction(CV::InstructionType::PROXY_STATIC, token);
+                            ins->data.push_back(nameRef[0]);
+                            ins->data.push_back(nameRef[1]);
+                            return ins;                            
+                        }
+                    };  
+                    default: {
+                        if(token->inner.size() > 0){
+                            return bListConstructFromToken(token, ctx);
+                        }else{  
+                            auto ins = prog->createInstruction(CV::InstructionType::PROXY_STATIC, token);
+                            ins->data.push_back(nameRef[0]);
+                            ins->data.push_back(nameRef[1]);
+                            return ins;
+                        }
+                    };
+                }
+            }else{
+                cursor->setError(CV_ERROR_MSG_UNDEFINED_IMPERATIVE, "Name '"+token->first+"'", token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
             }
-
-            auto r = CV::Execute(bodyIns, stack, nctx, cursor);
-            if(cursor->raise()){
-                return ctx->buildNil(stack);
-            }
-
-            return CV::ControlFlow(r.value, CV::ControlFlowType::CONTINUE);
 
         }
-        case CV::InstructionType::CF_LOOP_DO: { // CC
 
-            auto nctx = stack->contexts[ins->data[0]];
 
-            std::shared_ptr<CV::Item> cond(NULL);
-            std::shared_ptr<CV::Item> v(NULL);
 
-            auto isTrue = [](std::shared_ptr<CV::Item> &cond){
-                return cond->type != CV::NaturalType::NIL && (cond->type == CV::NaturalType::NUMBER ? std::static_pointer_cast<CV::NumberType>(cond)->get() != 0 : true);
-            };
-
-            unsigned ncf = CV::ControlFlowType::CONTINUE;
-
-            do {
-                // Check condition
-                nctx->revert();
-                cond = CV::Execute(stack->instructions[ins->parameter[0]], stack, nctx, cursor).value;
-                if(cursor->raise()){
-                    return ctx->buildNil(stack);
-                }
-
-                if(!isTrue(cond)){
-                    break;
-                }
-
-                // Execute
-                auto cfv = CV::Execute(stack->instructions[ins->parameter[1]], stack, nctx, cursor);
-                if(cursor->raise()){
-                    break;
-                }
-
-                v = cfv.value;
-                if(cfv.type != CV::ControlFlowType::CONTINUE){
-                    if(cfv.type == CV::ControlFlowType::SKIP){
-                        continue;
-                    }else
-                    if(cfv.type == CV::ControlFlowType::YIELD){
-                        break;
-                    }else{
-                        ncf = cfv.type;
-                        break;
-                    }
-                }
-
-
-            } while(isTrue(cond));
-
-            if(v){
-                ctx->transferFrom(stack.get(), v);
-            }
-
-            stack->deleteContext(nctx->id);
-
-            return CV::ControlFlow(v ? v : ctx->buildNil(stack), ncf);
-        };      
-
-
-        case CV::InstructionType::CF_LOOP_ITER: { // CC
-            auto nctx = stack->contexts[ins->data[0]];
-            auto stepperCountId = ins->parameter[2];
-            auto counter = 1;
-            std::shared_ptr<CV::Item> v(NULL);
-            unsigned ncf = CV::ControlFlowType::CONTINUE;
-
-            // Figure out counter
-            if(stepperCountId != 0){
-                auto v = CV::Execute(stack->instructions[stepperCountId], stack, ctx, cursor).value;
-                if(cursor->raise()){
-                    return ctx->buildNil(stack);
-                }                
-                if(v->type != CV::NaturalType::NUMBER){
-                    cursor->setError("Logic Error At '"+ins->token.first+"'", "Step increment must be a NUMBER", ins->token.line);
-                    return ctx->buildNil(stack);                     
-                }
-                counter = std::static_pointer_cast<CV::NumberType>(v)->get();
-            }
-
-            // Figure out source
-            auto source = CV::Execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor).value;
-            if(cursor->raise()){
-                return ctx->buildNil(stack);
-            }          
-            if(source->type != CV::NaturalType::LIST){
-                cursor->setError("Logic Error At '"+ins->token.first+"'", "iterator must be a LIST", ins->token.line);
-                return ctx->buildNil(stack);                 
-            }
-            auto list = std::static_pointer_cast<CV::ListType>(source);
-            if(list->getSize() == 0){
-                return source;
-            }
-            if(list->getSize() % (int)counter != 0){
-                cursor->setError("Logic Error At '"+ins->token.first+"'", "Step increment must a number divisible by the amount of the LIST", ins->token.line);
-                return ctx->buildNil(stack);                 
-            }
-
-            // Figure out stepper
-            std::shared_ptr<CV::Item> stepper(NULL);
-            if(counter > 1){
-                stepper = std::make_shared<CV::ListType>();
-                std::static_pointer_cast<CV::ListType>(stepper)->build(counter);
-                nctx->setPromise(ins->data[1], stepper);
-            }
-            auto updateStepper = [&](int index){
-                if(counter == 1){
-                    auto citem = list->get(stack, index);
-                    nctx->setPromise(ins->data[1], citem);
-                }else{
-                    for(int i = 0; i < counter; ++i){
-                        auto citem = list->get(stack, i + index);
-                        std::static_pointer_cast<CV::ListType>(stepper)->set(i, citem->ctx, citem->id);
-                    }
-                }
-            };
-
-            for(int i = 0; i < list->getSize(); i += counter){
-                nctx->revert();
-                updateStepper(i);
-                auto cfv = CV::Execute(stack->instructions[ins->parameter[1]], stack, nctx, cursor);
-                if(cursor->raise()){
-                    break;
-                }
-
-                v = cfv.value;
-                if(cfv.type != CV::ControlFlowType::CONTINUE){
-                    if(cfv.type == CV::ControlFlowType::SKIP){
-                        continue;
-                    }else
-                    if(cfv.type == CV::ControlFlowType::YIELD){
-                        break;
-                    }else{
-                        ncf = cfv.type;
-                        break;
-                    }
-                }
-
-            }
-
-            if(v){
-                ctx->transferFrom(stack.get(), v);
-            }            
-
-            stack->deleteContext(nctx->id);
-
-            return CV::ControlFlow(v ? v : ctx->buildNil(stack), ncf);
-        }; 
-
-        case CV::InstructionType::CF_LOOP_FOR: { // CC
-
-            auto nctx = stack->contexts[ins->data[0]];
-            auto stepper = nctx->data[ins->data[1]];
-            auto stepperCountId = ins->parameter[3];
-            std::shared_ptr<CV::Item> v(NULL);
-            unsigned ncf = CV::ControlFlowType::CONTINUE;
-            __CV_DEFAULT_NUMBER_TYPE counter = 1;
-            // Figure out counter
-            if(stepperCountId != 0){
-                auto v = CV::Execute(stack->instructions[stepperCountId], stack, nctx, cursor).value;
-                if(cursor->raise()){
-                    return ctx->buildNil(stack);
-                }                
-                if(v->type != CV::NaturalType::NUMBER){
-                    cursor->setError("Logic Error At '"+ins->token.first+"'", "Step increment must be a NUMBER", ins->token.line);
-                    return ctx->buildNil(stack);                     
-                }
-                counter = std::static_pointer_cast<CV::NumberType>(v)->get();
-            }
-            // Figure from
-            auto fromV = CV::Execute(stack->instructions[ins->parameter[0]], stack, nctx, cursor).value;
-            if(cursor->raise()){
-                return ctx->buildNil(stack);
-            } 
-            if(fromV->type != CV::NaturalType::NUMBER){
-                cursor->setError("Logic Error At '"+ins->token.first+"'", "from value must be a NUMBER", ins->token.line);
-                return ctx->buildNil(stack);                     
-            }
-            // Figure to
-            auto toV = CV::Execute(stack->instructions[ins->parameter[1]], stack, nctx, cursor).value;
-            if(cursor->raise()){
-                return ctx->buildNil(stack);
-            }   
-            if(toV->type != CV::NaturalType::NUMBER){
-                cursor->setError("Logic Error At '"+ins->token.first+"'", "to value must be a NUMBER", ins->token.line);
-                return ctx->buildNil(stack);                     
-            }                      
-
-            auto start = std::static_pointer_cast<CV::NumberType>(fromV);
-            auto end = std::static_pointer_cast<CV::NumberType>(toV);
-            nctx->revert();
-
-            for(__CV_DEFAULT_NUMBER_TYPE i = start->get(); i <= end->get(); i += counter){
-                std::static_pointer_cast<CV::NumberType>(stepper)->set(i);                
-                auto cfv = CV::Execute(stack->instructions[ins->parameter[2]], stack, nctx, cursor);
-                if(cursor->raise()){
-                    break;
-                }
-                v = cfv.value;
-                if(cfv.type != CV::ControlFlowType::CONTINUE){
-                    if(cfv.type == CV::ControlFlowType::SKIP){
-                        continue;
-                    }else
-                    if(cfv.type == CV::ControlFlowType::YIELD){
-                        break;
-                    }else{
-                        ncf = cfv.type;
-                        break;
-                    }
-                }
-                nctx->revert();
-                // Process next from/to
-                fromV = CV::Execute(stack->instructions[ins->parameter[0]], stack, nctx, cursor).value;
-                if(cursor->raise()){
-                    return ctx->buildNil(stack);
-                } 
-                if(fromV->type != CV::NaturalType::NUMBER){
-                    cursor->setError("Logic Error At '"+ins->token.first+"'", "from value must be a NUMBER", ins->token.line);
-                    return ctx->buildNil(stack);                     
-                }
-                // Figure to
-                toV = CV::Execute(stack->instructions[ins->parameter[1]], stack, nctx, cursor).value;
-                if(cursor->raise()){
-                    return ctx->buildNil(stack);
-                }   
-                if(toV->type != CV::NaturalType::NUMBER){
-                    cursor->setError("Logic Error At '"+ins->token.first+"'", "to value must be a NUMBER", ins->token.line);
-                    return ctx->buildNil(stack);                     
-                } 
-                start = std::static_pointer_cast<CV::NumberType>(fromV);
-                end = std::static_pointer_cast<CV::NumberType>(toV);                                 
-            }
-
-            if(v){
-                ctx->transferFrom(stack.get(), v);
-            }
-
-            stack->deleteContext(nctx->id);
-
-            return CV::ControlFlow(v ? v : ctx->buildNil(stack), ncf);
-        }; 
-
-        case CV::InstructionType::CF_INT_RETURN:
-        case CV::InstructionType::CF_INT_YIELD:
-        case CV::InstructionType::CF_INT_SKIP: {
-            auto hasPayload = ins->data[0];
-            if(hasPayload){
-                auto v = CV::Execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor).value;
-                if(cursor->raise()){
-                    return ctx->buildNil(stack);
-                }
-                return CV::ControlFlow(v, ins->type);
-            }else{
-                return CV::ControlFlow(ctx->buildNil(stack), CV::ControlFlowType::type(ins->type));
-            }
-        };              
-
-        /*
-            EMBEDDED OPERATORS (LOGIC & ARITHMETIC)
-        */        
-        case CV::InstructionType::OP_NUM_ADD: {
-            auto &ctxId = ins->data[0];
-            auto &dataId = ins->data[1];
-            auto item = stack->contexts[ctxId]->data[dataId];
-            for(int i = 0; i < ins->parameter.size(); ++i){
-                auto v = CV::Execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
-                if(cursor->raise()){
-                    return ctx->buildNil(stack);
-                }
-                *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) += std::static_pointer_cast<CV::NumberType>(v)->get();
-            }
-            return item;
-        };
-        case CV::InstructionType::OP_NUM_SUB: {
-            auto &ctxId = ins->data[0];
-            auto &dataId = ins->data[1];
-            auto item = stack->contexts[ctxId]->data[dataId];
-            auto firstv = CV::Execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor).value;
-            if(cursor->raise()){
-                return ctx->buildNil(stack);
-            }                 
-            *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = std::static_pointer_cast<CV::NumberType>(firstv)->get();
-            for(int i = 1; i < ins->parameter.size(); ++i){
-                auto v = CV::Execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
-                if(cursor->raise()){
-                    return ctx->buildNil(stack);
-                }
-                *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) -= std::static_pointer_cast<CV::NumberType>(v)->get();
-            }
-            return item;
-        };
-        case CV::InstructionType::OP_NUM_MULT: {
-            auto &ctxId = ins->data[0];
-            auto &dataId = ins->data[1];
-            auto item = stack->contexts[ctxId]->data[dataId];
-            auto firstv = CV::Execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor).value;
-            if(cursor->raise()){
-                return ctx->buildNil(stack);
-            }                 
-            *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = std::static_pointer_cast<CV::NumberType>(firstv)->get();
-            for(int i = 1; i < ins->parameter.size(); ++i){
-                auto v = CV::Execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
-                if(cursor->raise()){
-                    return ctx->buildNil(stack);
-                }
-                *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) *= std::static_pointer_cast<CV::NumberType>(v)->get();
-            }
-            return item;
-        };
-        case CV::InstructionType::OP_NUM_DIV: {
-            auto &ctxId = ins->data[0];
-            auto &dataId = ins->data[1];
-            auto item = stack->contexts[ctxId]->data[dataId];
-            auto firstv = CV::Execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor).value;
-            if(cursor->raise()){
-                return ctx->buildNil(stack);
-            }                 
-            *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = std::static_pointer_cast<CV::NumberType>(firstv)->get();
-            for(int i = 1; i < ins->parameter.size(); ++i){
-                auto cins = stack->instructions[ins->parameter[i]];
-                auto v = CV::Execute(cins, stack, ctx, cursor).value;
-                if(cursor->raise()){
-                    return ctx->buildNil(stack);
-                }
-                auto operand = std::static_pointer_cast<CV::NumberType>(v)->get();
-                if(operand == 0){
-                    cursor->setError("Logic Error At '"+ins->token.first+"'", "Division by zero", ins->token.line);
-                    return ctx->buildNil(stack);
-                }
-                *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) /= operand;
-            }
-            return item;
-        };
-        case CV::InstructionType::OP_COND_EQ: {
-            auto &ctxId = ins->data[0];
-            auto &dataId = ins->data[1];
-            auto item = stack->contexts[ctxId]->data[dataId];
-            auto firstv = CV::Execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor).value;
-            if(cursor->raise()){
-                return ctx->buildNil(stack);
-            }                 
-            *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 1;
-            for(int i = 1; i < ins->parameter.size(); ++i){
-                auto v = CV::Execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
-                if(cursor->raise()){
-                    return ctx->buildNil(stack);
-                }
-                if(std::static_pointer_cast<CV::NumberType>(v)->get() != std::static_pointer_cast<CV::NumberType>(firstv)->get()){
-                    *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 0;
-                    return ctx->buildNil(stack);
-                }
-            }
-            return item;
-        };      
-        case CV::InstructionType::OP_COND_NEQ: {
-            auto &ctxId = ins->data[0];
-            auto &dataId = ins->data[1];
-            auto item = stack->contexts[ctxId]->data[dataId];
-            *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 1;
-            std::vector<std::shared_ptr<CV::Item>> operands;
-            for(int i = 0; i < ins->parameter.size(); ++i){
-                auto v = CV::Execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
-                if(cursor->raise()){
-                    return ctx->buildNil(stack);
-                }                
-                operands.push_back(v);
-            }
-            for(int i = 0; i < operands.size(); ++i){
-                auto &v1 = *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(operands[i]->data);
-                for(int j = 0; j < operands.size(); ++j){
-                    if(j == i){
-                        continue;
-                    }
-                    auto &v2 = *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(operands[j]->data);
-                    if(v1 == v2){
-                        *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 0;
-                        return ctx->buildNil(stack);
-                    }
-                }
-            }
-            return item;
-        };   
-        case CV::InstructionType::OP_COND_LT: {
-            auto &ctxId = ins->data[0];
-            auto &dataId = ins->data[1];
-            auto item = stack->contexts[ctxId]->data[dataId];
-            *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 1;
-            std::vector<std::shared_ptr<CV::Item>> operands;
-            for(int i = 0; i < ins->parameter.size(); ++i){
-                auto v = CV::Execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
-                if(cursor->raise()){
-                    return ctx->buildNil(stack);
-                }                
-                operands.push_back(v);
-            }
-            auto last = *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(operands[0]->data);
-            for(int i = 1; i < operands.size(); ++i){
-                if(last >= *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(operands[i]->data)){
-                    *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 0;
-                    return ctx->buildNil(stack);
-                }
-                last = *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(operands[i]->data);
-            }
-            return item;
-        };       
-        case CV::InstructionType::OP_COND_LTE: {
-            auto &ctxId = ins->data[0];
-            auto &dataId = ins->data[1];
-            auto item = stack->contexts[ctxId]->data[dataId];
-            *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 1;
-            std::vector<std::shared_ptr<CV::Item>> operands;
-            for(int i = 0; i < ins->parameter.size(); ++i){
-                auto v = CV::Execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
-                if(cursor->raise()){
-                    return ctx->buildNil(stack);
-                }                
-                operands.push_back(v);
-            }
-            auto last = *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(operands[0]->data);
-            for(int i = 1; i < operands.size(); ++i){
-                if(last > *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(operands[i]->data)){
-                    *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 0;
-                    return ctx->buildNil(stack);
-                }
-                last = *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(operands[i]->data);
-            }
-            return item;
-        };      
-        case CV::InstructionType::OP_COND_GT: {
-            auto &ctxId = ins->data[0];
-            auto &dataId = ins->data[1];
-            auto item = stack->contexts[ctxId]->data[dataId];
-            *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 1;
-            std::vector<std::shared_ptr<CV::Item>> operands;
-            for(int i = 0; i < ins->parameter.size(); ++i){
-                auto v = CV::Execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
-                if(cursor->raise()){
-                    return ctx->buildNil(stack);
-                }                
-                operands.push_back(v);
-            }
-            auto last = *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(operands[0]->data);
-            for(int i = 1; i < operands.size(); ++i){
-                if(last <= *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(operands[i]->data)){
-                    *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 0;
-                    return ctx->buildNil(stack);
-                }
-                last = *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(operands[i]->data);
-            }
-            return item;
-        };       
-        case CV::InstructionType::OP_COND_GTE: {
-            auto &ctxId = ins->data[0];
-            auto &dataId = ins->data[1];
-            auto item = stack->contexts[ctxId]->data[dataId];
-            *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 1;
-            std::vector<std::shared_ptr<CV::Item>> operands;
-            for(int i = 0; i < ins->parameter.size(); ++i){
-                auto v = CV::Execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
-                if(cursor->raise()){
-                    return ctx->buildNil(stack);
-                }                
-                operands.push_back(v);
-            }
-            auto last = *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(operands[0]->data);
-            for(int i = 1; i < operands.size(); ++i){
-                if(last < *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(operands[i]->data)){
-                    *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 0;
-                    return ctx->buildNil(stack);
-                }
-                last = *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(operands[i]->data);
-            }
-            return item;
-        };    
-
-        case CV::InstructionType::OP_LOGIC_AND: {
-            auto &ctxId = ins->data[0];
-            auto &dataId = ins->data[1];
-
-            auto item = stack->contexts[ctxId]->data[dataId];
-
-            *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 1;
-
-            
-            for(int i = 0; i < ins->parameter.size(); ++i){
-                auto v = CV::Execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
-                if(cursor->raise()){
-                    return ctx->buildNil(stack);
-                }                
-                if(     v->type == CV::NaturalType::NIL ||
-                        (v->type == CV::NaturalType::NUMBER && std::static_pointer_cast<CV::NumberType>(v)->get() == 0)){
-                    *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 0;
-                    break;
-                }
-            }
-
-            return item;
-        };  
-
-        case CV::InstructionType::OP_LOGIC_OR: {
-            auto &ctxId = ins->data[0];
-            auto &dataId = ins->data[1];
-
-            auto item = stack->contexts[ctxId]->data[dataId];
-
-            *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 0;
-
-            
-            for(int i = 0; i < ins->parameter.size(); ++i){
-                auto v = CV::Execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
-                if(cursor->raise()){
-                    return ctx->buildNil(stack);
-                }                
-                if(     (v->type == CV::NaturalType::NUMBER && std::static_pointer_cast<CV::NumberType>(v)->get() != 0) ||
-                        (v->type != CV::NaturalType::NUMBER && v->type != CV::NaturalType::NIL)
-                        ){
-                    *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 1;
-                    break;
-                }
-            }
-
-            return item;
-        };        
-
-        case CV::InstructionType::OP_LOGIC_NOT: {
-            auto &ctxId = ins->data[0];
-            auto &dataId = ins->data[1];
-
-            auto item = stack->contexts[ctxId]->data[dataId];
-
-            *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 0;
-
-            auto v = CV::Execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor).value;
-            if(cursor->raise()){
-                return ctx->buildNil(stack);
-            }
-            if(v->type == CV::NaturalType::NUMBER){
-                *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(v->data) == 0;
-            }else
-            if(v->type == CV::NaturalType::NIL){
-                *static_cast<__CV_DEFAULT_NUMBER_TYPE*>(item->data) = 1;
-            }
-
-
-            return item;
-        };              
-
-        case CV::InstructionType::OP_DESC_LENGTH: {
-            auto &subject = ins->parameter[0];
-
-            auto v = CV::Execute(stack->instructions[subject], stack, ctx, cursor).value;
-            if(cursor->raise()){
-                return ctx->buildNil(stack);
-            }
-
-            return ctx->buildNumber(stack, v->getSize());
-        };     
-
-        case CV::InstructionType::OP_DESC_TYPE: {
-            auto &subject = ins->parameter[0];
-
-            auto v = CV::Execute(stack->instructions[subject], stack, ctx, cursor).value;
-            if(cursor->raise()){
-                return ctx->buildNil(stack);
-            }
-
-            return ctx->buildString(stack, CV::NaturalType::name(v->type));
-        };                                           
-
-
-        case CV::InstructionType::OP_LIST_POP:
-        case CV::InstructionType::OP_LIST_PUSH: {
-            auto target = std::make_shared<CV::ListType>();
-            auto targetId = ctx->store(stack, target);
-
-            auto subjectIns = ins->type == CV::InstructionType::OP_LIST_PUSH ? ins->parameter.size()-1  : 0 ;
-
-            unsigned start = ins->type == CV::InstructionType::OP_LIST_PUSH ? 0 : 1;
-            unsigned end = ins->type == CV::InstructionType::OP_LIST_PUSH ? ins->parameter.size()-1 : ins->parameter.size();
-
-            std::vector<std::shared_ptr<CV::Item>> items;
-            auto subject = CV::Execute(stack->instructions[ins->parameter[subjectIns]], stack, ctx, cursor).value;
-            if(cursor->raise()){
-                return ctx->buildNil(stack);
-            }
-            // Subject
-            if(subject->type == CV::NaturalType::LIST){
-                auto list = std::static_pointer_cast<CV::ListType>(subject); 
-                for(int i = 0; i < list->getSize(); ++i){
-                    items.push_back(list->get(stack, i));
-                }
-            }else{
-                items.push_back(subject);
-            }            
-            // Remainer
-            for(int i = start; i < end; ++i){
-                auto v = CV::Execute(stack->instructions[ins->parameter[i]], stack, ctx, cursor).value;
-                if(cursor->raise()){
-                    return ctx->buildNil(stack);
-                }
-                items.push_back(v);
-            }
-
-            target->build(items);
-
-            return std::static_pointer_cast<CV::Item>(target);
-        };   
-
-
+    }
+    
+
+    return prog->createInstruction(CV::InstructionType::NOOP, token);
+}
+
+CV::InsType CV::Compile(const CV::TokenType &input, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor){
+
+    std::vector<CV::TokenType> list = {};
+
+    for(int i = 0; i < input->inner.size(); ++i){
+        list.push_back(input->inner[i]);
+    }
+
+    std::vector<CV::InsType> instructions;
+    for(int i = 0 ; i < list.size(); ++i){
+        auto ins = CV::Translate(list[i], prog, ctx, cursor);
+        if(cursor->error){
+            return ins;
+        }
+        instructions.push_back(ins);
+    }
+    
+    for(int i = 1; i < instructions.size(); ++i){
+        auto &current = instructions[i];
+        auto &previous = instructions[i-1];
+        previous->next = current->id;
+        current->prev = previous->id;
+    }
+
+    return instructions[0];
+}
+
+CV::InsType CV::Compile(const std::string &input, const CV::ProgramType &prog, const CV::CursorType &cursor, const CV::ContextType &ctx){   
+
+    // Fix outter brackets (Input must always be accompained by brackets)
+    auto cleanInput = CV::Tools::cleanTokenInput(input);
+    auto fixedInput = input;
+    if(cleanInput[0] != '[' || cleanInput[cleanInput.size()-1] != ']'){
+        fixedInput = "["+fixedInput;
+        if(fixedInput[fixedInput.size()-1] == '\n'){
+            fixedInput[fixedInput.size()-1] = ']';
+        }else{
+            fixedInput = fixedInput+"]";
+        }
+    }
+    // Double brackets (Statement must respect the "[ [] -> STATEMENT ] -> PROGRAM" hierarchy)
+    cleanInput = CV::Tools::cleanTokenInput(fixedInput);
+    if( cleanInput[0] == '[' && cleanInput[1] != '[' &&
+        cleanInput[cleanInput.size()-1] == ']' && cleanInput[cleanInput.size()-2] != ']'){
+        fixedInput = "["+fixedInput+"]";
+    }
+
+    // Split basic tokens
+    auto tokens = parseTokens(fixedInput, ' ', cursor, 1);
+    if(cursor->error){
+        return prog->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+    }
+
+    std::vector<CV::TokenType> root;
+    // Build Token hierarchy
+    for(int i = 0; i < tokens.size(); ++i){
+        auto built = rebuildTokenHierarchy({tokens[i]}, ' ', cursor);
+        if(cursor->error){
+            return prog->createInstruction(CV::InstructionType::NOOP, built[0]);
+        }
+        for(int j = 0; j < built.size(); ++j){
+            root.push_back(built[j]);
+        }
+    }
+    
+    
+    // std::cout << "total " << root.size() << std::endl;
+    // for(int i = 0; i < root.size(); ++i){
+    //     std::cout << "\"" << root[i]->str() << "\" " << root[i]->inner.size() << std::endl;
+    // }
+    // std::cout << root[0]->inner[0]->inner[0]->str() << std::endl;
+    // std::exit(1);
+
+    // Convert tokens into instructions
+    std::vector<CV::InsType> instructions;
+    for(int i = 0 ; i < root.size(); ++i){
+        auto ins = CV::Translate(root[i], prog, ctx.get() ? ctx : prog->rootContext, cursor);
+        if(cursor->error){
+            return prog->createInstruction(CV::InstructionType::NOOP, root[i]);
+        }
+        instructions.push_back(ins);
+    }
+ 
+    // Order instructions
+    for(int i = 1; i < instructions.size(); ++i){
+        auto &current = instructions[i];
+        auto &previous = instructions[i-1];
+        previous->next = current->id;
+        current->prev = previous->id;
+    }
+
+    // Set entry point (should be first instruction in the list)
+    return instructions[0];
+
+}
+
+
+static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
+                                            const CV::ContextType &ctx,
+                                            const CV::ProgramType &prog,
+                                            const CV::CursorType &cursor,
+                                            const CV::CFType &st
+                                        ){
+    // Update control flow cursor
+    
+    st->prev = ins->prev;
+    st->current = ins->id;
+    st->next = ins->next;
+
+    switch(ins->type){
         /*
             PROXIES
         */
-        case CV::InstructionType::NTH_PROXY: {
-            // fetch
-            auto &indexId = ins->parameter[0];
-            auto &listId = ins->parameter[1];
+        case CV::InstructionType::PROXY_ACCESS: {
+            auto ctxId = ins->data[0];
+            auto dataId = ins->data[1];
+            std::string mname = ins->literal[0];
+            auto &quant = prog->getCtx(ctxId)->get(dataId);
+            auto store = std::static_pointer_cast<CV::TypeStore>(quant);
+            // TODO: Perhaps some error checking?
+            return store->v[mname];
+        };
+        case CV::InstructionType::PROXY_PARALELER: {
+            auto tctxId = ins->data[2];
+            auto dataId = ins->data[3];
+            auto entrypoint = ins->params[0];
 
-            // run
-            auto index = CV::Execute(stack->instructions[indexId], stack, ctx, cursor).value;
-            if(cursor->raise()){
-                return ctx->buildNil(stack);
+            auto tctxt = prog->getCtx(tctxId);
+            auto quant = tctxt->get(dataId);
+            auto thread = std::static_pointer_cast<CV::TypeThread>(quant);
+            
+            if(thread->state == CV::ThreadState::CREATED){
+                thread->setState(CV::ThreadState::STARTED);
+                auto handle = std::make_shared<InvokeThread>();
+                handle->core = thread.get();
+                handle->prog = prog;
+                handle->upcursor = cursor;
+                handle->root = ins->token;
+                prog->threadMutex.lock();
+                prog->threads[thread->id] = std::thread(&RUN_THREAD, handle);
+                prog->threadMutex.unlock();
             }
-            auto list = CV::Execute(stack->instructions[listId], stack, ctx, cursor).value;
-            if(cursor->raise()){
-                return ctx->buildNil(stack);
+            
+            return thread;
+        };
+        case CV::InstructionType::PROXY_EXPANDER: {
+            if(ctx->isPrefetched(ins->id)){
+                auto dir = ctx->getPrefetch(ins->id);
+                return prog->getCtx(dir[0])->get(dir[1]);
             }
-            // Basic checks
-            if(index->type != CV::NaturalType::NUMBER){
-                cursor->setError("Logic Error At '"+ins->token.first+"'", "Expected a NUMBER at position 0 as index, "+CV::NaturalType::name(index->type)+" was provided", ins->token.line);
-                return ctx->buildNil(stack);                
+            std::shared_ptr<CV::Quant> quant;
+            auto &entrypoint = prog->getIns(ins->params[0]);
+            quant = CV::Execute(entrypoint, ctx, prog, cursor, st);
+            if(cursor->error){
+                st->state = CV::ControlFlowState::CRASH;
+                return ctx->buildNil();
             }
+            ctx->setPrefetch(ins->id, {(unsigned)ctx->id, (unsigned)quant->id});
+            return quant;            
+        };
+        case CV::InstructionType::PROXY_NAMER: {
+            if(ctx->isPrefetched(ins->id)){
+                auto dir = ctx->getPrefetch(ins->id);
+                return prog->getCtx(dir[0])->get(dir[1]);
+            }
+            std::shared_ptr<CV::Quant> quant;
+            if(ins->params.size() > 0){
+                auto &entrypoint = prog->getIns(ins->params[0]);
+                quant = CV::Execute(entrypoint, ctx, prog, cursor, st);
+                if(cursor->error){
+                    st->state = CV::ControlFlowState::CRASH;
+                    return ctx->buildNil();
+                }
+                // Fulfill ghost name
+                if(ins->data.size() > 2){
+                    auto ghostDataId = ins->data[3];
+                    auto ghostDataCtxId = ins->data[2];
+                    auto &cctx = prog->getCtx(ghostDataCtxId);
+                    cctx->set(ghostDataId, quant); 
+                }  
+            }else{
+                quant = prog->getCtx(ins->data[2])->get(ins->data[3]);
+            }
+            ctx->setPrefetch(ins->id, {(unsigned)ctx->id, (unsigned)quant->id});
+            return quant;
+        };
+        case CV::InstructionType::PROXY_STATIC: {
+            auto ctxId = ins->data[0];
+            auto dataId = ins->data[1];
+            return prog->getCtx(ctxId)->get(dataId);
+        };
+        case CV::InstructionType::PROXY_PROMISE: {
+            // if(ctx->prefetched.count(ins->id) > 0){
+            //     auto dir = ctx->prefetched[ins->id];
+            //     return prog->ctx[dir[0]]->memory[dir[1]];
+            // }
+            auto cctx = prog->getCtx(ins->data[0]);
+            auto targetDataId = ins->data[1];
+            // Execute (The instruction needs to fulfill the promise on its side)
+            auto &entrypoint = prog->getIns(ins->params[0]);
+            auto quant = CV::Execute(entrypoint, cctx, prog, cursor, st);
+            if(cursor->error){
+                st->state = CV::ControlFlowState::CRASH;
+                return cctx->get(targetDataId);
+            }            
+            // ctx->prefetched[ins->id] = {(unsigned)cctx->id, (unsigned)targetDataId};
+            return cctx->get(targetDataId);
+        };                    
 
-            if(list->type != CV::NaturalType::LIST && list->type != CV::NaturalType::STRING){
-                cursor->setError("Logic Error At '"+ins->token.first+"'", "Expected a LIST or STRING at position 1 as container, "+CV::NaturalType::name(list->type)+" was provided", ins->token.line);
-                return ctx->buildNil(stack);                
-            }
-            // fetch and return
-            int n = std::static_pointer_cast<CV::NumberType>(index)->get();
-            switch(list->type){
-                case CV::NaturalType::LIST: {
-                    auto ls = std::static_pointer_cast<CV::ListType>(list);
-                    if(n < 0 || n >= ls->getSize()){
-                        cursor->setError("Logic Error At '"+ins->token.first+"'", "Provided out-of-range index("+std::to_string(n)+"), expected from 0 to "+std::to_string(ls->getSize()-1), ins->token.line);
-                        return ctx->buildNil(stack);                 
+
+        /*
+            CONSTRUCTORS        
+        */
+        case CV::InstructionType::CONSTRUCT_LIST: {
+            auto &cctx = prog->getCtx(ins->data[0]);
+            auto &qlist = cctx->get(ins->data[1]);
+            auto list = std::static_pointer_cast<CV::TypeList>(qlist);
+            for(int i = 0; i < ins->params.size(); ++i){
+                auto cins = prog->getIns(ins->params[i]);
+                bool isExpander = cins->type == CV::InstructionType::PROXY_EXPANDER;
+                auto quant = CV::Execute(cins, cctx, prog, cursor, st);
+                if(cursor->error){
+                    st->state = CV::ControlFlowState::CRASH;
+                    return ctx->buildNil();
+                }
+                if(isExpander && quant->type == CV::QuantType::LIST){
+                    auto subject = std::static_pointer_cast<CV::TypeList>(quant);
+                    for(int j = 0; j < subject->v.size(); ++j){
+                        list->v.push_back(subject->v[j]);
                     }
-
-                    return ls->get(stack, n);
-                };
-                case CV::NaturalType::STRING: {
-                    auto str = std::static_pointer_cast<CV::StringType>(list);
-                    if(n < 0 || n >= str->get().size()){
-                        cursor->setError("Logic Error At '"+ins->token.first+"'", "Provided out-of-range index("+std::to_string(n)+"), expected from 0 to "+std::to_string(str->get().size()-1), ins->token.line);
-                        return ctx->buildNil(stack);                 
-                    }  
-                    return ctx->buildString(stack, std::string()+str->get()[n]);
-                };                            
-            }
-            return ctx->buildNil(stack);                
-        } break;
-        case CV::InstructionType::STATIC_PROXY: {
-            // fetch and return
-            auto &ctxId = ins->data[0];
-            auto &dataId = ins->data[1];
-            return stack->contexts[ctxId]->data[dataId];
-        };      
-        case CV::InstructionType::PROMISE_PROXY: {
-            // run instruction
-            auto v = CV::Execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor);
-            if(cursor->raise()){
-                return ctx->buildNil(stack);
-            }
-            // complete promise
-            auto &ctxId = ins->data[0];
-            auto &dataId = ins->data[1];
-            auto cctx = stack->contexts[ctxId];
-            cctx->setPromise(dataId, v.value);
-            return v;            
+                }else{
+                    list->v[i] = quant;
+                }
+            }   
+            return std::static_pointer_cast<CV::Quant>(list);
         };
-        case CV::InstructionType::REFERRED_PROXY: {
-            // pre-fetch the item
-            auto &ctxId = ins->data[0];
-            auto &dataId = ins->data[1];
-            auto item = stack->contexts[ctxId]->data[dataId];
-            // run instruction
-            CV::Execute(stack->instructions[ins->parameter[0]], stack, ctx, cursor);
-            if(cursor->raise()){
-                return ctx->buildNil(stack);
-            }      
-            return item;
-        };          
-    }
+        case CV::InstructionType::CONSTRUCT_STORE: {
+            auto &cctx = prog->getCtx(ins->data[0]);
+            auto &qstore = cctx->get(ins->data[1]);
+            auto store = std::static_pointer_cast<CV::TypeStore>(qstore);
+            for(int i = 0; i < ins->params.size(); ++i){
+                auto quant = CV::Execute(prog->getIns(ins->params[i]), cctx, prog, cursor, st);
+                if(cursor->error){
+                    st->state = CV::ControlFlowState::CRASH;
+                    return ctx->buildNil();
+                }
+                store->v[ins->literal[i]] = quant;
+            }   
+            return std::static_pointer_cast<CV::Quant>(store);
+        };
 
-    return ctx->buildNil(stack);
-}
+        case CV::InstructionType::MUT: {
+            
+            if(ctx->isPrefetched(ins->id)){
+                auto dir = ctx->getPrefetch(ins->id);
+                return prog->getCtx(dir[0])->get(dir[1]);
+            }
+            
+            auto &targetDataCtxId = ins->data[0];
+            auto &targetDataId = ins->data[1];
+            auto &execCtxId = ins->data[2];
+            auto &execCtx = prog->getCtx(execCtxId);
+            auto &data = prog->getCtx(targetDataCtxId)->get(targetDataId);
+            auto &entrypoint = prog->getIns(ins->params[0]);
 
-CV::ControlFlow CV::Execute(CV::Instruction *ins, const std::shared_ptr<CV::Stack> &stack, std::shared_ptr<CV::Context> &ctx, SHARED<CV::Cursor> &cursor){
-    CV::ControlFlow result;
-    bool valid = false;
-    do {
-        result = __execute(stack, ins, ctx, cursor);
-        if(cursor->raise()){
-            return CV::ControlFlow(ctx->buildNil(stack));
-        }        
-        if(result.type != CV::ControlFlowType::CONTINUE){
-            return result;
-        }
-        valid = ins->next != CV::InstructionType::INVALID;    
-        ins = valid ? stack->instructions[ins->next] : NULL;
-    } while(valid);
+            auto v = CV::Execute(entrypoint, execCtx, prog, cursor, st);
+            if(cursor->error){
+                st->state = CV::ControlFlowState::CRASH;
+                return data;
+            }
+            
+            if(data->type != CV::QuantType::NUMBER && data->type != CV::QuantType::STRING){
+                cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "mut: Only numbers and string types might be mutated. Target is '"+CV::QuantType::name(data->type)+"'", ins->token);
+                st->state = CV::ControlFlowState::CRASH;
+                return data;
+            }
+            if(v->type != CV::QuantType::NUMBER && v->type != CV::QuantType::STRING){
+                cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "mut: Only numbers and string types might be mutated. New value is '"+CV::QuantType::name(v->type)+"'", ins->token);
+                st->state = CV::ControlFlowState::CRASH;
+                return data;
+            }
 
-    return result;
-}
+            if(v->type != data->type){
+                cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "mut: both target and new value must match in type. Target is '"+CV::QuantType::name(data->type)+"' and new value is '"+CV::QuantType::name(v->type)+"'", ins->token);
+                st->state = CV::ControlFlowState::CRASH;
+                return data;
+            }
 
-void CV::Stack::clear(){
-    // Clear Instructions
-    for(auto &it : this->instructions){
-        delete it.second;
-    }
-    this->instructions.clear();
-    // Clear contexts
-    for(auto &it : this->contexts){
-        it.second->clear();
-    }
-    this->contexts.clear();
-}
+            switch(data->type){
+                case CV::QuantType::STRING: {
+                    std::static_pointer_cast<CV::TypeString>(data)->v = std::static_pointer_cast<CV::TypeString>(v)->v;
+                } break;
+                case CV::QuantType::NUMBER: {
+                    std::static_pointer_cast<CV::TypeNumber>(data)->v = std::static_pointer_cast<CV::TypeNumber>(v)->v;
+                } break;
+            }
+
+            ctx->setPrefetch(ins->id, {(unsigned)targetDataCtxId, (unsigned)targetDataId});
 
 
-/* -------------------------------------------------------------------------------------------------------------------------------- */
+            return data;
+        };
 
-void CV::SetUseColor(bool v){
-    useColorOnText = v;
-}
+        case CV::InstructionType::LET: {
 
-std::string CV::ItemToText(const std::shared_ptr<CV::Stack> &stack, CV::Item *item){
-    switch(item->type){
+            if(ctx->isPrefetched(ins->id)){
+                auto dir = ctx->getPrefetch(ins->id);
+                return prog->getCtx(dir[0])->get(dir[1]);
+            }
+
+            auto &cctx = prog->getCtx(ins->data[0]);
+            auto targetDataID = ins->data[1];
+            auto &name = ins->literal[0];
+            auto &entrypoint = prog->getIns(ins->params[0]);
+
+            auto v = CV::Execute(entrypoint, cctx, prog, cursor, st);
+            if(cursor->error){
+                st->state = CV::ControlFlowState::CRASH;
+                return v;
+            }
+            cctx->set(targetDataID, v);
+
+            ctx->setPrefetch(ins->id, {(unsigned)cctx->id, (unsigned)targetDataID});
+
+            return v;
+        };
+
+        case CV::InstructionType::CARBON_COPY: {
+            if(ctx->isPrefetched(ins->id)){
+                auto dir = ctx->getPrefetch(ins->id);
+                return prog->getCtx(dir[0])->get(dir[1]);
+            }
+
+            auto &cctx = prog->getCtx(ins->data[0]);
+            auto &nv = cctx->get(ins->data[1]);
+
+            auto &entrypoint = prog->getIns(ins->params[0]);
+
+            auto v = CV::Execute(entrypoint, cctx, prog, cursor, st);
+            if(cursor->error){
+                st->state = CV::ControlFlowState::CRASH;
+                return v;
+            }
+            auto copied = cctx->buildCopy(v);
+            cctx->set(ins->data[1], copied);
+
+            ctx->setPrefetch(ins->id, {(unsigned)cctx->id, (unsigned)copied->id});
         
-        default:
-        case CV::NaturalType::NIL: {
-            return Tools::setTextColor(Tools::Color::BLUE)+"nil"+Tools::setTextColor(Tools::Color::RESET);
+            return copied;
         };
-
-        case CV::NaturalType::NUMBER: {
-            return  CV::Tools::setTextColor(Tools::Color::CYAN) +
-                    CV::Tools::removeTrailingZeros(static_cast<CV::NumberType*>(item)->get())+
-                    CV::Tools::setTextColor(Tools::Color::RESET);
+        
+        /*
+            CONTROL FLOW        
+        */
+        case CV::InstructionType::CF_INTERRUPT: {
+            switch(ins->data[0]){
+                case CV::InterruptType::YIELD: {
+                    st->state = CV::ControlFlowState::YIELD;
+                } break;
+                case CV::InterruptType::SKIP: {
+                    st->state = CV::ControlFlowState::SKIP;
+                } break;
+                case CV::InterruptType::RETURN: {
+                    st->state = CV::ControlFlowState::RETURN;
+                } break;
+                default: {
+                    st->state = CV::ControlFlowState::CRASH;
+                } break;
+            }
+            if(ins->params.size() > 0){
+                auto &payloadCtx = prog->getCtx(ins->data[1]);
+                auto v = CV::Execute(prog->getIns(ins->params[0]), payloadCtx, prog, cursor, st);
+                if(cursor->error){
+                    st->state = CV::ControlFlowState::CRASH;
+                    return v;
+                }   
+                st->payload = v;
+                return v;
+            }
+            return ctx->buildNil();
         };
+        case CV::InstructionType::CF_INVOKE_FUNCTION: {
+            auto fnCtxId = ins->data[0];
+            auto fnId = ins->data[1];
+            auto paramCtxId = ins->data[2];
 
-        case CV::NaturalType::STRING: {
-            return Tools::setTextColor(Tools::Color::GREEN)+
-                    "'"+static_cast<CV::StringType*>(item)->get()+"'"+
-                    Tools::setTextColor(Tools::Color::RESET);
-        };     
+            auto fn = std::static_pointer_cast<CV::TypeFunction>(prog->getCtx(fnCtxId)->get(fnId));
+            auto &topExecCtx = prog->getCtx(fn->ctxId);
+            auto &paramCtx = prog->getCtx(paramCtxId);
 
-        case CV::NaturalType::FUNCTION: {
-            auto fn = static_cast<CV::FunctionType*>(item);      
+            int targetCtxId = ins->data[3];
+            int targetDataId = ins->data[4];
 
-            std::string start = Tools::setTextColor(Tools::Color::RED, true)+"["+Tools::setTextColor(Tools::Color::RESET);
-            std::string end = Tools::setTextColor(Tools::Color::RED, true)+"]"+Tools::setTextColor(Tools::Color::RESET);
-            std::string name = Tools::setTextColor(Tools::Color::RED, true)+"fn"+Tools::setTextColor(Tools::Color::RESET);
-            std::string binary = Tools::setTextColor(Tools::Color::BLUE, true)+"BINARY"+Tools::setTextColor(Tools::Color::RESET);
-            std::string body = Tools::setTextColor(Tools::Color::BLUE, true)+fn->body.first+Tools::setTextColor(Tools::Color::RESET);
+            // topExecCtx->memory.clear();
+            topExecCtx->clearPrefetch();
 
-            return start+name+" "+start+(fn->variadic ? "args" : Tools::compileList(fn->args))+end+" "+( body )+end;
-        };
-
-        case CV::NaturalType::LIST: {
-            std::string output = Tools::setTextColor(Tools::Color::MAGENTA)+"["+Tools::setTextColor(Tools::Color::RESET);
-            auto list = static_cast<CV::ListType*>(item);
-
-            int total = list->getSize();
-            int limit = total > 30 ? 10 : total;
-            for(int i = 0; i < limit; ++i){
-                auto item = list->get(stack, i);
-                output += CV::ItemToText(stack, item.get());
-                if(i < list->getSize()-1){
-                    output += " ";
+            // Prepare Context
+            int namei = 0;
+            for(int i = 0; i < ins->params.size(); ++i){
+                auto &cins = prog->getIns(ins->params[i]);
+                auto v = CV::Execute(cins, paramCtx, prog, cursor, st);
+                if(cursor->error){
+                    st->state = CV::ControlFlowState::CRASH;
+                    return v;
+                }   
+                // Is it prefix?
+                if(CV::Test::IsItPrefixInstruction(cins) && cins->type == CV::InstructionType::PROXY_NAMER){
+                    topExecCtx->set(topExecCtx->getName(cins->literal[0], true)[1], v);
+                }else
+                if( CV::Test::IsItPrefixInstruction(cins) &&
+                    cins->type == CV::InstructionType::PROXY_EXPANDER &&
+                    v->type == CV::QuantType::LIST){
+                    auto inner = std::static_pointer_cast<CV::TypeList>(v);
+                    for(int j = 0; j < inner->v.size(); ++j){
+                        int fin = namei + j;
+                        if(fin >= fn->params.size()){
+                            cursor->setError(CV_ERROR_MSG_WRONG_OPERANDS, "Provided wrong number of parameters("+std::to_string(fin)+") through the Expander", ins->token);
+                            return ctx->buildNil();
+                        }
+                        topExecCtx->set(topExecCtx->getName(fn->params[fin], true)[1], inner->v[j]);
+                    }
+                    namei += inner->v.size();
+                }else{
+                    topExecCtx->set(topExecCtx->getName(fn->params[namei], true)[1], v);
+                    ++namei;
                 }
             }
-            if(limit != total){
-                output += Tools::setTextColor(Tools::Color::YELLOW)+"...("+std::to_string(total-limit)+" hidden)"+Tools::setTextColor(Tools::Color::RESET);
+            // Execute
+            auto execCtx = prog->createContext(topExecCtx);
+            auto v = CV::Execute(prog->getIns(fn->entrypoint), execCtx, prog, cursor, st);
+            if(cursor->error){
+                st->state = CV::ControlFlowState::CRASH;
+            }else  
+            if(st->state == CV::ControlFlowState::RETURN){
+                st->state = CV::ControlFlowState::CONTINUE;
+                v = st->payload;
             }
-                        
-            return output + Tools::setTextColor(Tools::Color::MAGENTA)+"]"+Tools::setTextColor(Tools::Color::RESET);
-        };
 
+            // Fulfill target
+            prog->getCtx(targetCtxId)->set(targetDataId, v);
+
+            prog->deleteContext(execCtx->id);
+            
+            return std::shared_ptr<CV::Quant>(NULL);
+        } break;
+        case CV::InstructionType::CF_INVOKE_BINARY_FUNCTION: {
+            auto &fnData = prog->getCtx(ins->data[0])->get(ins->data[1]);
+            auto fn = std::static_pointer_cast<CV::TypeFunctionBinary>(fnData);
+
+            auto &paramCtx = prog->getCtx(ins->data[2]);
+
+            int targetCtxId = ins->data[4];
+            int targetDataId = ins->data[5];
+
+            // Compile operands
+            int nArgs = ins->data[3];
+            std::vector<std::shared_ptr<CV::Instruction>> arguments;
+            for(int i = 0; i < nArgs; ++i){
+                auto cins = prog->getIns(ins->params[i]);
+                if(cins->type == CV::InstructionType::PROXY_EXPANDER){
+                    auto innerIns = prog->getIns(cins->params[0]);
+                    if(innerIns->type == CV::InstructionType::CONSTRUCT_LIST){
+                        for(int j = 0; j < innerIns->params.size(); ++j){
+                            arguments.push_back( prog->getIns(innerIns->params[j]) );
+                        }
+                    }else{
+                        arguments.push_back(cins);
+                    }
+                }else{
+                    arguments.push_back(cins);
+                }
+            }
+
+
+            // Cast ref into pointer function
+            void (*ref)(CV_BINARY_FN_PARAMS) = (void (*)(CV_BINARY_FN_PARAMS))fn->ref;
+
+            // Invoke it in a temporary context
+            auto tempCtx = prog->createContext(paramCtx);
+            ref(arguments, fn->name, ins->token, cursor, tempCtx->id, targetCtxId, targetDataId, prog, st);
+            if(cursor->error){
+                st->state = CV::ControlFlowState::CRASH;
+            }             
+            // Delete context afterwards. The target value must be within the level above
+            prog->deleteContext(tempCtx->id);
+
+            return std::shared_ptr<CV::Quant>(NULL);
+        };
+        /*
+            LIBRARY IMPORT
+        */
+        case CV::InstructionType::LIBRAY_IMPORT: {
+            return ctx->buildNumber(ins->data[1]); // returns library id handle            
+        } break;
+        /*
+            NOOP
+        */
+        case CV::InstructionType::NOOP: {
+            st->state = CV::ControlFlowState::CRASH;
+            return ctx->buildNil();            
+        } break;
+        /*
+            INVALID
+        */
+        default: {
+            cursor->setError(CV_ERROR_MSG_INVALID_INSTRUCTION, "Instruction Type '"+std::to_string(ins->type)+"' is undefined/invalid", ins->token);
+            st->state = CV::ControlFlowState::CRASH;
+            return ctx->buildNil();
+        };
     }
 }
 
-std::shared_ptr<CV::Item> CV::Interpret(const std::string &input, const std::shared_ptr<CV::Stack> &stack, std::shared_ptr<Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
-    // Get text tokens
-    auto tokens = parseTokens(input,  ' ', cursor);
-    if(cursor->raise()){
-        return ctx->buildNil(stack);
+std::shared_ptr<CV::Quant> CV::Execute(const CV::InsType &entry, const CV::ContextType &ctx, const CV::ProgramType &prog, const CV::CursorType &cursor, CFType cf){
+
+    CV::InsType ins = entry;
+    std::shared_ptr<CV::Quant> result;
+    auto st = cf.get() == NULL ? std::make_shared<CV::ControlFlow>() : cf;
+
+    if( 
+        cursor->error ||
+        st->state == CV::ControlFlowState::YIELD ||
+        st->state == CV::ControlFlowState::SKIP ||
+        st->state == CV::ControlFlowState::CRASH ||
+        st->state == CV::ControlFlowState::RETURN
+    ){
+        return ctx->buildNil();
     }
 
-    // Compile tokens into its bytecode
-    auto entry = compileTokens(tokens, stack, ctx, cursor);
-    if(cursor->raise()){
-        return ctx->buildNil(stack);
-    }
-    // Execute
-    auto result = CV::Execute(entry, stack, ctx, cursor).value;
-    if(cursor->raise()){
-        return ctx->buildNil(stack);
+    while(true){
+        result = __flow(ins, ctx, prog, cursor, st);
+        if( 
+            cursor->error ||
+            st->state == CV::ControlFlowState::YIELD ||
+            st->state == CV::ControlFlowState::SKIP ||
+            st->state == CV::ControlFlowState::CRASH ||
+            st->state == CV::ControlFlowState::RETURN
+        ){
+            return result;
+        }
+        if(ins->next != CV::InstructionType::INVALID){
+            ins = prog->getIns(ins->next);
+            continue;
+        }
+        break;
     }
 
     return result;
 }
 
-std::string CV::QuickInterpret(const std::string &input, const std::shared_ptr<CV::Stack> &stack, std::shared_ptr<Context> &ctx, std::shared_ptr<CV::Cursor> &cursor, bool shouldClear){
-    // Get text tokens
-    auto tokens = parseTokens(input,  ' ', cursor);
-    if(cursor->raise()){
-        return "";
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//  CONTEXT
+// 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+CV::Context::Context(){
+    this->id = GEN_ID();
+}
+
+CV::Context::Context(const std::shared_ptr<CV::Context> &head) : Context(){
+    this->head = head;
+}
+
+std::shared_ptr<CV::Quant> CV::Context::buildCopy(const std::shared_ptr<CV::Quant> &subject){
+    std::shared_ptr<CV::Quant> c = subject->copy();
+    switch(subject->type){
+        case CV::QuantType::LIST: {
+            auto orig = std::static_pointer_cast<CV::TypeList>(subject);
+            auto target = std::static_pointer_cast<CV::TypeList>(c);
+            for(int i = 0; i < orig->v.size(); ++i){
+                target->v.push_back(this->buildCopy(orig->v[i]));
+            }
+        };
+        case CV::QuantType::STORE: {
+            auto orig = std::static_pointer_cast<CV::TypeStore>(subject);
+            auto target = std::static_pointer_cast<CV::TypeStore>(c);
+            for(auto &it : orig->v){
+                target->v[it.first] = this->buildCopy(it.second);
+            }
+        };
     }
+    this->memoryMutex.lock();
+    this->memory[c->id] = c;
+    this->memoryMutex.unlock();
+    return c;
+}
 
-    // Compile tokens into its bytecode
-    auto entry = compileTokens(tokens, stack, ctx, cursor);
-    if(cursor->raise()){
-        return "";
+std::shared_ptr<CV::TypeNumber> CV::Context::buildNumber(number n){
+    auto t = std::make_shared<CV::TypeNumber>();
+    this->memoryMutex.lock();
+    this->memory[t->id] = t;
+    this->memoryMutex.unlock();
+    t->v = n;
+    return t;
+}
+
+std::shared_ptr<CV::TypeThread> CV::Context::buildThread(){
+    auto t = std::make_shared<CV::TypeThread>();
+    this->memoryMutex.lock();
+    this->memory[t->id] = t;
+    this->memoryMutex.unlock();
+    t->threadId = GEN_ID();
+    return t; 
+}
+
+std::shared_ptr<CV::Quant> CV::Context::buildNil(){
+    auto t = std::make_shared<CV::Quant>();
+    this->memoryMutex.lock();
+    this->memory[t->id] = t;
+    this->memoryMutex.unlock();
+    return t;
+}
+
+std::shared_ptr<CV::Quant> CV::Context::buildType(int type){
+    switch(type){
+        case CV::QuantType::NUMBER: {
+            return this->buildNumber();
+        };
+        case CV::QuantType::STRING: {
+            return this->buildString();
+        };
+        case CV::QuantType::LIST: {
+            return this->buildList();
+        };
+        case CV::QuantType::STORE: {
+            return this->buildStore();
+        };
+        default:
+        case CV::QuantType::NIL: {
+            return this->buildNil();
+        };
     }
-    // Execute
-    auto result = CV::Execute(entry, stack, ctx, cursor).value;
-    if(cursor->raise()){
-        return CV::ItemToText(stack, result.get());
+}
+
+std::shared_ptr<CV::TypeString> CV::Context::buildString(const std::string &s){
+    auto t = std::make_shared<CV::TypeString>();
+    this->memoryMutex.lock();
+    this->memory[t->id] = t;
+    this->memoryMutex.unlock();
+    t->v = s;
+    return t;
+}
+
+std::shared_ptr<CV::TypeList> CV::Context::buildList(const std::vector<std::shared_ptr<CV::Quant>> &list){
+    auto t = std::make_shared<TypeList>();
+    this->memoryMutex.lock();
+    this->memory[t->id] = t;
+    this->memoryMutex.unlock();
+    for(int i = 0; i < list.size(); ++i){
+        t->v.push_back(list[i]);
     }
+    return t;
+}
 
-    auto text = CV::ItemToText(stack, result.get());
-
-    if(shouldClear){
-        stack->clear();
+std::shared_ptr<CV::TypeStore> CV::Context::buildStore(const std::unordered_map<std::string, std::shared_ptr<CV::Quant>> &store){
+    auto t = std::make_shared<TypeStore>();
+    this->memoryMutex.lock();
+    this->memory[t->id] = t;
+    this->memoryMutex.unlock();
+    for(auto &it : store){
+        t->v[it.first] = it.second;
     }
-
-    return text;
+    return t;
 }
 
-void CV::SetColorTableText(const std::unordered_map<int, std::string> &ct){
-    CV::Tools::UnixColor::TextColorCodes = ct;
-    CV::Tools::UnixColor::BoldTextColorCodes = ct;
+std::shared_ptr<CV::Quant> &CV::Context::get(int id){
+    memoryMutex.lock();
+    auto &v = this->memory[id];
+    memoryMutex.unlock();
+    return v;
 }
 
-void CV::SetColorTableBackground(const std::unordered_map<int, std::string> &ct){
-    CV::Tools::UnixColor::BackgroundColorCodes = ct;
+void CV::Context::set(int id, const std::shared_ptr<CV::Quant> &q){
+    memoryMutex.lock();
+    this->memory[id] = q;
+    memoryMutex.unlock();
 }
 
-std::string CV::GetPrompt(){
-    std::string start = Tools::setTextColor(Tools::Color::MAGENTA) + "[" + Tools::setTextColor(Tools::Color::RESET);
-    std::string cv = Tools::setTextColor(Tools::Color::CYAN) + "~" + Tools::setTextColor(Tools::Color::RESET);
-    std::string end = Tools::setTextColor(Tools::Color::MAGENTA) + "]" + Tools::setTextColor(Tools::Color::RESET);
-    return start+cv+end+"> ";
+void CV::Context::setName(const std::string &name, unsigned id){
+    nameMutex.lock();
+    this->names[name] = id;
+    nameMutex.unlock();
 }
 
-void CV::AddStandardConstructors(std::shared_ptr<CV::Stack> &stack){
-    __addStandardConstructors(stack);
+void CV::Context::setPrefetch(unsigned id, const std::vector<unsigned> &v){
+    prefetchMutex.lock();
+    this->prefetched[id] = v;
+    prefetchMutex.unlock();
 }
 
-bool CV::isVarTrue(const std::shared_ptr<CV::Item> &v){
-    return v->type != CV::NaturalType::NIL && (v->type == CV::NaturalType::NUMBER ? std::static_pointer_cast<CV::NumberType>(v)->get() : true);
+std::vector<unsigned> CV::Context::getPrefetch(unsigned id){
+    prefetchMutex.lock();
+    std::vector<unsigned> vs = this->prefetched[id];
+    prefetchMutex.unlock();
+    return vs;
+}  
+
+bool CV::Context::isPrefetched(unsigned id){
+    prefetchMutex.lock();
+    auto v = this->prefetched.count(id);
+    prefetchMutex.unlock();
+    return v > 0;
 }
 
-/* -------------------------------------------------------------------------------------------------------------------------------- */
-
-CV::ErrorCheck::ConstraintArgNumber::ConstraintArgNumber(){
-    type = ConstraintType::ARG_NUMBER;
+void CV::Context::clearPrefetch(){
+    prefetchMutex.lock();
+    this->prefetched.clear();
+    prefetchMutex.unlock();
 }
 
-CV::ErrorCheck::ConstraintArgNumber::ConstraintArgNumber(unsigned minNumber, unsigned maxNumber){
-    type = ConstraintType::ARG_NUMBER;
-    this->minNumber = minNumber;
-    this->maxNumber = maxNumber;
+std::shared_ptr<CV::TypeFunctionBinary> CV::Context::registerBinaryFuntion(const std::string &name, void *ref){
+    auto fn = std::make_shared<CV::TypeFunctionBinary>();
+    fn->ref = ref;
+    fn->ctxId = this->id;
+    fn->name = name;
+    this->memoryMutex.lock();
+    this->memory[fn->id] = fn;
+    this->memoryMutex.unlock();
+    this->names[name] = fn->id;
+    return fn;
 }
 
-bool CV::ErrorCheck::ConstraintArgNumber::check(const std::shared_ptr<CV::Stack> &stack, std::string &msg, const std::vector<std::shared_ptr<CV::Item>> &args){
-    if(minNumber == 0 && maxNumber == 0 && args.size() != 0){
-        msg = CV::Tools::format("Expected no arguments, %i were provided", args.size());
+// Name's context Id and data Id upwards
+std::vector<int> CV::Context::getName(const std::string &name, bool local){
+    this->nameMutex.lock();
+    if(this->names.count(name) > 0){
+        std::vector<int> ids;
+        ids.push_back(this->id);
+        ids.push_back(this->get(this->names[name])->id);
+        this->nameMutex.unlock();
+        return ids;
+    }
+    this->nameMutex.unlock();
+    return (this->head.get() && !local ? this->head->getName(name) : std::vector<int>({}));
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//  PROGRAM
+// 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+CV::InsType CV::Program::createInstruction(unsigned type, const std::shared_ptr<CV::Token> &token){
+    auto ins = std::make_shared<CV::Instruction>();
+    ins->id = GEN_ID();
+    ins->type = type;
+    ins->token = token;
+    insMutex.lock();
+    this->instructions[ins->id] = ins;
+    insMutex.unlock();
+    return ins;
+}
+
+std::shared_ptr<CV::Context> CV::Program::createContext(const std::shared_ptr<CV::Context> &head){
+    auto nctx = std::make_shared<CV::Context>(head);
+    ctxMutex.lock();
+    this->ctx[nctx->id] = nctx;
+    ctxMutex.unlock();
+    return nctx;
+}
+
+bool CV::Program::deleteContext(int id){
+    ctxMutex.lock();
+    if(this->ctx.count(id) > 0){
+        this->ctx.erase(id); // Careful!! TODO: Check
+        ctxMutex.unlock();
         return true;
     }
-    if(minNumber != maxNumber && args.size() < minNumber){
-        msg = CV::Tools::format("Expected at least %i arguments, %i were provided", minNumber, args.size());
-        return true;
-    }
-    if(minNumber != maxNumber && args.size() > maxNumber){
-        msg = CV::Tools::format("Expected no more than %i arguments, %i were provided", maxNumber, args.size());
-        return true;
-    }                
-    if(minNumber == maxNumber && args.size() != maxNumber){
-        msg = CV::Tools::format("Expected exactly %i arguments, %i were provided", maxNumber, args.size());
-        return true;                    
-    }
+    ctxMutex.unlock();
     return false;
 }
 
-CV::ErrorCheck::ConstraintArgType::ConstraintArgType(){
-    this->type = ConstraintType::ARG_TYPE;
+std::shared_ptr<CV::Context> &CV::Program::getCtx(int id){
+    ctxMutex.lock();
+    auto &c = this->ctx[id];
+    ctxMutex.unlock();
+    return c;
 }
 
-CV::ErrorCheck::ConstraintArgType::ConstraintArgType(unsigned argPos, unsigned argType){
-    this->type = ConstraintType::ARG_TYPE;
-    this->argPos = argPos;
-    this->argType = argType;
+std::shared_ptr<CV::Instruction> &CV::Program::getIns(int id){
+    this->insMutex.lock();
+    auto &i = this->instructions[id];
+    this->insMutex.unlock();
+    return i;
 }
 
-bool CV::ErrorCheck::ConstraintArgType::check(const std::shared_ptr<CV::Stack> &stack, std::string &msg, const std::vector<std::shared_ptr<CV::Item>> &args){
-    if(args.size() < (this->argPos+1)){
-        msg = CV::Tools::format("Provided mismatching number of arguments, %i were provided, %i expected at least", args.size(), argPos+1);
-        return true;
-    }
-    if(args[argPos]->type != this->argType){
-        msg = CV::Tools::format(
-            "Provided argument type '%s' at position %i: Expected '%s'",
-            CV::NaturalType::name(args[argPos]->type).c_str(),
-            argPos,
-            CV::NaturalType::name(this->argType).c_str()
-        );
-        return true;                    
-    }
-    return false;
+void CV::Program::deleteThread(unsigned id){
+    this->threadMutex.lock();
+    this->threads.erase(id);
+    this->threadMutex.unlock();
 }
 
-CV::ErrorCheck::ConstraintArgList::ConstraintArgList(){
-    this->type = ConstraintType::ARG_LIST;
+void CV::Program::end(){
+    for(auto &it : threads){
+        // We shall finish for threads to finish
+        it.second.join(); 
+    }
 }
 
-CV::ErrorCheck::ConstraintArgList::ConstraintArgList(unsigned argType, unsigned argPos, unsigned argSize){
-    this->type = ConstraintType::ARG_LIST;
-    this->argType = argType;
-    this->argPos = argPos;
-    this->argSize = argSize;
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//  API
+// 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+bool CV::GetBooleanValue(const std::shared_ptr<CV::Quant> &data){
+    if(data.get() == NULL){
+        return false;
+    }
+    switch(data->type){
+        case CV::QuantType::NUMBER: {
+            auto v = std::static_pointer_cast<CV::TypeNumber>(data);
+            return v->v != 0;
+        };
+        default:
+        case CV::QuantType::NIL: {
+            return false;
+        };
+    }
 }
 
-bool CV::ErrorCheck::ConstraintArgList::check(const std::shared_ptr<CV::Stack> &stack, std::string &msg, const std::vector<std::shared_ptr<CV::Item>> &args){
-    if(args.size() < (this->argPos+1)){
-        msg = CV::Tools::format("Provided mismatching number of arguments, %i were provided, %i expected at least", args.size(), argPos+1);
-        return true;
+
+int CV::Import(const std::string &fname, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor){
+    if(!CV::Tools::fileExists(fname)){
+        cursor->setError(CV_ERROR_MSG_LIBRARY_NOT_VALID, "'"+fname+"' does not exist");
+        return 0;
     }
-
-    if(args[argPos]->type != CV::NaturalType::LIST){
-        msg = CV::Tools::format("Expected argument type 'LIST' at position %i: Provided %s",
-            argPos,
-            CV::NaturalType::name(args[argPos]->type)
-        );
-        return true;                    
+    auto literal = CV::Tools::readFile(fname);
+    auto entrypoint = CV::Compile(literal, prog, cursor);
+    if(cursor->error){
+        std::cout << cursor->getRaised() << std::endl;
+        std::exit(1);
     }
-
-    auto lst = std::static_pointer_cast<CV::ListType>(args[argPos]);
-
-    if(this->argSize != 0 && lst->getSize() != this->argSize){
-        msg = CV::Tools::format("Expected argument type 'LIST' of exactly %i elements, provided %i",
-            argSize,
-            lst->getSize()
-        );
-        return true;                      
+    auto st = std::make_shared<CV::ControlFlow>();
+    auto result = CV::Execute(entrypoint, ctx, prog, cursor, st);
+    if(cursor->error){
+        std::cout << cursor->getRaised() << std::endl;
+        std::exit(1);
     }
+    return 1;
+}
 
-    for(int i = 0; i < lst->getSize(); ++i){
-        auto item = lst->get(stack, i);
-        if(item->type != argType){
-            msg = CV::Tools::format("Expected argument type 'LIST' of '%s' elements, provided '%s' at position %i",
-                CV::NaturalType::name(argType).c_str(),
-                CV::NaturalType::name(item->type).c_str(),
-                i
-            );
-            return true; 
+bool CV::Unimport(int id){
+    return true;
+}
+
+int CV::ImportDynamicLibrary(const std::string &path, const std::string &fname, const std::shared_ptr<CV::Program> &prog, const CV::ContextType &ctx, const CV::CursorType &cursor){
+    #if (_CV_PLATFORM == _CV_PLATFORM_TYPE_LINUX)
+        void (*registerlibrary )(const std::shared_ptr<CV::Stack> &stack);
+        void* handle = NULL;
+        const char* error = NULL;
+        handle = dlopen(path.c_str(), RTLD_LAZY);
+        if(!handle){
+            fprintf( stderr, "Failed to load dynamic library %s: %s\n", fname.c_str(), dlerror());
+            std::exit(1);
         }
-    }
-
-    return false;
-}
-
-bool CV::ErrorCheck::TestArguments(
-                const std::vector<std::shared_ptr<Constraint>> &constraints,
-                const std::string &name,
-                const CV::Token &token,
-                const std::shared_ptr<CV::Stack> &stack,
-                std::vector<std::shared_ptr<CV::Item>> &args,
-                std::shared_ptr<CV::Cursor> &cursor){
-    for(int i = 0; i < constraints.size(); ++i){
-        auto &cons = constraints[i];
-        std::string error;
-        if(cons->check(stack, error, args)){
-            cursor->setError(name, error, token.line);
-            return true;
+        dlerror();
+        registerlibrary = (void (*)(const std::shared_ptr<CV::Stack> &stack)) dlsym( handle, "_CV_REGISTER_LIBRARY" );
+        error = dlerror();
+        if(error){
+            fprintf( stderr, "Failed to load dynamic library '_CV_REGISTER_LIBRARY' from '%s': %s\n", fname.c_str(), error);
+            dlclose(handle);
+            std::exit(1);
         }
-    }
-    return false;
+        // Try to load
+        (*registerlibrary)(stack);
+        loadedLibraries.push_back(handle);
+        return true;
+    #elif  (_CV_PLATFORM == _CV_PLATFORM_TYPE_WINDOWS)
+        typedef void (*rlib)(const std::shared_ptr<CV::Program> &prog, const CV::ContextType &ctx, const CV::CursorType &cursor);
+
+        rlib entry;
+        HMODULE hdll;
+        // Load lib
+        hdll = LoadLibraryA(path.c_str());
+        if(hdll == NULL){
+            fprintf( stderr, "Failed to load dynamic library %s\n", fname.c_str());
+            std::exit(1);                
+        }
+        // Fetch register's address
+        entry = (rlib)GetProcAddress(hdll, "_CV_REGISTER_LIBRARY");
+        if(entry == NULL){
+            fprintf( stderr, "Failed to load dynamic library '_CV_REGISTER_LIBRARY' from '%s'\n", fname.c_str());
+            std::exit(1);      
+        }
+        entry(prog, ctx, cursor);
+        auto id = GEN_ID();
+        prog->loadedDynamicLibs[id] = hdll;
+        return id;
+    #endif
 }
+
+void CV::SetUseColor(bool v){
+    UseColorOnText = v;
+}
+
+std::string CV::GetLogo(){
+    std::string start = CV::Tools::setTextColor(Tools::Color::MAGENTA) + "[" + CV::Tools::setTextColor(Tools::Color::RESET);
+    std::string cv = CV::Tools::setTextColor(Tools::Color::CYAN) + "~" + CV::Tools::setTextColor(Tools::Color::RESET);
+    std::string end = CV::Tools::setTextColor(Tools::Color::MAGENTA) + "]" + CV::Tools::setTextColor(Tools::Color::RESET);
+    return start+cv+end;
+}
+
+// int main(){
+
+//     auto cursor = std::make_shared<CV::Cursor>();
+//     auto program = std::make_shared<CV::Program>();
+//     program->rootContext = program->createContext();
+    
+//     CV::InitializeCore(program);
+
+//     auto entrypoint = CV::Compile("print 'hello world'", program, cursor);
+//     if(cursor->error){
+//         std::cout << cursor->getRaised() << std::endl;
+//         std::exit(1);
+//     }
+//     program->entrypointIns = entrypoint->id;
+//     auto result = CV::Execute(entrypoint, program->rootContext, program, cursor);
+//     if(cursor->error){
+//         std::cout << cursor->getRaised() << std::endl;
+//         std::exit(1);
+//     }
+
+//     std::cout << CV::QuantToText(result) << std::endl;
+
+//     std::cout << "exit" << std::endl;
+
+//     return 0;
+
+// }

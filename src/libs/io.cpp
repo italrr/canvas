@@ -1,13 +1,6 @@
 #include <iostream>
 #include "../CV.hpp"
 
-/*
-    Here we should register all binary functions that are part of the standard:
-    - stdout, stdin, stderr
-    - fopen, fclose, fwrite, fread
-    - exit/quit
-*/
-
 static inline void ___WRITE_STDOUT(const std::string &v){
     int n = v.size();
     std::cout << v;
@@ -22,56 +15,109 @@ static inline void ___GET_STDIN(std::string &v){
     std::cin >> v;
 }  
 
-extern "C" void _CV_REGISTER_LIBRARY(const std::shared_ptr<CV::Stack> &stack){
-  
+static void __CV_STD_IO_OUT(
+    const std::vector<std::shared_ptr<CV::Instruction>> &args,
+    const std::string &name,
+    const CV::TokenType &token,
+    const CV::CursorType &cursor,
+    int execCtxId,
+    int ctxId,
+    int dataId,
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
+){
+    // Fetch context & data target
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
 
-    stack->registerFunction("io:out", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
-        std::string out = "";
-        for(int i = 0; i < args.size(); ++i){
-            auto item = args[i];
-            if(item->type != CV::NaturalType::STRING){
-                out += CV::ItemToText(stack, item.get());
-            }else{
-                out += std::static_pointer_cast<CV::StringType>(item)->get();
-            }
+    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
+        !CV::ErrorCheck::ExpectsOperands(args.size(), 1, name, token, cursor)){
+        return;
+    }
+    
+    std::string out = "";
+    for(int i = 0; i < args.size(); ++i){
+        auto quant = CV::Execute(args[i], execCtx, prog, cursor, st);
+        if(cursor->error){
+            return;
         }
-        ___WRITE_STDOUT(out);
-        return ctx->buildNil(stack);
-    });
-
-
-    stack->registerFunction("io:err", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
-        std::string out = "";
-        for(int i = 0; i < args.size(); ++i){
-            auto item = args[i];
-            if(item->type != CV::NaturalType::STRING){
-                out += CV::ItemToText(stack, item.get());
-            }else{
-                out += std::static_pointer_cast<CV::StringType>(item)->get();
-            }
+        if(quant->type != CV::QuantType::STRING){
+            out += CV::QuantToText(quant);
+        }else{
+            out += std::static_pointer_cast<CV::TypeString>(quant)->v;
         }
-        ___WRITE_STDERR(out);
-        return ctx->buildNil(stack);
-    });  
+    }
+    ___WRITE_STDOUT(out);
 
-    stack->registerFunction("io:in", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
-        std::string input;
-        ___GET_STDIN(input);
-        auto data = std::make_shared<CV::StringType>();
-        data->set(input);
-        ctx->store(stack, data);
-        return std::static_pointer_cast<CV::Item>(data);
-    });      
 
-    stack->registerFunction("io:str-to-number", [stack](const std::string &name, const CV::Token &token, std::vector<std::shared_ptr<CV::Item>> &args, std::shared_ptr<CV::Context> &ctx, std::shared_ptr<CV::Cursor> &cursor){
-        if(args.size() != 1 || args[0]->type != CV::NaturalType::STRING){
-            cursor->setError(name, "Expects exactly 1 arguments: STRING", token.line);
-            return ctx->buildNumber(stack, 0);
+    dataCtx->set(dataId, dataCtx->buildNil());
+}
+
+static void __CV_STD_IO_ERR(
+    const std::vector<std::shared_ptr<CV::Instruction>> &args,
+    const std::string &name,
+    const CV::TokenType &token,
+    const CV::CursorType &cursor,
+    int execCtxId,
+    int ctxId,
+    int dataId,
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
+){
+    // Fetch context & data target
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
+
+    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
+        !CV::ErrorCheck::ExpectsOperands(args.size(), 1, name, token, cursor)){
+        return;
+    }
+
+    std::string out = "";
+    for(int i = 0; i < args.size(); ++i){
+        auto quant = CV::Execute(args[i], execCtx, prog, cursor, st);
+        if(cursor->error){
+            return;
         }
+        if(quant->type != CV::QuantType::STRING){
+            out += CV::QuantToText(quant);
+        }else{
+            out += std::static_pointer_cast<CV::TypeString>(quant)->v;
+        }
+    }
+    ___WRITE_STDERR(out);
 
-        auto v = std::stod(std::static_pointer_cast<CV::StringType>(args[0])->get());
 
-        return ctx->buildNumber(stack, v);
-    });            
+    dataCtx->set(dataId, dataCtx->buildNil());
+}
 
+static void __CV_STD_IO_IN(
+    const std::vector<std::shared_ptr<CV::Instruction>> &args,
+    const std::string &name,
+    const CV::TokenType &token,
+    const CV::CursorType &cursor,
+    int execCtxId,
+    int ctxId,
+    int dataId,
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
+){
+    // Fetch context & data target
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
+
+    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ){
+        return;
+    }
+
+    std::string input;
+    ___GET_STDIN(input);
+
+    dataCtx->set(dataId, dataCtx->buildString(input));
+}
+
+extern "C" void _CV_REGISTER_LIBRARY(const std::shared_ptr<CV::Program> &prog, const CV::ContextType &ctx, const CV::CursorType &cursor){
+    ctx->registerBinaryFuntion("io:out", (void*)__CV_STD_IO_OUT);
+    ctx->registerBinaryFuntion("io:err", (void*)__CV_STD_IO_ERR);
+    ctx->registerBinaryFuntion("io:in", (void*)__CV_STD_IO_IN);
 }

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 2.6)
+cmake_minimum_required(VERSION 3.10)
 
 project(cv CXX C)
 
@@ -18,8 +18,8 @@ macro (mvLib t)
 endmacro()
 
 set (cv_src 
-            src/Tools.cpp
-            src/canvas.cpp)
+            src/CV.cpp
+            src/Core.cpp)
 
 if(UNIX AND NOT APPLE)
     set(LINUX TRUE)
@@ -36,21 +36,18 @@ IF(MINGW)
 ENDIF(MINGW)
 
 
-add_executable(cv src/CV.cpp)
+add_executable(cv src/CLI.cpp)
 target_link_libraries(cv cv_bin)
 
 # LIBRARIES
 # -------------------------------------------------------------------------- #
 
-# bitmap
-add_library(bm SHARED src/libs/bitmap.cpp src/CV.cpp src/Tools.cpp)
-mvLib(bm)
-# time
-add_library(tm SHARED src/libs/time.cpp src/CV.cpp src/Tools.cpp)
-mvLib(tm)
-# math
-add_library(math SHARED src/libs/math.cpp src/CV.cpp src/Tools.cpp)
-mvLib(math)
 # io
-add_library(io SHARED src/libs/io.cpp src/CV.cpp src/Tools.cpp)
-mvLib(io)  
+add_library(io SHARED src/libs/io.cpp src/CV.cpp src/Core.cpp)
+mvLib(io)
+# json
+add_library(json SHARED src/libs/json.cpp src/libs/thirdparty/json11.cpp src/CV.cpp src/Core.cpp)
+mvLib(json)
+# bmp
+add_library(bmp SHARED src/libs/bmp.cpp src/CV.cpp src/Core.cpp)
+mvLib(bmp)

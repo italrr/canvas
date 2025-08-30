@@ -1,5 +1,0 @@
-#
-#   Time Library
-#
-
-[__cv_load_dynamic_library 'libtm']
