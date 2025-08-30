@@ -16,7 +16,7 @@ struct ExecArg {
 	}
 };
 
-std::shared_ptr<ExecArg> getParam(std::vector<std::string> &params, const std::string &name, bool single = false){
+static std::shared_ptr<ExecArg> getParam(std::vector<std::string> &params, const std::string &name, bool single = false){
 	auto v = std::make_shared<ExecArg>(name);
 	for(int i = 0; i < params.size(); ++i){
 		if(params[i] == name){
@@ -33,7 +33,6 @@ std::shared_ptr<ExecArg> getParam(std::vector<std::string> &params, const std::s
 	}
 	return v;
 }
-
 
 int main(int argc, char* argv[]){
 	
@@ -105,14 +104,17 @@ int main(int argc, char* argv[]){
 		auto entrypoint = CV::Compile(file, program, cursor);
 		if(cursor->error){
 			std::cout << cursor->getRaised() << std::endl;
+			program->end();
 			return 1;
 		}
 		program->entrypointIns = entrypoint->id;
 		auto result = CV::Execute(entrypoint, program->rootContext, program, cursor, st);
 		if(cursor->error){
 			std::cout << cursor->getRaised() << std::endl;
+			program->end();
 			return 1;
 		}
+		program->end();
 		return 0;
 	}else
 	// REPL
@@ -139,6 +141,7 @@ int main(int argc, char* argv[]){
 					if(useRelaxed){
 						cursor->clear();
 					}else{
+						program->end();
 						return 1;
 					}
 				}
@@ -149,6 +152,7 @@ int main(int argc, char* argv[]){
 					if(useRelaxed){
 						cursor->clear();
 					}else{
+						program->end();
 						return 1;
 					}
 				}
@@ -158,7 +162,7 @@ int main(int argc, char* argv[]){
 				}
 			}
 		}
-
+		program->end();
 		return cursor->error && !useRelaxed ? 1 : 0;
 	}else{
 	// Inline
@@ -182,17 +186,20 @@ int main(int argc, char* argv[]){
 		auto entrypoint = CV::Compile(cmd, program, cursor);
 		if(cursor->error){
 			std::cout << cursor->getRaised() << std:: endl;
+			program->end();
 			return 1;
 		}
 		program->entrypointIns = entrypoint->id;
 		auto result = CV::Execute(entrypoint, program->rootContext, program, cursor, st);
 		if(cursor->error){
 			std::cout << cursor->getRaised() << std:: endl;
+			program->end();
 			return 1;
 		}
 		if(!useNoReturn){
 			std::cout << CV::QuantToText(result) << std::endl;
 		}
+		program->end();
 		return 0;
 	}
 

@@ -19,6 +19,36 @@
 
 static bool UseColorOnText = false;
 
+struct InvokeThread {
+    CV::TypeThread *core;
+    CV::ProgramType prog;
+    CV::CursorType upcursor;
+    CV::TokenType root;
+};
+
+static void RUN_THREAD(std::shared_ptr<InvokeThread> handle){
+
+    auto &prog = handle->prog;
+    auto core = handle->core;
+    auto &upcursor = handle->upcursor;
+    auto &root = handle->root;
+    auto &entrypoint = prog->getIns( core->entrypoint );
+
+    auto ctx = prog->getCtx( core->ctxId );
+    auto st = std::make_shared<CV::ControlFlow>();
+    st->state = CV::ControlFlowState::CONTINUE;
+    auto cursor = std::make_shared<CV::Cursor>();
+    auto r = CV::Execute(entrypoint, ctx, prog, cursor, st);
+    if(cursor->error){
+        st->state = CV::ControlFlowState::CRASH;
+        upcursor->setError(cursor->title, "Crash in Thread "+std::to_string(core->threadId)+": "+cursor->message, root);
+    }
+    ctx->set(r->id, r);
+    core->returnId = r->id;
+    core->setState(CV::ThreadState::FINISHED);
+    handle->prog->deleteThread(core->threadId);
+}
+
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //
 //  TOOLS
@@ -79,6 +109,9 @@ namespace CV {
             };     
         }   
   
+        void sleep(uint64_t t){
+            std::this_thread::sleep_for(std::chrono::milliseconds(t));
+        }
         std::string setTextColor(int color, bool bold){
             if(!UseColorOnText){
                 return "";
@@ -416,6 +449,35 @@ std::shared_ptr<CV::Quant> CV::TypeFunctionBinary::copy(){
     return cpy;
 }
 
+// THREAD
+CV::TypeThread::TypeThread(){
+    this->entrypoint = 0;
+    this->ctxId = 0;
+    this->threadId = 0;
+    this->state = CV::ThreadState::CREATED;
+    this->type = CV::QuantType::THREAD;
+}
+
+bool CV::TypeThread::clear(){
+    return true;
+}
+
+void CV::TypeThread::setState(int nstate){
+    this->accessMutex.lock();
+    this->state = nstate;
+    this->accessMutex.unlock();
+}
+
+std::shared_ptr<CV::Quant> CV::TypeThread::copy(){
+    auto cpy = std::make_shared<CV::TypeThread>();
+    cpy->entrypoint = this->entrypoint;
+    cpy->ctxId = this->ctxId;
+    cpy->threadId = this->threadId;
+    cpy->state = this->state;
+    cpy->returnId = this->returnId;
+    return cpy;
+}
+
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //
 //  CURSOR
@@ -592,6 +654,18 @@ std::string CV::QuantToText(const std::shared_ptr<CV::Quant> &t){
                         
             return output + Tools::setTextColor(Tools::Color::MAGENTA)+"]"+Tools::setTextColor(Tools::Color::RESET);
         };        
+
+        case CV::QuantType::THREAD: {
+            auto thread = std::static_pointer_cast<CV::TypeThread>(t);
+
+            return Tools::setTextColor(Tools::Color::YELLOW)
+                                +"[THREAD "+std::to_string(thread->id)+" "
+                                +Tools::setTextColor(Tools::Color::GREEN)
+                                +"'"+CV::ThreadState::name(thread->state)
+                                +"'"
+                                +Tools::setTextColor(Tools::Color::YELLOW)+"]"
+                                +Tools::setTextColor(Tools::Color::RESET);
+        };
 
     }
 }
@@ -843,7 +917,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                 return prog->createInstruction(CV::InstructionType::NOOP, origin);
             }
             // Deny expander usage in Stores
-            if(fetched->type != CV::InstructionType::PROXY_EXPANDER){
+            if(fetched->type == CV::InstructionType::PROXY_EXPANDER){
                 cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "Expander Prefixer cannot be used while constructing Stores", inc);
                 return prog->createInstruction(CV::InstructionType::NOOP, origin);
             }
@@ -1244,30 +1318,71 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                 return ins;
             }
         }else
-        // EXPANDER
-        if(token->first[0] == '^'){
-            if(token->first.length() > 1){
-                std::string subpart(token->first.begin() + 1, token->first.end());
-                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "Expander Prefix '"+token->first+"' may not be appended with '"+subpart+"'", token);
-                return prog->createInstruction(CV::InstructionType::NOOP, token);                            
-            }
-            if(token->inner.size() != 1){
-                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "Expander Prefix '"+token->first+"' expects exactly one value", token);
+        // PARALLELER
+        if(token->first[0] == '|'){
+
+            if(token->inner.size() != 0){
+                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "Paralleler Prefix '"+token->first+"' expects no values", token);
                 return prog->createInstruction(CV::InstructionType::NOOP, token);                                            
             }
 
-            auto ins = prog->createInstruction(CV::InstructionType::PROXY_EXPANDER, token);
+            if(token->first.size() == 1){
+                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "Paralleler Prefix '"+token->first+"' expects an apppended body", token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);                
+            }
+
+            std::string statement = std::string(token->first.begin()+1, token->first.end());
+
+            auto ins = prog->createInstruction(CV::InstructionType::PROXY_PARALELER, token);
             ins->data.push_back(CV_INS_PREFIXER_IDENTIFIER_INSTRUCTION);
-            ins->data.push_back(CV::Prefixer::NAMER);
+            ins->data.push_back(CV::Prefixer::PARALELLER);
             std::shared_ptr<CV::Quant> ghostData;
 
-            auto &inc = token->inner[0];
-            auto fetched = CV::Translate(inc, prog, ctx, cursor);
+            auto tctx = prog->createContext(ctx);
+
+            auto entrypoint = CV::Compile(statement, prog, cursor, tctx);
             if(cursor->error){
                 cursor->subject = token;
                 return prog->createInstruction(CV::InstructionType::NOOP, token);
             }
-            ins->params.push_back(fetched->id);
+
+            auto data = tctx->buildThread();
+            data->ctxId = tctx->id;
+            data->entrypoint = entrypoint->id;
+
+            ins->data.push_back(tctx->id);
+            ins->data.push_back(data->id);
+            ins->params.push_back(entrypoint->id);
+
+            return ins;
+
+        }else
+        // EXPANDER
+        if(token->first[0] == '^'){
+            if(token->inner.size() != 0){
+                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "Expander Prefix '"+token->first+"' expects no values", token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);                                            
+            }
+
+            if(token->first.size() == 1){
+                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "Expander Prefix '"+token->first+"' expects an apppended body", token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);                
+            }
+
+            std::string statement = std::string(token->first.begin()+1, token->first.end());
+
+
+            auto ins = prog->createInstruction(CV::InstructionType::PROXY_EXPANDER, token);
+            ins->data.push_back(CV_INS_PREFIXER_IDENTIFIER_INSTRUCTION);
+            ins->data.push_back(CV::Prefixer::EXPANDER);
+            std::shared_ptr<CV::Quant> ghostData;
+
+            auto entrypoint = CV::Compile(statement, prog, cursor, ctx);
+            if(cursor->error){
+                cursor->subject = token;
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
+            ins->params.push_back(entrypoint->id);
 
             return ins;
         }else
@@ -1548,7 +1663,7 @@ CV::InsType CV::Compile(const CV::TokenType &input, const CV::ProgramType &prog,
     return instructions[0];
 }
 
-CV::InsType CV::Compile(const std::string &input, const CV::ProgramType &prog, const CV::CursorType &cursor){   
+CV::InsType CV::Compile(const std::string &input, const CV::ProgramType &prog, const CV::CursorType &cursor, const CV::ContextType &ctx){   
 
     // Fix outter brackets (Input must always be accompained by brackets)
     auto cleanInput = CV::Tools::cleanTokenInput(input);
@@ -1561,7 +1676,7 @@ CV::InsType CV::Compile(const std::string &input, const CV::ProgramType &prog, c
             fixedInput = fixedInput+"]";
         }
     }
-    // Double brackets (Statement must respect [ [] -> STATEMENT ] -> PROGRAM hierarchy)
+    // Double brackets (Statement must respect the "[ [] -> STATEMENT ] -> PROGRAM" hierarchy)
     cleanInput = CV::Tools::cleanTokenInput(fixedInput);
     if( cleanInput[0] == '[' && cleanInput[1] != '[' &&
         cleanInput[cleanInput.size()-1] == ']' && cleanInput[cleanInput.size()-2] != ']'){
@@ -1597,7 +1712,7 @@ CV::InsType CV::Compile(const std::string &input, const CV::ProgramType &prog, c
     // Convert tokens into instructions
     std::vector<CV::InsType> instructions;
     for(int i = 0 ; i < root.size(); ++i){
-        auto ins = CV::Translate(root[i], prog, prog->rootContext, cursor);
+        auto ins = CV::Translate(root[i], prog, ctx.get() ? ctx : prog->rootContext, cursor);
         if(cursor->error){
             return prog->createInstruction(CV::InstructionType::NOOP, root[i]);
         }
@@ -1642,6 +1757,29 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
             auto store = std::static_pointer_cast<CV::TypeStore>(quant);
             // TODO: Perhaps some error checking?
             return store->v[mname];
+        };
+        case CV::InstructionType::PROXY_PARALELER: {
+            auto tctxId = ins->data[2];
+            auto dataId = ins->data[3];
+            auto entrypoint = ins->params[0];
+
+            auto tctxt = prog->getCtx(tctxId);
+            auto quant = tctxt->get(dataId);
+            auto thread = std::static_pointer_cast<CV::TypeThread>(quant);
+            
+            if(thread->state == CV::ThreadState::CREATED){
+                thread->setState(CV::ThreadState::STARTED);
+                auto handle = std::make_shared<InvokeThread>();
+                handle->core = thread.get();
+                handle->prog = prog;
+                handle->upcursor = cursor;
+                handle->root = ins->token;
+                prog->threadMutex.lock();
+                prog->threads[thread->id] = std::thread(&RUN_THREAD, handle);
+                prog->threadMutex.unlock();
+            }
+            
+            return thread;
         };
         case CV::InstructionType::PROXY_EXPANDER: {
             if(ctx->isPrefetched(ins->id)){
@@ -2094,6 +2232,15 @@ std::shared_ptr<CV::TypeNumber> CV::Context::buildNumber(number n){
     return t;
 }
 
+std::shared_ptr<CV::TypeThread> CV::Context::buildThread(){
+    auto t = std::make_shared<CV::TypeThread>();
+    this->memoryMutex.lock();
+    this->memory[t->id] = t;
+    this->memoryMutex.unlock();
+    t->threadId = GEN_ID();
+    return t; 
+}
+
 std::shared_ptr<CV::Quant> CV::Context::buildNil(){
     auto t = std::make_shared<CV::Quant>();
     this->memoryMutex.lock();
@@ -2275,6 +2422,20 @@ std::shared_ptr<CV::Instruction> &CV::Program::getIns(int id){
     this->insMutex.unlock();
     return i;
 }
+
+void CV::Program::deleteThread(unsigned id){
+    this->threadMutex.lock();
+    this->threads.erase(id);
+    this->threadMutex.unlock();
+}
+
+void CV::Program::end(){
+    for(auto &it : threads){
+        // We shall finish for threads to finish
+        it.second.join(); 
+    }
+}
+
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //

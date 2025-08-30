@@ -947,8 +947,7 @@ static void __CV_CORE_LIST_PUSH(
     auto &dataCtx = prog->getCtx(ctxId);
     auto &execCtx = prog->getCtx(execCtxId);
 
-    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
-        !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 2, name, token, cursor)){
+    if(!CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 2, name, token, cursor)){
         return;
     }
     
@@ -991,8 +990,7 @@ static void __CV_CORE_LIST_POP(
     auto &dataCtx = prog->getCtx(ctxId);
     auto &execCtx = prog->getCtx(execCtxId);
 
-    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
-        !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, token, cursor)){
+    if( !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, token, cursor)){
         return;
     }
     
@@ -1536,11 +1534,57 @@ static void __CV_CORE_PRINT(
 }
 
 
+static void __CV_CORE_AWAIT(
+    const std::vector<std::shared_ptr<CV::Instruction>> &args,
+    const std::string &name,
+    const CV::TokenType &token,
+    const CV::CursorType &cursor,
+    int execCtxId,
+    int ctxId,
+    int dataId,
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
+){
+    // Fetch context & data target
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
+
+    if( !CV::ErrorCheck::ExpectsOperands(args.size(), 1, name, token, cursor) ){
+        return;
+    }    
+
+    auto subject = CV::Execute(args[0], execCtx, prog, cursor, st);
+    if(cursor->error){
+        return;
+    }
+    if(!CV::ErrorCheck::ExpectsTypeAt(subject->type, CV::QuantType::THREAD, 0, name, token, cursor)){
+        return;
+    }
+    
+    auto thread = std::static_pointer_cast<CV::TypeThread>(subject);
+
+    while(thread->state != CV::ThreadState::FINISHED){
+        CV::Tools::sleep(20);
+    }
+
+    auto returnData = prog->getCtx(thread->ctxId)->get(thread->returnId); 
+
+    // Fulfill promise in context
+    dataCtx->set(dataId, returnData);
+}
+
+
+
 void CV::InitializeCore(const CV::ProgramType &target){
     /*
         PRINT
     */
     target->rootContext->registerBinaryFuntion("print", (void*)__CV_CORE_PRINT);
+
+    /*
+       THREAD
+    */
+    target->rootContext->registerBinaryFuntion("await", (void*)__CV_CORE_AWAIT);
 
     /*
 

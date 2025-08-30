@@ -5,6 +5,7 @@
     #include <cctype>
     #include <unordered_map>
     #include <memory>
+    #include <thread>
     #include <string>
     #include <functional>
     #include <mutex>
@@ -125,7 +126,8 @@
                 STORE,
                 PROTOTYPE,
                 FUNCTION,
-                BINARY_FUNCTION
+                BINARY_FUNCTION,
+                THREAD
             };
             static std::string name(int t){
                 switch(t){
@@ -143,6 +145,15 @@
                     };
                     case QuantType::PROTOTYPE: {
                         return "PROTOTYPE";
+                    };
+                    case QuantType::FUNCTION: {
+                        return "FUNCTION";
+                    };
+                    case QuantType::BINARY_FUNCTION: {
+                        return "BINARY_FUNCTION";
+                    };
+                    case QuantType::THREAD: {
+                        return "THREAD";
                     };
                     default:
                         return "UNDEFINED";
@@ -213,6 +224,44 @@
             virtual std::shared_ptr<CV::Quant> copy();
         };          
 
+        namespace ThreadState {
+            enum ThreadState : int {
+                UNDEFINED = 0,
+                CREATED = 10,
+                STARTED,
+                FINISHED
+            };
+            static std::string name(int state){
+                switch(state){
+                    case CV::ThreadState::CREATED: {
+                        return "CREATED";
+                    };
+                    case CV::ThreadState::STARTED: {
+                        return "STARTED";
+                    };
+                    case CV::ThreadState::FINISHED: {
+                        return "FINISHED";
+                    };
+                    default: {
+                        return "UNDEFINED";
+                    };
+                }
+            } 
+        }
+
+        struct TypeThread : CV::Quant {
+            int entrypoint;
+            int ctxId;
+            int threadId;
+            int state;
+            int returnId;
+            std::mutex accessMutex;
+            TypeThread();
+            void setState(int nstate);
+            virtual bool clear();
+            virtual std::shared_ptr<CV::Quant> copy();
+        };          
+
         ////////////////////////////
         //// PARSING
         ///////////////////////////
@@ -220,12 +269,20 @@
         namespace Prefixer {
             enum Prefixer : int {
                 UNDEFINED,
-                NAMER
+                NAMER,
+                EXPANDER,
+                PARALELLER
             };
             static std::string name(int v){
                 switch(v){
                     case CV::Prefixer::NAMER: {
                         return "NAMER";
+                    };
+                    case CV::Prefixer::EXPANDER: {
+                        return "EXPANDER";
+                    };
+                    case CV::Prefixer::PARALELLER: {
+                        return "PARALELLER";
                     };
                     case CV::Prefixer::UNDEFINED:
                     default: {
@@ -340,6 +397,7 @@
                 PROXY_DYNAMIC,                              // DATA[0] -> CTX_ID, DATA[1] -> DATA_ID, DATA[n] -> ...LITERAL, OPTIONAL: PARAM[0] -> preprocess
                 PROXY_NAMER,                                // PARAM[0] -> TARGET_INS | LITERAL[0] -> NAME                            
                 PROXY_EXPANDER,                             // PARAM[0] -> TARGET_INS
+                PROXY_PARALELER,                            // DATA[0] -> CTX_ID, DATA[1] -> DATA_ID | PARAM[0] -> TARGET_INS
                 PROXY_ACCESS,                               // DATA[0] -> CTX_ID, DATA[1] -> DATA_ID, LITERAL[0] -> NAME
             };
         }
@@ -419,6 +477,7 @@
             Context();
             Context(const std::shared_ptr<CV::Context> &head);
             std::shared_ptr<CV::TypeNumber> buildNumber(number n = 0);
+            std::shared_ptr<CV::TypeThread> buildThread();
             std::shared_ptr<CV::Quant> buildCopy(const std::shared_ptr<CV::Quant> &subject);
             std::shared_ptr<CV::Quant> buildNil();
             std::shared_ptr<CV::Quant> buildType(int type);
@@ -439,9 +498,9 @@
             std::unordered_map<unsigned, std::shared_ptr<CV::Quant>> memory;
         };
 
-        class Program {
-            public:
+        struct Program {
             std::mutex ctxMutex;
+            std::mutex threadMutex;
             unsigned entrypointIns;
             std::shared_ptr<Context> rootContext;
             std::unordered_map<unsigned, void*> loadedDynamicLibs;
@@ -451,10 +510,11 @@
             std::shared_ptr<CV::Context> &getCtx(int id);
             std::mutex insMutex;
             std::shared_ptr<CV::Instruction> &getIns(int id);
-            private:
+            void deleteThread(unsigned id);
+            void end();
             std::unordered_map<unsigned, std::shared_ptr<CV::Instruction>> instructions;
             std::unordered_map<unsigned, std::shared_ptr<CV::Context>> ctx; 
-
+            std::unordered_map<unsigned, std::thread> threads;
         };
 
         struct ControlFlow {
@@ -514,6 +574,7 @@
                     RESET
                 };
             }    
+            void sleep(uint64_t t);
             std::string setTextColor(int color, bool bold = false);
             std::string setBackgroundColor(int color);
             bool fileExists(const std::string &path);
@@ -537,7 +598,7 @@
         std::string GetLogo();
         void InitializeCore(const CV::ProgramType &prog);
         std::shared_ptr<CV::Quant> Execute(const CV::InsType &entry, const CV::ContextType &ctx, const CV::ProgramType &prog, const CV::CursorType &cursor, CFType cf);
-        CV::InsType Compile(const std::string &input, const CV::ProgramType &prog, const CV::CursorType &cursor);
+        CV::InsType Compile(const std::string &input, const CV::ProgramType &prog, const CV::CursorType &cursor, const CV::ContextType &ctx = CV::ContextType(NULL));
         CV::InsType Compile(const CV::TokenType &input, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor);
         CV::InsType Translate(const CV::TokenType &token, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor);
 
