@@ -12,8 +12,8 @@
 
     #define CV_DEFAULT_NUMBER_TYPE double
     typedef CV_DEFAULT_NUMBER_TYPE number;
-    static const number CV_RELEASE_VERSION[3] = { 1, 0, 0 };
-    static const std::string CV_RELEASE_DATE = "Oct. 1st 2025"; 
+    static const number CV_RELEASE_VERSION[3] = { 0, 9, 0 };
+    static const std::string CV_RELEASE_DATE = "Aug. 30th 2025"; 
 
     #define CV_ERROR_MSG_NOOP_NO_INSTRUCTIONS "Provided no instructions"
     #define CV_ERROR_MSG_WRONG_TYPE "Provided wrong types"
