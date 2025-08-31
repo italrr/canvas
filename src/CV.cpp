@@ -1087,6 +1087,11 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
 
             // TODO: Solve name (Could be a local or system library, probably using CV_LIB)
 
+            // system path
+            std::string usrLPath = "/usr/lib/canvas";
+            std::string usrLPath = "/lib/canvas";
+            
+
             // Load .cv
             if(isdotcv){
                 if(!CV::Tools::fileExists(fname)){
@@ -2262,6 +2267,9 @@ std::shared_ptr<CV::Quant> CV::Context::buildType(int type){
         };
         case CV::QuantType::STORE: {
             return this->buildStore();
+        };
+        case CV::QuantType::THREAD: {
+            return this->buildThread();
         };
         default:
         case CV::QuantType::NIL: {
