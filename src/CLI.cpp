@@ -140,6 +140,7 @@ int main(int argc, char* argv[]){
 					std::cout << cursor->getRaised() << std:: endl << std::endl;
 					if(useRelaxed){
 						cursor->clear();
+						continue;
 					}else{
 						program->end();
 						return 1;
@@ -151,6 +152,7 @@ int main(int argc, char* argv[]){
 					std::cout << cursor->getRaised() << std:: endl << std::endl;
 					if(useRelaxed){
 						cursor->clear();
+						continue;
 					}else{
 						program->end();
 						return 1;

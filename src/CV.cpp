@@ -492,11 +492,14 @@ CV::Cursor::Cursor(){
 }
 
 void CV::Cursor::clear(){
+    accessMutex.lock();
     this->error = false;
     this->used = false;
-    this->used = false;
+    this->shouldExit = true;
+    this->autoprint = true;
     this->subject = CV::TokenType(NULL);
     this->message = "";
+    accessMutex.unlock();
 }
 
 void CV::Cursor::setError(const std::string &title, const std::string &message, const std::shared_ptr<CV::Token> &subject){
@@ -1088,8 +1091,8 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
             // TODO: Solve name (Could be a local or system library, probably using CV_LIB)
 
             // system path
-            std::string usrLPath = "/usr/lib/canvas";
-            std::string usrLPath = "/lib/canvas";
+            // std::string usrLPath = "/usr/lib/canvas";
+            // std::string usrLPath = "/lib/canvas";
             
 
             // Load .cv
@@ -1260,6 +1263,14 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
             }         
 
             
+            if(target->type == CV::InstructionType::PROXY_PARALELER){
+
+                auto &targetData = prog->getCtx(target->data[2])->get(target->data[3]);
+                ctx->set(targetData->id, targetData);
+                ctx->setName(name, targetData->id);  
+                return target;
+
+            }else
             if(target->type == CV::InstructionType::PROXY_STATIC){
                 auto &targetData = prog->getCtx(target->data[0])->get(target->data[1]);
                 ctx->set(targetData->id, targetData);
