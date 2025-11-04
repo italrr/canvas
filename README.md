@@ -2,25 +2,25 @@ canvas [~]
 ----------
 `canvas` is a dynamic, high-level, JIT compiled, general purpose, scripting/programming language designed and developed as an extension interface or propotyping tool for scrapy solutions. The philosophy of `canvas` is to aim to be as simple as it can possibly be while also being as powerful as the user can make it out while remaining highly flexible.
 
-It's a language that was concieved when I was in college, and had had many different iterations, variations and rewrites. It's heavily inspired by other languages of my choise such as Python and JavaScript. There's also an small touch of Lisp into it.
+It's a language concieved when I was in college. It had had many different iterations, variations and rewrites. It's heavily inspired by other languages of my choice such as Python and JavaScript. There's a small touch of Lisp as well.
 
 ## Features
 - JIT Compiled
-- No VM, but it's garbage collected by C++'s std::memory through smart use of contexts
+- No VM, but it's garbage collected by C++'s std::memory through smart use of contexts.
 - Statements are structured through the usage of brackets.
-- Syntax is prefix notated
-- Lists and Stores (a type of dictionary) are first class citizens
-- **No OOP**
-- Basic types are NUMBER, STRING, LIST, STORE and FUNCTION
-- _Mostly_ immutable
-- _Mostly_ Functional
-- Recursion highly encouraged
-- Standard Library (io, fs, net, bitmap, time, math)
-- Error handling _a la_ C (checking return types). No try/catch
-- Expessive yet simple Syntax
-- Native parallelism
+- Syntax is prefix notated.
+- Lists and Stores (a type of dictionary) are first class citizens.
+- **No OOP**.
+- Basic types are **NUMBER**, **STRING**, **LIST**, **STORE** and **FUNCTION**.
+- _Mostly_ immutable.
+- _Mostly_ Functional.
+- Recursion highly encouraged.
+- Standard Library (io, fs, net, bitmap, time, math).
+- Error handling _a la_ C (checking return types). No try/catch.
+- Expessive yet simple Syntax.
+- Native parallelism.
 
-Note regarding **No OOP**: While you experiment with canvas, you might find that you can in fact store Functions into Stores, however it won't let you execute them _from_ the store. You need to "take them out" of the Store for you use to them.
+Note regarding **No OOP**: While experimenting with `canvas`, you might encounter you _can_, in fact, store Functions within Stores, however it won't let you execute them _from_ the store. You need to "take them out" of the Store for you use to them.
 ```
 [~]> [[let test [b:store [~n 10] [~k [fn [a b][+ a b]]]]]]
 [[~k [fn [a b] [+ a b]]] [~n 10]]
@@ -35,14 +35,14 @@ Note regarding **No OOP**: While you experiment with canvas, you might find that
 
 ## Syntax
 
-`canvas` follows a hierarchy of brackets to organize instructions/statements. The hierarchy goes like this:
+`canvas` follows a hierarchy of blocks(brackets) to organize instructions/statements. The hierarchy goes like this:
 
 ```
 "[ []...[] -> STATEMENT(S)/INSTRUCTION(S) ]" -> PROGRAM
 
 ```
 
-In short, the "program" itself must be within brackets, and statements themselves, must be within brackets. The interpreter/compiler is very relaxed around this, as it would try to fix informal or incomplete `canvas` code to make it work. However, the user must be cautious since there can be the occasional case of ambiguity for the interprer/compiler and the user's expectations.
+In other words, the "program" itself must be within brackets, and statements must be within brackets as well. The interpreter/compiler is very relaxed around this though, as it would try to fix informal or incomplete `canvas` code to make it work. However, the user must be wary as there can be the occasional case of ambiguity between what `canvas` interprets and the actual intention.
 
 ```
 canvas[~] v1.0.0 X86_64 [WINDOWS] released in Oct. 1st 2025
@@ -65,7 +65,7 @@ canvas[~] v1.0.0 X86_64 [WINDOWS] released in Oct. 1st 2025
 [5 9 2]
 ```
 
-The takeaway is that the user is encouraged to be explicit when needed to avoid unexpected behavior. The reason canvas is this way it's because I wanted to make it powerful, flexible, and not too cumbersome. JavaScript suffers from ambiguity causing unintended results as well, as a side-effect of its flexibility. I understand some people do not welcome this kind of quirk. But I personally find it not so much of a problem. If this is a deal breaker for you, canvas is definitely not the tool you want. 
+The takeaway is that the user is encouraged to be explicit when needed to avoid unexpected behavior. `canvas` is this way because I wanted to make it powerful, flexible, and not too cumbersome. JavaScript suffers from ambiguity causing unintended results as well, as a side-effect of its flexibility. I understand some people do not welcome this kind of quirk. But I personally find it not so much of a problem. If this is a deal breaker for you, `canvas` is definitely not the tool you want. 
 
 ## Prefixers
 
@@ -97,13 +97,13 @@ As previously mentioned, the namer simply defines a name for us to refer to a ty
 ```
 
 #### `let` alternative / Positional Parameter
-Another interesting way the Namer can be used is to essentially define variables, the same way as using `let`.
+Another interesting usage for the Namer is to define variables, the same way as using `let`.
 
 ```
 [~var 19200] # This defines a name/symbol called `var` that points the type number `19200`.
 ```
 
-It doesn't work as well for `mut`, because canvas doesn't really deal with data in names, but references, so even though you might replace a variable's name with another type, the created references will still point to the original value. This is because Namer is mostly a runtime instruction.
+It doesn't work as well for `mut`, because `canvas` doesn't really deal with data in names, but references, so even though you might replace a variable's name with another type, the created references will still point to the original value. This is because Namer is mostly a runtime instruction.
 
 In the case of Positional Parameters, let's say I have a "func" function that takes 2 paramters: param1 and param2, in that order. I can execute this function the following way
 
@@ -113,7 +113,7 @@ Function invocations create a context on the fly, so the interpreter allows me t
 
 ### Prefixer Expander
 
-The Expander Prefixer (^) allows the members of a list to be used as parameters in the current block. The syntax is `^CODE`. The code part is considered "appended body" and it's interpreted as its own code, irrespective of the current context. Meaining you could append an entire program to it, and it would interpret it as valid canvas.
+The Expander Prefixer (^) allows the members of a list to be used as parameters in the current block. The syntax is `^CODE`. The code part is considered "appended body" and it's interpreted as its own code, irrespective of the current context. Meaining you could append an entire program to it, and it would interpret it as valid `canvas`.
 
 ```
 [~]> [[1 ^[2 3]]]
@@ -143,15 +143,15 @@ nil
 The thread starts as soon as the block evaluated. You may wait for a thread to finish synchronously using the imperative `await`. 
 
 ```
+# Nested parallel jobs
 [~]> [[>> 3 [>> [await |[await |2]] 1]]]
 [1 2 3]
 [~]>
 ```
-Nested parallel jobs
  
 
 ## Dependencies
-`canvas` does not require any special dependency. It only requires a C++11 capable compiler, preferably GCC (or MINGW), but other Unix-like compilers can work. Visual Studio Compiler wouldn't compile without some work as `canvas` expects a Unix-like compiler/environment. For Windows it's recommended to use MINGW.
+`canvas` does not require any special dependency. It only needs an Unix-like C++11 capable compiler, preferably GCC (or MINGW), but other Unix-like compilers can work. Visual Studio Compiler wouldn't work without some big changes, as `canvas` expects an Unix-like environment.
 
 ## How to build
 - `cmake .`
