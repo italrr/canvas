@@ -347,7 +347,97 @@ static void __CV_STD_BMP_SET_PIXEL_AT(
     dataCtx->set(dataId, dataCtx->buildNumber(1));
 }
 
+
+static void __CV_STD_BMP_CREATE(
+    const std::vector<std::shared_ptr<CV::Instruction>> &args,
+    const std::string &name,
+    const CV::TokenType &token,
+    const CV::CursorType &cursor,
+    int execCtxId,
+    int ctxId,
+    int dataId,
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
+){
+    // Fetch context & data target
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
+
+   if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
+        !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 3, name, {"width", "height", "format"}, token, cursor)){
+        dataCtx->set(dataId, dataCtx->buildNil());
+        return;
+    }
+
+    auto param0Width = CV::Execute(args[0], execCtx, prog, cursor, st);
+    if(cursor->error){
+        dataCtx->set(dataId, dataCtx->buildNumber(0));
+        return;
+    }
+    if(!CV::ErrorCheck::ExpectsTypeAt(param0Width->type, CV::QuantType::NUMBER, 0, name, token, cursor)){
+        dataCtx->set(dataId, dataCtx->buildNil());
+        return;
+    }
+    auto width = std::static_pointer_cast<CV::TypeNumber>(param0Width)->v;
+
+
+    auto param1Height = CV::Execute(args[1], execCtx, prog, cursor, st);
+    if(cursor->error){
+        dataCtx->set(dataId, dataCtx->buildNumber(0));
+        return;
+    }
+    if(!CV::ErrorCheck::ExpectsTypeAt(param1Height->type, CV::QuantType::NUMBER, 1, name, token, cursor)){
+        dataCtx->set(dataId, dataCtx->buildNil());
+        return;
+    }
+    auto height = std::static_pointer_cast<CV::TypeNumber>(param1Height)->v;
+
+
+    auto param2Format = CV::Execute(args[2], execCtx, prog, cursor, st);
+    if(cursor->error){
+        dataCtx->set(dataId, dataCtx->buildNumber(0));
+        return;
+    }
+    if(!CV::ErrorCheck::ExpectsTypeAt(param2Format->type, CV::QuantType::STRING, 2, name, token, cursor)){
+        dataCtx->set(dataId, dataCtx->buildNil());
+        return;
+    }
+    auto format = std::static_pointer_cast<CV::TypeString>(param2Format)->v;
+
+    auto handle = dataCtx->buildStore();
+    auto pixels = dataCtx->buildList();
+    int nrChannels = 3;
+
+    if(format == "RGB"){
+        nrChannels = 3;
+    }else
+    if(format == "RGBA"){
+        nrChannels = 4;
+    }else
+    if(format == "RG"){
+        nrChannels = 2;
+    }else{
+        cursor->setError("Invalid Bitmap Format", "'"+format+"' is an undefined format", token);      
+        return;  
+    }
+
+    handle->v["width"] = dataCtx->buildNumber(width);
+    handle->v["height"] = dataCtx->buildNumber(height);
+    handle->v["channels"] = dataCtx->buildNumber(nrChannels);
+    handle->v["data"] = pixels;
+
+    int total = width * height * nrChannels;
+    for(int i = 0; i < total; ++i){
+        pixels->v.push_back(dataCtx->buildNumber(0));
+    }
+
+
+    dataCtx->set(dataId,  handle);
+}
+
+
 extern "C" void _CV_REGISTER_LIBRARY(const std::shared_ptr<CV::Program> &prog, const CV::ContextType &ctx, const CV::CursorType &cursor){
+    ctx->registerBinaryFuntion("bmp:create", (void*)__CV_STD_BMP_CREATE);
     ctx->registerBinaryFuntion("bmp:load", (void*)__CV_STD_BMP_LOAD);
     ctx->registerBinaryFuntion("bmp:write", (void*)__CV_STD_BMP_WRITE);
     ctx->registerBinaryFuntion("bmp:setp", (void*)__CV_STD_BMP_SET_PIXEL_AT);
