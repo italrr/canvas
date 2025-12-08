@@ -149,6 +149,50 @@ static void __CV_STD_JSON_WRITE(
     dataCtx->set(dataId,  dataCtx->buildNumber(1));
 }
 
+static void __CV_STD_JSON_DUMP(
+    const std::vector<std::shared_ptr<CV::Instruction>> &args,
+    const std::string &name,
+    const CV::TokenType &token,
+    const CV::CursorType &cursor,
+    int execCtxId,
+    int ctxId,
+    int dataId,
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
+){
+    // Fetch context & data target
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
+
+
+    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
+        !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, {"STORE/LIST"}, token, cursor)){
+        dataCtx->set(dataId,  dataCtx->buildNumber(0));
+        return;
+    }
+    
+    // Get store param
+    auto param0 = CV::Execute(args[0], execCtx, prog, cursor, st);
+    if(cursor->error){
+        dataCtx->set(dataId,  dataCtx->buildNumber(0));
+        return;
+    }
+    if(param0->type != CV::QuantType::LIST && param0->type != CV::QuantType::STORE){
+        cursor->setError(CV_ERROR_MSG_WRONG_TYPE, "Imperative '"+name+"' expects LIST or STORE operand at first position", token);   
+        dataCtx->set(dataId,  dataCtx->buildNumber(0));
+        return;
+    }
+
+    // Build Json hierarchy
+    auto obj = buildNode(name, param0, token, cursor);
+    if(cursor->error){
+        dataCtx->set(dataId,  dataCtx->buildNumber(0));
+        return;
+    }
+
+    dataCtx->set(dataId,  dataCtx->buildString(json11::Json(obj).dump()));
+}
+
 static void __CV_STD_JSON_PARSE_FILE(
     const std::vector<std::shared_ptr<CV::Instruction>> &args,
     const std::string &name,
@@ -201,7 +245,56 @@ static void __CV_STD_JSON_PARSE_FILE(
     dataCtx->set(dataId,  unwrapJson(name, json, token, dataCtx, cursor));
 }
 
+
+static void __CV_STD_JSON_PARSE(
+    const std::vector<std::shared_ptr<CV::Instruction>> &args,
+    const std::string &name,
+    const CV::TokenType &token,
+    const CV::CursorType &cursor,
+    int execCtxId,
+    int ctxId,
+    int dataId,
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
+){
+    // Fetch context & data target
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
+
+
+    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
+        !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, {"BODY"}, token, cursor)){
+        dataCtx->set(dataId,  dataCtx->buildNumber(0));
+        return;
+    }
+
+    // Get filename param
+    auto param0Body = CV::Execute(args[0], execCtx, prog, cursor, st);
+    if(cursor->error){
+        dataCtx->set(dataId,  dataCtx->buildNumber(0));  
+        return;
+    }
+    if(!CV::ErrorCheck::ExpectsTypeAt(param0Body->type, CV::QuantType::STRING, 0, name, token, cursor)){
+        dataCtx->set(dataId,  dataCtx->buildNumber(0));
+        return;
+    }    
+
+    auto body = std::static_pointer_cast<CV::TypeString>(param0Body)->v;
+
+    std::string err;
+    auto json = json11::Json::parse(body, err);
+    if(err.size() > 0){
+        cursor->setError("Bad JSON Input", "Imperative '"+name+"' was provided an invalid JSON input: '"+err+"'", token);
+        dataCtx->set(dataId,  dataCtx->buildNumber(0));
+        return;
+    }
+
+    dataCtx->set(dataId,  unwrapJson(name, json, token, dataCtx, cursor));
+}
+
 extern "C" void _CV_REGISTER_LIBRARY(const std::shared_ptr<CV::Program> &prog, const CV::ContextType &ctx, const CV::CursorType &cursor){
     ctx->registerBinaryFuntion("json:write", (void*)__CV_STD_JSON_WRITE);
+    ctx->registerBinaryFuntion("json:dump", (void*)__CV_STD_JSON_DUMP);
     ctx->registerBinaryFuntion("json:load", (void*)__CV_STD_JSON_PARSE_FILE);
+    ctx->registerBinaryFuntion("json:parse", (void*)__CV_STD_JSON_PARSE);
 }

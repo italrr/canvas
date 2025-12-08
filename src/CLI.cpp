@@ -122,17 +122,17 @@ int main(int argc, char* argv[]){
 
 		auto cursor = std::make_shared<CV::Cursor>();
 		auto program = std::make_shared<CV::Program>();
-		auto st = std::make_shared<CV::ControlFlow>();
 		program->rootContext = program->createContext();		
 		CV::InitializeCore(program);
 
 		printVersion(false, useRelaxed ? "RELAXED" : "");
 
 		while(true){
+			auto st = std::make_shared<CV::ControlFlow>();
 			std::string input = "";
 			std::cout << CV::GetLogo() << "> ";
 			std::getline (std::cin, input);
-
+			
 			if(input.size() > 0){
 				// Compile
 				auto entrypoint = CV::Compile(input, program, cursor);

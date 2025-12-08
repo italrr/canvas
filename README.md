@@ -1,8 +1,8 @@
 canvas [~]
 ----------
-`canvas` is a dynamic, high-level, JIT compiled, general purpose, scripting/programming language designed and developed as an extension interface or propotyping tool for scrapy solutions. The philosophy of `canvas` is to aim to be as simple as it can possibly be while also being as powerful as the user can make it out while remaining highly flexible.
+`canvas` is a dynamic, high-level, JIT compiled, general purpose, scripting/programming language designed and developed as an extension interface or propotyping tool for scrapy solutions. The philosophy of `canvas` is to aim to be as simple as it can possibly be while also being as powerful as the user can make it out while remaining highly flexible and uncumbersome.
 
-It's a language concieved when I was in college. It had had many different iterations, variations and rewrites. It's heavily inspired by other languages of my choice such as Python and JavaScript. There's a small touch of Lisp as well.
+It's a language concieved when I was in college. It had had many different iterations, variations and rewrites. It's heavily inspired by other languages of my choice such as Python and JavaScript. There's a small touch of Lisp as well. This final design, I believe, fulfills my vision for this project.
 
 ## Features
 - JIT Compiled
@@ -15,12 +15,13 @@ It's a language concieved when I was in college. It had had many different itera
 - _Mostly_ immutable.
 - _Mostly_ Functional.
 - Recursion highly encouraged.
-- Standard Library (io, fs, net, bitmap, time, math).
+- Standard Library (io, fs, net, bitmap, time, math). WIP.
 - Error handling _a la_ C (checking return types). No try/catch.
 - Expessive yet simple Syntax.
 - Native parallelism.
 
-Note regarding **No OOP**: While experimenting with `canvas`, you might encounter you _can_, in fact, store Functions within Stores, however it won't let you execute them _from_ the store. You need to "take them out" of the Store for you use to them.
+Note regarding **No OOP**: You _can_, in fact, store Functions within Stores, however it won't let you execute them _from_ the store. You need to "take them out" of the Store for you use to them.
+
 ```
 [~]> [[let test [b:store [~n 10] [~k [fn [a b][+ a b]]]]]]
 [[~k [fn [a b] [+ a b]]] [~n 10]]
@@ -35,10 +36,10 @@ Note regarding **No OOP**: While experimenting with `canvas`, you might encounte
 
 ## Syntax
 
-`canvas` follows a hierarchy of blocks(brackets) to organize instructions/statements. The hierarchy goes like this:
+`canvas` follows a hierarchy of blocks(brackets) to organize statements. The hierarchy goes like this:
 
 ```
-"[ []...[] -> STATEMENT(S)/INSTRUCTION(S) ]" -> PROGRAM
+"[ []...[] -> STATEMENT(S) ]" -> PROGRAM
 
 ```
 

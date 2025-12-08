@@ -18,6 +18,7 @@
 #endif
 
 static bool UseColorOnText = false;
+static std::string CV_LIB_HOME = "./";
 
 struct InvokeThread {
     CV::TypeThread *core;
@@ -292,6 +293,11 @@ namespace CV {
 			stat(path.c_str(), &tt);
 			return S_ISREG(tt.st_mode);	            
         }
+        
+		std::string fileExtension(const std::string &filename){
+			int k = filename.rfind(".");
+			return k != -1 ? filename.substr(k+1, filename.length()-1) : "";
+		}
 
         std::string readFile(const std::string &path){
             std::string buffer;
@@ -1059,8 +1065,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
         /*
             BRING
         */
-        if(token->first== "bring" || token->first == "bring:dynamic-library"){
-            bool isdotcv = token->first == "bring";
+        if(token->first== "bring"){
             if(token->inner.size() != 1){
                 cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "'"+token->first+"' expects exactly 2 tokens ("+token->first+" NAME)", token);
                 return prog->createInstruction(CV::InstructionType::NOOP, token);
@@ -1088,56 +1093,113 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
             // Get symbolic or literal
             auto fname = std::static_pointer_cast<CV::TypeString>(fnamev)->v;
 
-            // TODO: Solve name (Could be a local or system library, probably using CV_LIB)
-
-            // system path
-            // std::string usrLPath = "/usr/lib/canvas";
-            // std::string usrLPath = "/lib/canvas";
-            
-
-            // Load .cv
-            if(isdotcv){
-                if(!CV::Tools::fileExists(fname)){
-                    cursor->setError(CV_ERROR_MSG_LIBRARY_NOT_VALID, "No dynamic library '"+fname+"' was found", token);
-                    return prog->createInstruction(CV::InstructionType::NOOP, token);
-                }
-                int id = CV::Import(fname, prog, ctx, cursor);
-            }else{
-            // Load .so/.dll
-                std::string path = "./lib/" + fname;
-                switch(CV::PLATFORM){
-                    case CV::SupportedPlatform::LINUX: {
-                        path += ".so";
-                    } break; 
-                    case CV::SupportedPlatform::WINDOWS: {
-                        path += ".dll";
-                    } break;
-                    case CV::SupportedPlatform::OSX: {
-                        // TODO
-                    } break;                
-                    default:
-                    case CV::SupportedPlatform::UNKNOWN: {
-                        fprintf(stderr, "%s: Unable to load dyanmic library for this platform (UNKNOWN/UNDEFINED).", token->first.c_str());
-                        std::exit(1);
-                    } break;                        
-                }
-
-                if(!CV::Tools::fileExists(path)){
-                    cursor->setError(CV_ERROR_MSG_LIBRARY_NOT_VALID, "No dynamic library '"+fname+"' was found", token);
-                    return prog->createInstruction(CV::InstructionType::NOOP, token);
-                }
-
-                int id = CV::ImportDynamicLibrary(path, fname, prog, ctx, cursor);
-
+            // Does it include .cv?
+            if(CV::Tools::fileExtension(fname) == ""){
+                fname += ".cv";
             }
+
+            // Is it a local file?
+            if(CV::Tools::fileExists("./"+fname)){
+                fname = "./"+fname;
+            }else{
+            // Then it must be a 'lib/' library
+                fname = CV_LIB_HOME+"/"+fname;
+            }
+
+            // Does it exist at all?
+            if(!CV::Tools::fileExists(fname)){
+                cursor->setError(CV_ERROR_MSG_LIBRARY_NOT_VALID, "No canvas library '"+fname+"' was found", token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
+
+            // Load it
+            int id = CV::Import(fname, prog, ctx, cursor);
             if(cursor->error){
                 return prog->createInstruction(CV::InstructionType::NOOP, token);
             }
 
             auto ins = prog->createInstruction(CV::InstructionType::LIBRAY_IMPORT, token);
             ins->data.push_back(ctx->id);
-            ins->data.push_back(0); // library id, TODO
-            ins->data.push_back(isdotcv);
+            ins->data.push_back(id);
+            ins->data.push_back(true);
+            ins->literal.push_back(fname);
+            return ins;
+        }else
+        /*
+            BRING "dynamic-library"
+        */
+        if(token->first == "bring:dynamic-library"){
+            if(token->inner.size() != 1){
+                cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "'"+token->first+"' expects exactly 2 tokens ("+token->first+" NAME)", token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
+
+            auto target = CV::Translate(token->inner[0], prog, ctx, cursor);
+            if(cursor->error){
+                cursor->subject = token;
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
+            
+            if(!CV::ErrorCheck::ExpectNoPrefixer(token->first, {target}, token, cursor)){
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
+            auto st = std::make_shared<CV::ControlFlow>();
+            auto fnamev = CV::Execute(target, ctx, prog, cursor, st);
+            if(cursor->error){
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
+
+            if(!CV::ErrorCheck::ExpectsTypeAt(fnamev->type, CV::QuantType::STRING, 0, token->first, token, cursor)){
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
+
+            // Get symbolic or literal
+            auto fname = std::static_pointer_cast<CV::TypeString>(fnamev)->v;
+
+            // Does it include .cv?
+            if(CV::Tools::fileExtension(fname) == ""){
+                switch(CV::PLATFORM){
+                    case CV::SupportedPlatform::LINUX: {
+                        fname += ".so";
+                    } break; 
+                    case CV::SupportedPlatform::WINDOWS: {
+                        fname += ".dll";
+                    } break;
+                    case CV::SupportedPlatform::OSX: {
+                        // TODO
+                    } break;                
+                    default:
+                    case CV::SupportedPlatform::UNKNOWN: {
+                        fprintf(stderr, "Failed to infere dynamic library platform in '%s'", token->first.c_str());
+                        std::exit(1);
+                    } break;                        
+                }
+            }
+
+            // Is it a local file?
+            if(CV::Tools::fileExists("./"+fname)){
+                fname = "./"+fname;
+            }else{
+            // Then it must be a 'lib/' library
+                fname = CV_LIB_HOME+"/"+fname;
+            }
+
+            // Does it exist at all?
+            if(!CV::Tools::fileExists(fname)){
+                cursor->setError(CV_ERROR_MSG_LIBRARY_NOT_VALID, "No dynamic library '"+fname+"' was found", token);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
+
+            // Load it
+            int id = CV::ImportDynamicLibrary(fname, fname, prog, ctx, cursor);
+            if(cursor->error){
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
+
+            auto ins = prog->createInstruction(CV::InstructionType::LIBRAY_IMPORT, token);
+            ins->data.push_back(ctx->id);
+            ins->data.push_back(id); 
+            ins->data.push_back(false);
             ins->literal.push_back(fname);
             return ins;
         }else
@@ -2558,6 +2620,10 @@ std::string CV::GetLogo(){
     std::string cv = CV::Tools::setTextColor(Tools::Color::CYAN) + "~" + CV::Tools::setTextColor(Tools::Color::RESET);
     std::string end = CV::Tools::setTextColor(Tools::Color::MAGENTA) + "]" + CV::Tools::setTextColor(Tools::Color::RESET);
     return start+cv+end;
+}
+
+void CV::SetCanvasLibHome(const std::string &path){
+    CV_LIB_HOME = path;
 }
 
 // int main(){

@@ -1,5 +1,7 @@
 #include <stdio.h>
 #include <cmath>
+#include <cstdlib>
+
 #include "CV.hpp"
 
 namespace CV {
@@ -1574,17 +1576,50 @@ static void __CV_CORE_AWAIT(
 }
 
 
+static void __CV_CORE_TYPEOF(
+    const std::vector<std::shared_ptr<CV::Instruction>> &args,
+    const std::string &name,
+    const CV::TokenType &token,
+    const CV::CursorType &cursor,
+    int execCtxId,
+    int ctxId,
+    int dataId,
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
+){
+    // Fetch context & data target
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
+
+    if( !CV::ErrorCheck::ExpectsOperands(args.size(), 1, name, token, cursor) ){
+        return;
+    }    
+
+    auto subject = CV::Execute(args[0], execCtx, prog, cursor, st);
+    if(cursor->error){
+        return;
+    }
+
+    // Fulfill promise in context
+    dataCtx->set(dataId, dataCtx->buildString( CV::QuantType::name(subject->type) ));
+}
+
 
 void CV::InitializeCore(const CV::ProgramType &target){
     /*
-        PRINT
+        SET UP PATHS    
     */
-    target->rootContext->registerBinaryFuntion("print", (void*)__CV_CORE_PRINT);
+    char *cvLibPath = getenv("CANVAS_LIB_HOME");
+    CV::SetCanvasLibHome(cvLibPath ? std::string(cvLibPath) : "./lib");
+
 
     /*
-       THREAD
+       CORE
     */
+    target->rootContext->registerBinaryFuntion("print", (void*)__CV_CORE_PRINT);
     target->rootContext->registerBinaryFuntion("await", (void*)__CV_CORE_AWAIT);
+    target->rootContext->registerBinaryFuntion("typeof", (void*)__CV_CORE_TYPEOF);
+
 
     /*
 

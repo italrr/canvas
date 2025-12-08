@@ -12,7 +12,7 @@
 
     #define CV_DEFAULT_NUMBER_TYPE double
     typedef CV_DEFAULT_NUMBER_TYPE number;
-    static const number CV_RELEASE_VERSION[3] = { 0, 9, 0 };
+    static const number CV_RELEASE_VERSION[3] = { 0, 9, 1 };
     static const std::string CV_RELEASE_DATE = "Aug. 30th 2025"; 
 
     #define CV_ERROR_MSG_NOOP_NO_INSTRUCTIONS "Provided no instructions"
@@ -136,6 +136,9 @@
                     };
                     case QuantType::NUMBER: {
                         return "NUMBER";
+                    };
+                    case QuantType::STRING: {
+                        return "STRING";
                     };
                     case QuantType::LIST: {
                         return "LIST";
@@ -583,6 +586,7 @@
             bool isValidVarName(const std::string &name);
             std::string lower(const std::string &in);
             std::string upper(const std::string &in);
+            std::string fileExtension(const std::string &filename);
         }
 
         ////////////////////////////
@@ -601,7 +605,7 @@
         CV::InsType Compile(const std::string &input, const CV::ProgramType &prog, const CV::CursorType &cursor, const CV::ContextType &ctx = CV::ContextType(NULL));
         CV::InsType Compile(const CV::TokenType &input, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor);
         CV::InsType Translate(const CV::TokenType &token, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor);
-
+        void SetCanvasLibHome(const std::string &path);
     }
 
 #endif
