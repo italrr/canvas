@@ -1099,6 +1099,91 @@ static void __CV_CORE_LIST_RESERVE(
     dataCtx->set(dataId, result);
 }
 
+static void __CV_CORE_LIST_SUB(
+    const std::vector<std::shared_ptr<CV::Instruction>> &args,
+    const std::string &name,
+    const CV::TokenType &token,
+    const CV::CursorType &cursor,
+    int execCtxId,
+    int ctxId,
+    int dataId,
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::CFType &st
+){
+    // Fetch context & data target
+    auto &dataCtx = prog->getCtx(ctxId);
+    auto &execCtx = prog->getCtx(execCtxId);
+
+    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
+        !CV::ErrorCheck::ExpectsNoMoreOperands(args.size(), 3, name, token, cursor)){
+        return;
+    }
+
+    auto result = dataCtx->buildList();
+    
+    auto listBranch = CV::Execute(args[0], execCtx, prog, cursor, st);
+    if(cursor->error){
+        return;
+    }
+    if(!CV::ErrorCheck::ExpectsTypeAt(listBranch->type, CV::QuantType::LIST, 0, name, token, cursor)){
+        return;
+    }
+    auto list = std::static_pointer_cast<CV::TypeList>(listBranch);
+
+
+    auto fromBranch = CV::Execute(args[1], execCtx, prog, cursor, st);
+    if(cursor->error){
+        return;
+    }
+    if(!CV::ErrorCheck::ExpectsTypeAt(fromBranch->type, CV::QuantType::NUMBER, 1, name, token, cursor)){
+        return;
+    }
+    auto from = std::static_pointer_cast<CV::TypeNumber>(fromBranch)->v;
+
+
+    int to = list->v.size();
+    if(args.size() > 2){
+        auto toBranch = CV::Execute(args[2], execCtx, prog, cursor, st);
+        if(cursor->error){
+            return;
+        }
+        if(!CV::ErrorCheck::ExpectsTypeAt(toBranch->type, CV::QuantType::NUMBER, 2, name, token, cursor)){
+            return;
+        }
+        to = std::static_pointer_cast<CV::TypeNumber>(toBranch)->v;   
+    }
+
+    if(from < 0){
+        cursor->setError(CV_ERROR_MSG_INVALID_INDEX, "Imperative '"+name+"' expects non-negative 'from' number at operand 1: operand is "+std::to_string(from), token);
+        return;
+    }
+    if(from >= list->v.size()){
+        cursor->setError(CV_ERROR_MSG_INVALID_INDEX, "Imperative '"+name+"' expects 'from' number at operand 1 within bounds (size:"+std::to_string(list->v.size())+"): operand is "+std::to_string(from), token);
+        return;
+    }
+
+    if(to < 0){
+        cursor->setError(CV_ERROR_MSG_INVALID_INDEX, "Imperative '"+name+"' expects non-negative 'to' number at operand 2: operand is "+std::to_string(to), token);
+        return;
+    }
+    if(to < from){
+        cursor->setError(CV_ERROR_MSG_INVALID_INDEX, "Imperative '"+name+"' expects 'to' number at operand 2 to be more than 'from': operand is "+std::to_string(to), token);
+        return;
+    }
+    if(to > list->v.size()){
+        cursor->setError(CV_ERROR_MSG_INVALID_INDEX, "Imperative '"+name+"' expects 'to' number at operand 2 within bounds (size:"+std::to_string(list->v.size())+"): operand is "+std::to_string(to), token);
+        return;
+    }
+    
+    
+    for(int i = from; i <= to; ++i){
+        result->v.push_back(list->v[i]);
+    }
+
+    // Fulfill promise in context
+    dataCtx->set(dataId, result);
+}
+
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //
 //  MUTATORS
@@ -1663,6 +1748,7 @@ void CV::InitializeCore(const CV::ProgramType &target){
     target->rootContext->registerBinaryFuntion("len", (void*)__CV_CORE_LIST_LENGTH);
     target->rootContext->registerBinaryFuntion("splice", (void*)__CV_CORE_LIST_SPLICE);
     target->rootContext->registerBinaryFuntion("l-rev", (void*)__CV_CORE_LIST_RESERVE);
+    target->rootContext->registerBinaryFuntion("l-sub", (void*)__CV_CORE_LIST_SUB);
 
     /*
 

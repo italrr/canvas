@@ -476,6 +476,9 @@
             std::mutex memoryMutex;
             std::mutex nameMutex;
             std::mutex prefetchMutex;
+            std::unordered_map<unsigned, std::vector<unsigned>> prefetched;
+            std::unordered_map<std::string, unsigned> names;
+            std::unordered_map<unsigned, std::shared_ptr<CV::Quant>> memory;
             std::shared_ptr<CV::Context> head;
             Context();
             Context(const std::shared_ptr<CV::Context> &head);
@@ -496,9 +499,6 @@
             std::vector<unsigned> getPrefetch(unsigned id);
             bool isPrefetched(unsigned id);
             void clearPrefetch();
-            std::unordered_map<unsigned, std::vector<unsigned>> prefetched;
-            std::unordered_map<std::string, unsigned> names;
-            std::unordered_map<unsigned, std::shared_ptr<CV::Quant>> memory;
         };
 
         struct Program {
@@ -518,6 +518,7 @@
             std::unordered_map<unsigned, std::shared_ptr<CV::Instruction>> instructions;
             std::unordered_map<unsigned, std::shared_ptr<CV::Context>> ctx; 
             std::unordered_map<unsigned, std::thread> threads;
+            void quickGC();
         };
 
         struct ControlFlow {

@@ -18,15 +18,16 @@ def run_test(test):
     return (( p.stdout.replace('\n', '') == test.expected if test.expEqual else p.stdout != test.expected ), p.stdout.replace('\n', ''))
 
 cases = [
-
+    TestCase("1", "1", True),
+    TestCase("[1 2 3]", "[1 2 3]", True),
+    TestCase("'string'", "'string'", True),
+    TestCase("[[typeof [[~n 10][~k 21]]]]", "'STORE'", True),
+    TestCase("[[let test [fn [a b][+ a b]]]]", "[fn [a b] [+ a b]]", True),
     TestCase("+ 2 2", "4", True),
     TestCase("** 4", "16", True),
     TestCase("[[// [** 4]]]", "8", True),
     TestCase("+ [+ 1 2] 3", "6", True),
     TestCase("[[>> 3 [>> [await |[await |2]] 1]]]", "[1 2 3]", True),
-
-    
-  
 ]
 
 print("ABOUT TO START TEST CASES FOR CANVAS")

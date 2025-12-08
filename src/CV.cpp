@@ -2313,7 +2313,7 @@ std::shared_ptr<CV::TypeNumber> CV::Context::buildNumber(number n){
 std::shared_ptr<CV::TypeThread> CV::Context::buildThread(){
     auto t = std::make_shared<CV::TypeThread>();
     this->memoryMutex.lock();
-    this->memory[t->id] = t;
+    this->memory[t->id] = t; 
     this->memoryMutex.unlock();
     t->threadId = GEN_ID();
     return t; 
@@ -2482,12 +2482,30 @@ std::shared_ptr<CV::Context> CV::Program::createContext(const std::shared_ptr<CV
 bool CV::Program::deleteContext(int id){
     ctxMutex.lock();
     if(this->ctx.count(id) > 0){
+        this->ctx[id]->clearPrefetch();
         this->ctx.erase(id); // Careful!! TODO: Check
         ctxMutex.unlock();
         return true;
     }
     ctxMutex.unlock();
     return false;
+}
+
+void CV::Program::quickGC(){
+    // ctxMutex.lock();
+    // std::vector<int> actx;
+    // for(auto &it : this->ctx){
+    //     actx.push_back(it.first);
+    // }
+    // for(int i = 0; i < actx.size(); ++i){
+    //     auto &cctx = this->ctx[actx[i]];
+    //     cctx->memoryMutex.lock();
+    //     for(auto &it : cctx->memory){
+    //         if(it.second.use_count)
+    //     }
+    //     cctx->memoryMutex.unlock();
+    // }
+    // ctxMutex.unlock();
 }
 
 std::shared_ptr<CV::Context> &CV::Program::getCtx(int id){
