@@ -124,6 +124,24 @@ int main(int argc, char* argv[]){
 		auto program = std::make_shared<CV::Program>();
 		program->rootContext = program->createContext();		
 		CV::InitializeCore(program);
+		
+		// Append easy "exit" function for REPL
+		program->rootContext->registerBinaryFuntion("exit", [&](
+			const std::vector<std::shared_ptr<CV::Instruction>> &args,
+			const std::string &name,
+			const CV::TokenType &token,
+			const CV::CursorType &cursor,
+			int execCtxId,
+			int ctxId,
+			int dataId,
+			const std::shared_ptr<CV::Program> &prog,
+			const CV::CFType &st
+		){
+    		auto &dataCtx = prog->getCtx(ctxId);
+    		auto &execCtx = prog->getCtx(execCtxId);
+			dataCtx->buildNil();
+			std::exit(1);
+		});
 
 		printVersion(false, useRelaxed ? "RELAXED" : "");
 
@@ -163,6 +181,7 @@ int main(int argc, char* argv[]){
 					std::cout << CV::QuantToText(result) << std::endl;
 				}
 			}
+			program->quickGC();
 		}
 		program->end();
 		return cursor->error && !useRelaxed ? 1 : 0;

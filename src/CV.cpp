@@ -377,6 +377,9 @@ CV::TypeList::TypeList() : CV::Quant() {
     this->type = CV::QuantType::LIST;
 }
 bool CV::TypeList::clear(){
+    for(int i = 0; i < this->v.size(); ++i){
+        this->v[i]->clear();
+    }
     v.clear();
     return true;
 }
@@ -400,6 +403,9 @@ CV::TypeStore::TypeStore(){
 }
 
 bool CV::TypeStore::clear(){
+    for(auto &it : this->v){
+        it.second->clear();
+    }
     v.clear();
     return true;
 }
@@ -439,9 +445,11 @@ std::shared_ptr<CV::Quant> CV::TypeFunction::copy(){
 // BINARY FUNCTION
 CV::TypeFunctionBinary::TypeFunctionBinary(){
     this->type = CV::QuantType::BINARY_FUNCTION;
+    this->ref = NULL;
 }
 
 bool CV::TypeFunctionBinary::clear(){
+    this->ref = NULL;
     return true;
 }
 
@@ -451,6 +459,7 @@ std::shared_ptr<CV::Quant> CV::TypeFunctionBinary::copy(){
     cpy->entrypoint = this->entrypoint;
     cpy->ctxId = this->ctxId;
     cpy->ref = this->ref;
+    cpy->lambda = this->lambda;
     cpy->body = this->body->copy();
     return cpy;
 }
@@ -880,6 +889,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
     auto bListConstruct = [prog, cursor](const CV::TokenType &origin, std::vector<CV::TokenType> &tokens, const CV::ContextType &ctx){
         auto ins = prog->createInstruction(CV::InstructionType::CONSTRUCT_LIST, origin);
         auto list = ctx->buildList();
+        ctx->set(list->id, list);
         ins->data.push_back(ctx->id);
         ins->data.push_back(list->id);
         for(int i = 0; i < tokens.size(); ++i){
@@ -912,6 +922,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
     auto bStoreConstruct = [prog, cursor](const std::string &name, const CV::TokenType &origin, std::vector<CV::TokenType> &tokens, const CV::ContextType &ctx){
         auto ins = prog->createInstruction(CV::InstructionType::CONSTRUCT_STORE, origin);
         auto store = ctx->buildStore();
+        ctx->set(store->id, store);
         ins->data.push_back(ctx->id);
         ins->data.push_back(store->id);
         for(int i = 0; i < tokens.size(); ++i){
@@ -1362,6 +1373,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
             }else{
                 auto ins = prog->createInstruction(CV::InstructionType::PROXY_STATIC, token);
                 auto data = ctx->buildNil();
+                ctx->set(data->id, data);
                 ins->data.push_back(ctx->id);
                 ins->data.push_back(data->id);
                 return ins;
@@ -1376,6 +1388,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
             }else{
                 auto ins = prog->createInstruction(CV::InstructionType::PROXY_STATIC, token);
                 auto data = ctx->buildNumber(std::stod(token->first));
+                ctx->set(data->id, data);
                 ins->data.push_back(ctx->id);
                 ins->data.push_back(data->id);
                 return ins;
@@ -1391,6 +1404,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                 auto ins = prog->createInstruction(CV::InstructionType::PROXY_STATIC, token);
                 auto string = ctx->buildString("");
                 string->v = token->first.substr(1, token->first.length() - 2);
+                ctx->set(string->id, string);
                 ins->data.push_back(ctx->id);
                 ins->data.push_back(string->id);
                 return ins;
@@ -1425,6 +1439,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
             }
 
             auto data = tctx->buildThread();
+            tctx->set(data->id, data);
             data->ctxId = tctx->id;
             data->entrypoint = entrypoint->id;
 
@@ -2187,13 +2202,17 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
                 }
             }
 
-
-            // Cast ref into pointer function
-            void (*ref)(CV_BINARY_FN_PARAMS) = (void (*)(CV_BINARY_FN_PARAMS))fn->ref;
-
             // Invoke it in a temporary context
             auto tempCtx = prog->createContext(paramCtx);
-            ref(arguments, fn->name, ins->token, cursor, tempCtx->id, targetCtxId, targetDataId, prog, st);
+            if(fn->ref == NULL){
+                // Use lambda
+                fn->lambda(arguments, fn->name, ins->token, cursor, tempCtx->id, targetCtxId, targetDataId, prog, st);
+            }else{
+                // Cast ref into pointer function
+                void (*ref)(CV_BINARY_FN_PARAMS) = (void (*)(CV_BINARY_FN_PARAMS))fn->ref;
+                // Execute
+                ref(arguments, fn->name, ins->token, cursor, tempCtx->id, targetCtxId, targetDataId, prog, st);
+            }
             if(cursor->error){
                 st->state = CV::ControlFlowState::CRASH;
             }             
@@ -2260,6 +2279,14 @@ std::shared_ptr<CV::Quant> CV::Execute(const CV::InsType &entry, const CV::Conte
         break;
     }
 
+    // prog->gcOpsMutex.lock();
+    // for(int i = 0; i < prog->gcOps.size(); ++i){
+    //     auto &op = prog->gcOps[i];
+    //     op(prog);
+    // }
+    // prog->gcOps.clear();
+    // prog->gcOpsMutex.unlock();
+
     return result;
 }
 
@@ -2286,44 +2313,41 @@ std::shared_ptr<CV::Quant> CV::Context::buildCopy(const std::shared_ptr<CV::Quan
             for(int i = 0; i < orig->v.size(); ++i){
                 target->v.push_back(this->buildCopy(orig->v[i]));
             }
-        };
+        } break;
         case CV::QuantType::STORE: {
             auto orig = std::static_pointer_cast<CV::TypeStore>(subject);
             auto target = std::static_pointer_cast<CV::TypeStore>(c);
             for(auto &it : orig->v){
                 target->v[it.first] = this->buildCopy(it.second);
             }
-        };
+        } break;
     }
-    this->memoryMutex.lock();
-    this->memory[c->id] = c;
-    this->memoryMutex.unlock();
     return c;
 }
 
 std::shared_ptr<CV::TypeNumber> CV::Context::buildNumber(number n){
     auto t = std::make_shared<CV::TypeNumber>();
-    this->memoryMutex.lock();
-    this->memory[t->id] = t;
-    this->memoryMutex.unlock();
+    // this->memoryMutex.lock();
+    // this->memory[t->id] = t;
+    // this->memoryMutex.unlock();
     t->v = n;
     return t;
 }
 
 std::shared_ptr<CV::TypeThread> CV::Context::buildThread(){
     auto t = std::make_shared<CV::TypeThread>();
-    this->memoryMutex.lock();
-    this->memory[t->id] = t; 
-    this->memoryMutex.unlock();
+    // this->memoryMutex.lock();
+    // this->memory[t->id] = t; 
+    // this->memoryMutex.unlock();
     t->threadId = GEN_ID();
     return t; 
 }
 
 std::shared_ptr<CV::Quant> CV::Context::buildNil(){
     auto t = std::make_shared<CV::Quant>();
-    this->memoryMutex.lock();
-    this->memory[t->id] = t;
-    this->memoryMutex.unlock();
+    // this->memoryMutex.lock();
+    // this->memory[t->id] = t;
+    // this->memoryMutex.unlock();
     return t;
 }
 
@@ -2353,18 +2377,18 @@ std::shared_ptr<CV::Quant> CV::Context::buildType(int type){
 
 std::shared_ptr<CV::TypeString> CV::Context::buildString(const std::string &s){
     auto t = std::make_shared<CV::TypeString>();
-    this->memoryMutex.lock();
-    this->memory[t->id] = t;
-    this->memoryMutex.unlock();
+    // this->memoryMutex.lock();
+    // this->memory[t->id] = t;
+    // this->memoryMutex.unlock();
     t->v = s;
     return t;
 }
 
 std::shared_ptr<CV::TypeList> CV::Context::buildList(const std::vector<std::shared_ptr<CV::Quant>> &list){
     auto t = std::make_shared<TypeList>();
-    this->memoryMutex.lock();
-    this->memory[t->id] = t;
-    this->memoryMutex.unlock();
+    // this->memoryMutex.lock();
+    // this->memory[t->id] = t;
+    // this->memoryMutex.unlock();
     for(int i = 0; i < list.size(); ++i){
         t->v.push_back(list[i]);
     }
@@ -2373,9 +2397,9 @@ std::shared_ptr<CV::TypeList> CV::Context::buildList(const std::vector<std::shar
 
 std::shared_ptr<CV::TypeStore> CV::Context::buildStore(const std::unordered_map<std::string, std::shared_ptr<CV::Quant>> &store){
     auto t = std::make_shared<TypeStore>();
-    this->memoryMutex.lock();
-    this->memory[t->id] = t;
-    this->memoryMutex.unlock();
+    // this->memoryMutex.lock();
+    // this->memory[t->id] = t;
+    // this->memoryMutex.unlock();
     for(auto &it : store){
         t->v[it.first] = it.second;
     }
@@ -2439,6 +2463,18 @@ std::shared_ptr<CV::TypeFunctionBinary> CV::Context::registerBinaryFuntion(const
     return fn;
 }
 
+std::shared_ptr<CV::TypeFunctionBinary> CV::Context::registerBinaryFuntion(const std::string &name, const CV::BinaryFunctionLambda &lambda){
+    auto fn = std::make_shared<CV::TypeFunctionBinary>();
+    fn->lambda = lambda;
+    fn->ctxId = this->id;
+    fn->name = name;
+    this->memoryMutex.lock();
+    this->memory[fn->id] = fn;
+    this->memoryMutex.unlock();
+    this->names[name] = fn->id;
+    return fn;  
+}
+
 // Name's context Id and data Id upwards
 std::vector<int> CV::Context::getName(const std::string &name, bool local){
     this->nameMutex.lock();
@@ -2452,6 +2488,19 @@ std::vector<int> CV::Context::getName(const std::string &name, bool local){
     this->nameMutex.unlock();
     return (this->head.get() && !local ? this->head->getName(name) : std::vector<int>({}));
 }
+
+bool CV::Context::isNamed(int id){
+    this->nameMutex.lock();
+    for(auto &it : this->names){
+        if(it.second == id){
+            this->nameMutex.unlock();
+            return true;
+        }
+    }
+    this->nameMutex.unlock();
+    return false;
+}
+
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -2491,21 +2540,49 @@ bool CV::Program::deleteContext(int id){
     return false;
 }
 
+void CV::Program::issueGCOperation(const CV::GCOperation &op){
+    this->gcOpsMutex.lock();
+    this->gcOps.push_back(op);
+    this->gcOpsMutex.unlock();
+}
+
 void CV::Program::quickGC(){
-    // ctxMutex.lock();
-    // std::vector<int> actx;
-    // for(auto &it : this->ctx){
-    //     actx.push_back(it.first);
-    // }
-    // for(int i = 0; i < actx.size(); ++i){
-    //     auto &cctx = this->ctx[actx[i]];
-    //     cctx->memoryMutex.lock();
-    //     for(auto &it : cctx->memory){
-    //         if(it.second.use_count)
-    //     }
-    //     cctx->memoryMutex.unlock();
-    // }
-    // ctxMutex.unlock();
+    ctxMutex.lock();
+    // Clear trailing data
+    std::vector<int> actx;
+    std::vector<int> dctx;
+    for(auto &it : this->ctx){
+        actx.push_back(it.first);
+    }
+    for(int i = 0; i < actx.size(); ++i){
+        auto &cctx = this->ctx[actx[i]];
+        cctx->memoryMutex.lock();
+        std::vector<int> toDelete;
+        for(auto &it : cctx->memory){
+            auto id = it.first;
+            auto &q = it.second;
+            std::cout << CV::QuantType::name(q->type) << " " << id << std::endl;
+            if(it.second.use_count() == 1 && !cctx->isNamed(id)){
+                toDelete.push_back(id);
+            }
+        }
+        for(int j = 0; j < toDelete.size(); ++j){
+            cctx->memory[toDelete[j]]->clear();
+            cctx->memory.erase(toDelete[j]);
+        }
+        std::cout << "ctx " << cctx->memory.size() << std::endl;
+        if(cctx->memory.size() == 0){
+            dctx.push_back(cctx->id);
+        }
+        cctx->memoryMutex.unlock();
+        cctx->clearPrefetch();
+    }
+    std::cout << "all " << this->ctx.size() << std::endl;
+    ctxMutex.unlock();
+    // Empty contexts must be deleted
+    for(int i = 0; i < dctx.size(); ++i){
+        this->deleteContext(dctx[i]);
+    }
 }
 
 std::shared_ptr<CV::Context> &CV::Program::getCtx(int id){

@@ -1770,4 +1770,25 @@ void CV::InitializeCore(const CV::ProgramType &target){
     target->rootContext->registerBinaryFuntion("while", (void*)__CV_CORE_LOOP_WHILE);
     target->rootContext->registerBinaryFuntion("for", (void*)__CV_CORE_LOOP_FOR);
 
+
+    /*
+        GC RELATED
+    */
+    // target->rootContext->registerBinaryFuntion("gc:quick", [&](
+    //     const std::vector<std::shared_ptr<CV::Instruction>> &args,
+    //     const std::string &name,
+    //     const CV::TokenType &token,
+    //     const CV::CursorType &cursor,
+    //     int execCtxId,
+    //     int ctxId,
+    //     int dataId,
+    //     const std::shared_ptr<CV::Program> &prog,
+    //     const CV::CFType &st
+    // ){
+    //     auto &dataCtx = prog->getCtx(ctxId);
+    //     auto &execCtx = prog->getCtx(execCtxId);
+    //     dataCtx->buildNil();
+
+    // });
+
 }
