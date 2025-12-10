@@ -65,7 +65,7 @@ int main(int argc, char* argv[]){
 							CV::Tools::setTextColor(CV::Tools::Color::RESET): "");
 		printf(
 			text.c_str(),
-			CV::GetLogo().c_str(),
+			CV::GetPrompt().c_str(),
 			CV_RELEASE_VERSION[0],
 			CV_RELEASE_VERSION[1],
 			CV_RELEASE_VERSION[2],
@@ -140,7 +140,7 @@ int main(int argc, char* argv[]){
 		){
     		auto &dataCtx = prog->getCtx(ctxId);
     		auto &execCtx = prog->getCtx(execCtxId);
-			dataCtx->buildNil();
+        	dataCtx->set(dataId,  CV::Build::Nil());
 			std::exit(1);
 		});
 
@@ -169,14 +169,18 @@ int main(int argc, char* argv[]){
 			// Read line
 			std::string input = "";
 			auto quit = linenoise::Readline(
-				(CV::GetLogo()+"> ").c_str(),
+				(CV::GetPrompt()+"> ").c_str(),
 				input
 			);
+			
 			if(quit){
 				break;
 			}
 
 			if(input.size() > 0){
+				// Add to history
+				linenoise::AddHistory(input.c_str());	
+
 				// Compile
 				auto entrypoint = CV::Compile(input, program, cursor);
 				if(cursor->error){
@@ -204,9 +208,7 @@ int main(int argc, char* argv[]){
 				// Print
 				if(!useNoReturn){
 					std::cout << CV::QuantToText(result) << std::endl;
-				}
-				// Add to history
-				linenoise::AddHistory(input.c_str());				
+				}			
 			}
 			program->quickGC();
 		}

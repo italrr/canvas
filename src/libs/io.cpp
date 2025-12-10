@@ -50,7 +50,7 @@ static void __CV_STD_IO_OUT(
     ___WRITE_STDOUT(out);
 
 
-    dataCtx->set(dataId, dataCtx->buildNil());
+    dataCtx->set(dataId, CV::Build::Nil());
 }
 
 static void __CV_STD_IO_ERR(
@@ -88,7 +88,7 @@ static void __CV_STD_IO_ERR(
     ___WRITE_STDERR(out);
 
 
-    dataCtx->set(dataId, dataCtx->buildNil());
+    dataCtx->set(dataId, CV::Build::Nil());
 }
 
 static void __CV_STD_IO_IN(
@@ -113,7 +113,7 @@ static void __CV_STD_IO_IN(
     std::string input;
     ___GET_STDIN(input);
 
-    dataCtx->set(dataId, dataCtx->buildString(input));
+    dataCtx->set(dataId, CV::Build::String(input));
 }
 
 extern "C" void _CV_REGISTER_LIBRARY(const std::shared_ptr<CV::Program> &prog, const CV::ContextType &ctx, const CV::CursorType &cursor){

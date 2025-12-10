@@ -104,7 +104,7 @@ static void __CV_CORE_ARITHMETIC_ADDITION(
     }
 
     // Build result holder
-    auto result = dataCtx->buildNumber();
+    auto result = CV::Build::Number();
 
     // Fulfill promise in context
     dataCtx->set(dataId, result);
@@ -143,7 +143,7 @@ static void __CV_CORE_ARITHMETIC_SUB(
     }    
 
     // Build result holder
-    auto result = dataCtx->buildNumber();
+    auto result = CV::Build::Number();
 
     // Fulfill promise in context
     dataCtx->set(dataId, result);
@@ -190,7 +190,7 @@ static void __CV_CORE_ARITHMETIC_MULT(
     }    
 
     // Build result holder
-    auto result = dataCtx->buildNumber();
+    auto result = CV::Build::Number();
 
     // Fulfill promise in context
     dataCtx->set(dataId, result);
@@ -238,7 +238,7 @@ static void __CV_CORE_ARITHMETIC_DIV(
     }    
 
     // Build result holder
-    auto result = dataCtx->buildNumber();
+    auto result = CV::Build::Number();
 
     // Fulfill promise in context
     dataCtx->set(dataId, result);
@@ -291,7 +291,7 @@ static void __CV_CORE_BOOLEAN_AND(
     }
 
     // Build result holder
-    auto result = dataCtx->buildNumber();
+    auto result = CV::Build::Number();
 
     // Fulfill promise in context
     dataCtx->set(dataId, result);
@@ -331,7 +331,7 @@ static void __CV_CORE_BOOLEAN_OR(
     }
 
     // Build result holder
-    auto result = dataCtx->buildNumber();
+    auto result = CV::Build::Number();
 
     // Fulfill promise in context
     dataCtx->set(dataId, result);
@@ -371,7 +371,7 @@ static void __CV_CORE_BOOLEAN_NOT(
     }
 
     // Build result holder
-    auto result = dataCtx->buildNumber();
+    auto result = CV::Build::Number();
 
     // Fulfill promise in context
     dataCtx->set(dataId, result);
@@ -415,7 +415,7 @@ static void __CV_CORE_CONDITIONAL_EQ(
     }
 
     // Build result holder
-    auto result = dataCtx->buildNumber();
+    auto result = CV::Build::Number();
 
     // Fulfill promise in context
     dataCtx->set(dataId, result);
@@ -478,7 +478,7 @@ static void __CV_CORE_CONDITIONAL_NEQ(
     }
 
     // Build result holder
-    auto result = dataCtx->buildNumber();
+    auto result = CV::Build::Number();
 
     // Fulfill promise in context
     dataCtx->set(dataId, result);
@@ -543,7 +543,7 @@ static void __CV_CORE_CONDITIONAL_IF(
     }
 
     // Build result holder
-    auto result = dataCtx->buildNumber();
+    auto result = CV::Build::Number();
 
     // Fulfill promise in context
     dataCtx->set(dataId, result);
@@ -565,7 +565,7 @@ static void __CV_CORE_CONDITIONAL_IF(
         dataCtx->set(dataId, trueBranch);
     }else
     if(args.size() == 2 && !result->v){
-        dataCtx->set(dataId, dataCtx->buildNil());
+        dataCtx->set(dataId, CV::Build::Nil());
     }else
     // FALSE BRANCH
     if(args.size() > 2 && !result->v){
@@ -601,7 +601,7 @@ static void __CV_CORE_CONDITIONAL_MORE_THAN(
     }
 
     // Build result holder
-    auto result = dataCtx->buildNumber();
+    auto result = CV::Build::Number();
 
     // Fulfill promise in context
     dataCtx->set(dataId, result);
@@ -664,7 +664,7 @@ static void __CV_CORE_CONDITIONAL_MORE_OR_EQ(
     }
 
     // Build result holder
-    auto result = dataCtx->buildNumber();
+    auto result = CV::Build::Number();
 
     // Fulfill promise in context
     dataCtx->set(dataId, result);
@@ -728,7 +728,7 @@ static void __CV_CORE_CONDITIONAL_LESS_THAN(
     }
 
     // Build result holder
-    auto result = dataCtx->buildNumber();
+    auto result = CV::Build::Number();
 
     // Fulfill promise in context
     dataCtx->set(dataId, result);
@@ -791,7 +791,7 @@ static void __CV_CORE_CONDITIONAL_LESS_OR_EQUAL(
     }
 
     // Build result holder
-    auto result = dataCtx->buildNumber();
+    auto result = CV::Build::Number();
 
     // Fulfill promise in context
     dataCtx->set(dataId, result);
@@ -927,7 +927,7 @@ static void __CV_CORE_LIST_LENGTH(
     auto list = std::static_pointer_cast<CV::TypeList>(listBranch);
 
     // Fulfill promise in context
-    auto result = dataCtx->buildNumber(list->v.size());
+    auto result = CV::Build::Number(list->v.size());
 
     // Fulfill promise in context
     dataCtx->set(dataId, result);
@@ -966,7 +966,7 @@ static void __CV_CORE_LIST_PUSH(
     }
     std::shared_ptr<CV::TypeList> target;
     if(targetBranch->type != CV::QuantType::LIST){
-        target = dataCtx->buildList();
+        target = CV::Build::List();
         target->v.push_back(targetBranch);
     }else{
         target = std::static_pointer_cast<CV::TypeList>(targetBranch);
@@ -1039,7 +1039,7 @@ static void __CV_CORE_LIST_SPLICE(
         return;
     }
 
-    auto result = dataCtx->buildList();
+    auto result = CV::Build::List();
     
     // Join
     for(int i = 0; i < args.size(); ++i){
@@ -1081,7 +1081,7 @@ static void __CV_CORE_LIST_RESERVE(
         return;
     }
 
-    auto result = dataCtx->buildList();
+    auto result = CV::Build::List();
     
     auto listBranch = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
@@ -1119,7 +1119,7 @@ static void __CV_CORE_LIST_SUB(
         return;
     }
 
-    auto result = dataCtx->buildList();
+    auto result = CV::Build::List();
     
     auto listBranch = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
@@ -1424,7 +1424,7 @@ static void __CV_CORE_LOOP_WHILE(
     }
 
     if(result.get() == NULL){
-        result = dataCtx->buildNil();
+        result = CV::Build::Nil();
     }
     
     // Fulfill promise in context
@@ -1567,7 +1567,7 @@ static void __CV_CORE_LOOP_FOR(
         prog->deleteContext(deepExecCtx->id);
     }
     if(result.get() == NULL){
-        result = dataCtx->buildNil();
+        result = CV::Build::Nil();
     }
     // Fulfill promise in context
     dataCtx->set(dataId, result);
@@ -1617,7 +1617,7 @@ static void __CV_CORE_PRINT(
     printf("%s\n", v.c_str());
 
     // Fulfill promise in context
-    dataCtx->set(dataId, dataCtx->buildNil());
+    dataCtx->set(dataId, CV::Build::Nil());
 }
 
 
@@ -1686,7 +1686,7 @@ static void __CV_CORE_TYPEOF(
     }
 
     // Fulfill promise in context
-    dataCtx->set(dataId, dataCtx->buildString( CV::QuantType::name(subject->type) ));
+    dataCtx->set(dataId, CV::Build::String( CV::QuantType::name(subject->type) ));
 }
 
 

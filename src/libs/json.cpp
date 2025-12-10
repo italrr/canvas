@@ -53,7 +53,7 @@ static std::shared_ptr<CV::Quant> unwrapJson(const std::string &name, json11::Js
     switch(obj.type()){
         case json11::Json::ARRAY: {
             auto arr = obj.array_items();
-            auto list = ctx->buildList();
+            auto list = CV::Build::List();
             for(int i = 0; i < arr.size(); ++i){
                 list->v.push_back(unwrapJson(name, arr.at(i), token, ctx, cursor));
             }
@@ -61,27 +61,27 @@ static std::shared_ptr<CV::Quant> unwrapJson(const std::string &name, json11::Js
         };
         case json11::Json::OBJECT: {
             json11::Json::object curr { obj.object_items() };
-            auto store = ctx->buildStore();
+            auto store = CV::Build::Store();
             for(auto &it : curr){
                 store->v[it.first] = unwrapJson(name, it.second, token, ctx, cursor);
             }
             return store;
         };
         case json11::Json::NUMBER: {
-            return ctx->buildNumber( obj.number_value() );
+            return CV::Build::Number( obj.number_value() );
         };
         case json11::Json::BOOL: {
-            return ctx->buildNumber( obj.bool_value() );
+            return CV::Build::Number( obj.bool_value() );
         };
         case json11::Json::STRING: {
-            return ctx->buildString( obj.string_value() );
+            return CV::Build::String( obj.string_value() );
         };
         case json11::Json::NUL: {
-            return ctx->buildNil();
+            return CV::Build::Nil();
         };
         default: {
             cursor->setError("Unhandled Type For JSON", "Imperative '"+name+"' was provided type '"+std::to_string(obj.type())+"' is not handled by this JSON library");
-            return ctx->buildNil();
+            return CV::Build::Nil();
         };
     }
 
@@ -105,30 +105,30 @@ static void __CV_STD_JSON_WRITE(
 
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 2, name, {"STORE/LIST", "FILENAME"}, token, cursor)){
-        dataCtx->set(dataId,  dataCtx->buildNumber(0));
+        dataCtx->set(dataId,  CV::Build::Number(0));
         return;
     }
     
     // Get store param
     auto param0 = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
-        dataCtx->set(dataId,  dataCtx->buildNumber(0));
+        dataCtx->set(dataId,  CV::Build::Number(0));
         return;
     }
     if(param0->type != CV::QuantType::LIST && param0->type != CV::QuantType::STORE){
         cursor->setError(CV_ERROR_MSG_WRONG_TYPE, "Imperative '"+name+"' expects LIST or STORE operand at first position", token);   
-        dataCtx->set(dataId,  dataCtx->buildNumber(0));
+        dataCtx->set(dataId,  CV::Build::Number(0));
         return;
     }
 
     // Get filename param
     auto param1Filename = CV::Execute(args[1], execCtx, prog, cursor, st);
     if(cursor->error){
-        dataCtx->set(dataId,  dataCtx->buildNumber(0));  
+        dataCtx->set(dataId,  CV::Build::Number(0));  
         return;
     }
     if(!CV::ErrorCheck::ExpectsTypeAt(param1Filename->type, CV::QuantType::STRING, 1, name, token, cursor)){
-        dataCtx->set(dataId,  dataCtx->buildNumber(0));
+        dataCtx->set(dataId,  CV::Build::Number(0));
         return;
     }    
 
@@ -137,7 +137,7 @@ static void __CV_STD_JSON_WRITE(
     // Build Json hierarchy
     auto obj = buildNode(name, param0, token, cursor);
     if(cursor->error){
-        dataCtx->set(dataId,  dataCtx->buildNumber(0));
+        dataCtx->set(dataId,  CV::Build::Number(0));
         return;
     }
 
@@ -146,7 +146,7 @@ static void __CV_STD_JSON_WRITE(
     outFile << json11::Json(obj).dump();
     outFile.close();   
 
-    dataCtx->set(dataId,  dataCtx->buildNumber(1));
+    dataCtx->set(dataId,  CV::Build::Number(1));
 }
 
 static void __CV_STD_JSON_DUMP(
@@ -167,30 +167,30 @@ static void __CV_STD_JSON_DUMP(
 
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, {"STORE/LIST"}, token, cursor)){
-        dataCtx->set(dataId,  dataCtx->buildNumber(0));
+        dataCtx->set(dataId,  CV::Build::Number(0));
         return;
     }
     
     // Get store param
     auto param0 = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
-        dataCtx->set(dataId,  dataCtx->buildNumber(0));
+        dataCtx->set(dataId,  CV::Build::Number(0));
         return;
     }
     if(param0->type != CV::QuantType::LIST && param0->type != CV::QuantType::STORE){
         cursor->setError(CV_ERROR_MSG_WRONG_TYPE, "Imperative '"+name+"' expects LIST or STORE operand at first position", token);   
-        dataCtx->set(dataId,  dataCtx->buildNumber(0));
+        dataCtx->set(dataId,  CV::Build::Number(0));
         return;
     }
 
     // Build Json hierarchy
     auto obj = buildNode(name, param0, token, cursor);
     if(cursor->error){
-        dataCtx->set(dataId,  dataCtx->buildNumber(0));
+        dataCtx->set(dataId,  CV::Build::Number(0));
         return;
     }
 
-    dataCtx->set(dataId,  dataCtx->buildString(json11::Json(obj).dump()));
+    dataCtx->set(dataId,  CV::Build::String(json11::Json(obj).dump()));
 }
 
 static void __CV_STD_JSON_PARSE_FILE(
@@ -211,18 +211,18 @@ static void __CV_STD_JSON_PARSE_FILE(
 
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, {"FILENAME"}, token, cursor)){
-        dataCtx->set(dataId,  dataCtx->buildNumber(0));
+        dataCtx->set(dataId,  CV::Build::Number(0));
         return;
     }
 
     // Get filename param
     auto param0Filename = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
-        dataCtx->set(dataId,  dataCtx->buildNumber(0));  
+        dataCtx->set(dataId,  CV::Build::Number(0));  
         return;
     }
     if(!CV::ErrorCheck::ExpectsTypeAt(param0Filename->type, CV::QuantType::STRING, 0, name, token, cursor)){
-        dataCtx->set(dataId,  dataCtx->buildNumber(0));
+        dataCtx->set(dataId,  CV::Build::Number(0));
         return;
     }    
 
@@ -230,7 +230,7 @@ static void __CV_STD_JSON_PARSE_FILE(
 
     if(!CV::Tools::fileExists(filename)){
         cursor->setError("File Not Found", "File '"+filename+"' does not exist", token);
-        dataCtx->set(dataId,  dataCtx->buildNumber(0));
+        dataCtx->set(dataId,  CV::Build::Number(0));
         return;
     }
     auto source = CV::Tools::readFile(filename);
@@ -238,7 +238,7 @@ static void __CV_STD_JSON_PARSE_FILE(
     auto json = json11::Json::parse(source, err);
     if(err.size() > 0){
         cursor->setError("Bad JSON Input", "Imperative '"+name+"' was provided an invalid JSON input: '"+err+"'", token);
-        dataCtx->set(dataId,  dataCtx->buildNumber(0));
+        dataCtx->set(dataId,  CV::Build::Number(0));
         return;
     }
 
@@ -264,18 +264,18 @@ static void __CV_STD_JSON_PARSE(
 
     if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
         !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, {"BODY"}, token, cursor)){
-        dataCtx->set(dataId,  dataCtx->buildNumber(0));
+        dataCtx->set(dataId,  CV::Build::Number(0));
         return;
     }
 
     // Get filename param
     auto param0Body = CV::Execute(args[0], execCtx, prog, cursor, st);
     if(cursor->error){
-        dataCtx->set(dataId,  dataCtx->buildNumber(0));  
+        dataCtx->set(dataId,  CV::Build::Number(0));  
         return;
     }
     if(!CV::ErrorCheck::ExpectsTypeAt(param0Body->type, CV::QuantType::STRING, 0, name, token, cursor)){
-        dataCtx->set(dataId,  dataCtx->buildNumber(0));
+        dataCtx->set(dataId,  CV::Build::Number(0));
         return;
     }    
 
@@ -285,7 +285,7 @@ static void __CV_STD_JSON_PARSE(
     auto json = json11::Json::parse(body, err);
     if(err.size() > 0){
         cursor->setError("Bad JSON Input", "Imperative '"+name+"' was provided an invalid JSON input: '"+err+"'", token);
-        dataCtx->set(dataId,  dataCtx->buildNumber(0));
+        dataCtx->set(dataId,  CV::Build::Number(0));
         return;
     }
 

@@ -888,7 +888,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
 
     auto bListConstruct = [prog, cursor](const CV::TokenType &origin, std::vector<CV::TokenType> &tokens, const CV::ContextType &ctx){
         auto ins = prog->createInstruction(CV::InstructionType::CONSTRUCT_LIST, origin);
-        auto list = ctx->buildList();
+        auto list = CV::Build::List();
         ctx->set(list->id, list);
         ins->data.push_back(ctx->id);
         ins->data.push_back(list->id);
@@ -921,7 +921,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
 
     auto bStoreConstruct = [prog, cursor](const std::string &name, const CV::TokenType &origin, std::vector<CV::TokenType> &tokens, const CV::ContextType &ctx){
         auto ins = prog->createInstruction(CV::InstructionType::CONSTRUCT_STORE, origin);
-        auto store = ctx->buildStore();
+        auto store = CV::Build::Store();
         ctx->set(store->id, store);
         ins->data.push_back(ctx->id);
         ins->data.push_back(store->id);
@@ -1241,7 +1241,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                     return prog->createInstruction(CV::InstructionType::NOOP, token);                
                 }  
                 fn->params.push_back(name);
-                auto v = fctx->buildNil();
+                auto v = CV::Build::Nil();
                 fctx->set(v->id, v);
                 fctx->setName(name, v);
             }
@@ -1273,7 +1273,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                 return prog->createInstruction(CV::InstructionType::NOOP, token);
             }
             auto ins = prog->createInstruction(CV::InstructionType::CARBON_COPY, token);
-            auto nv = ctx->buildNil();
+            auto nv = CV::Build::Nil();
             ctx->set(nv->id, nv);
             ins->data.push_back(ctx->id);
             ins->data.push_back(nv->id);
@@ -1352,7 +1352,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                 ctx->setName(name, targetData);  
                 return target;
             }else{
-                auto targetData = ctx->buildNil();
+                auto targetData = CV::Build::Nil();
                 ctx->set(targetData->id, targetData);
 
                 auto ins = prog->createInstruction(CV::InstructionType::LET, token);
@@ -1375,7 +1375,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                 return bListConstructFromToken(token, ctx);
             }else{
                 auto ins = prog->createInstruction(CV::InstructionType::PROXY_STATIC, token);
-                auto data = ctx->buildNil();
+                auto data = CV::Build::Nil();
                 ctx->set(data->id, data);
                 ins->data.push_back(ctx->id);
                 ins->data.push_back(data->id);
@@ -1390,7 +1390,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                 return bListConstructFromToken(token, ctx);
             }else{
                 auto ins = prog->createInstruction(CV::InstructionType::PROXY_STATIC, token);
-                auto data = ctx->buildNumber(std::stod(token->first));
+                auto data = CV::Build::Number(std::stod(token->first));
                 ctx->set(data->id, data);
                 ins->data.push_back(ctx->id);
                 ins->data.push_back(data->id);
@@ -1405,7 +1405,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                 return bListConstructFromToken(token, ctx);
             }else{            
                 auto ins = prog->createInstruction(CV::InstructionType::PROXY_STATIC, token);
-                auto string = ctx->buildString("");
+                auto string = CV::Build::String("");
                 ctx->set(string->id, string);
                 string->v = token->first.substr(1, token->first.length() - 2);
                 ctx->set(string->id, string);
@@ -1442,7 +1442,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                 return prog->createInstruction(CV::InstructionType::NOOP, token);
             }
 
-            auto data = tctx->buildThread();
+            auto data = CV::Build::Thread();
             tctx->set(data->id, data);
             data->ctxId = tctx->id;
             data->entrypoint = entrypoint->id;
@@ -1529,7 +1529,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                 if(fetched->type == CV::InstructionType::PROXY_STATIC){
                     ghostData = prog->getCtx(fetched->data[0])->get(fetched->data[1]);
                 }else{
-                    ghostData = ctx->buildNil();
+                    ghostData = CV::Build::Nil();
                     ctx->set(ghostData->id, ghostData);
                 }
                 if(ctx->getName(name, true).size() == 0){
@@ -1537,7 +1537,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                 }
                 ins->params.push_back(fetched->id);
             }else{
-                ghostData = ctx->buildNil();
+                ghostData = CV::Build::Nil();
                 ctx->set(ghostData->id, ghostData);
                 if(ctx->getName(name, true).size() == 0){
                     ctx->setName(name, ghostData);
@@ -1596,7 +1596,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                         }
 
                         auto childIns = prog->createInstruction(CV::InstructionType::PROXY_PROMISE, token);
-                        auto targetData = hctx->buildNil();
+                        auto targetData = CV::Build::Nil();
                         hctx->set(targetData->id, targetData);
                         childIns->data.push_back(hctx->id);
                         childIns->data.push_back(targetData->id);
@@ -1641,7 +1641,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                         ins->data.push_back(ins->params.size());
                         // Build Promise Proxy to store result value 
                         auto childIns = prog->createInstruction(CV::InstructionType::PROXY_PROMISE, token);
-                        auto targetData = hctx->buildNil();
+                        auto targetData = CV::Build::Nil();
                         hctx->set(targetData->id, targetData);;
                         childIns->data.push_back(hctx->id);
                         childIns->data.push_back(targetData->id);
@@ -1689,7 +1689,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                                 }else{
                                 // Several names returns a list of values
                                     auto ins = prog->createInstruction(CV::InstructionType::CONSTRUCT_LIST, token);
-                                    auto list = hctx->buildList();
+                                    auto list = CV::Build::List();
                                     hctx->set(list->id, list);
                                     ins->data.push_back(hctx->id);
                                     ins->data.push_back(list->id);
@@ -1788,7 +1788,10 @@ CV::InsType CV::Compile(const std::string &input, const CV::ProgramType &prog, c
     // Split basic tokens
     auto tokens = parseTokens(fixedInput, ' ', cursor, 1);
     if(cursor->error){
-        return prog->createInstruction(CV::InstructionType::NOOP, tokens[0]);
+        return prog->createInstruction(
+            CV::InstructionType::NOOP,
+            tokens.size() == 0 ? std::make_shared<CV::Token>(fixedInput, cursor->line) : tokens[0]
+        );
     }
 
     std::vector<CV::TokenType> root;
@@ -1802,14 +1805,6 @@ CV::InsType CV::Compile(const std::string &input, const CV::ProgramType &prog, c
             root.push_back(built[j]);
         }
     }
-    
-    
-    // std::cout << "total " << root.size() << std::endl;
-    // for(int i = 0; i < root.size(); ++i){
-    //     std::cout << "\"" << root[i]->str() << "\" " << root[i]->inner.size() << std::endl;
-    // }
-    // std::cout << root[0]->inner[0]->inner[0]->str() << std::endl;
-    // std::exit(1);
 
     // Convert tokens into instructions
     std::vector<CV::InsType> instructions;
@@ -1893,7 +1888,7 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
             quant = CV::Execute(entrypoint, ctx, prog, cursor, st);
             if(cursor->error){
                 st->state = CV::ControlFlowState::CRASH;
-                return ctx->buildNil();
+                return CV::Build::Nil();
             }
             ctx->setPrefetch(ins->id, {(unsigned)ctx->id, (unsigned)quant->id});
             return quant;            
@@ -1909,7 +1904,7 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
                 quant = CV::Execute(entrypoint, ctx, prog, cursor, st);
                 if(cursor->error){
                     st->state = CV::ControlFlowState::CRASH;
-                    return ctx->buildNil();
+                    return CV::Build::Nil();
                 }
                 // Fulfill ghost name
                 if(ins->data.size() > 2){
@@ -1962,7 +1957,7 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
                 auto quant = CV::Execute(cins, cctx, prog, cursor, st);
                 if(cursor->error){
                     st->state = CV::ControlFlowState::CRASH;
-                    return ctx->buildNil();
+                    return CV::Build::Nil();
                 }
                 if(isExpander && quant->type == CV::QuantType::LIST){
                     auto subject = std::static_pointer_cast<CV::TypeList>(quant);
@@ -1983,7 +1978,7 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
                 auto quant = CV::Execute(prog->getIns(ins->params[i]), cctx, prog, cursor, st);
                 if(cursor->error){
                     st->state = CV::ControlFlowState::CRASH;
-                    return ctx->buildNil();
+                    return CV::Build::Nil();
                 }
                 store->v[ins->literal[i]] = quant;
             }   
@@ -2084,7 +2079,7 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
                 st->state = CV::ControlFlowState::CRASH;
                 return v;
             }
-            auto copied = cctx->buildCopy(v);
+            auto copied = CV::Build::Copy(v);
             cctx->set(ins->data[1], copied);
 
             ctx->setPrefetch(ins->id, {(unsigned)cctx->id, (unsigned)copied->id});
@@ -2120,7 +2115,7 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
                 st->payload = v;
                 return v;
             }
-            return ctx->buildNil();
+            return CV::Build::Nil();
         };
         case CV::InstructionType::CF_INVOKE_FUNCTION: {
             auto fnCtxId = ins->data[0];
@@ -2134,7 +2129,6 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
             int targetCtxId = ins->data[3];
             int targetDataId = ins->data[4];
 
-            // topExecCtx->memory.clear();
             topExecCtx->clearPrefetch();
 
             // Prepare Context
@@ -2158,7 +2152,7 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
                         int fin = namei + j;
                         if(fin >= fn->params.size()){
                             cursor->setError(CV_ERROR_MSG_WRONG_OPERANDS, "Provided wrong number of parameters("+std::to_string(fin)+") through the Expander", ins->token);
-                            return ctx->buildNil();
+                            return CV::Build::Nil();
                         }
                         topExecCtx->set(topExecCtx->getName(fn->params[fin], true)[1], inner->v[j]);
                     }
@@ -2237,14 +2231,14 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
             LIBRARY IMPORT
         */
         case CV::InstructionType::LIBRAY_IMPORT: {
-            return ctx->buildNumber(ins->data[1]); // returns library id handle            
+            return CV::Build::Number(ins->data[1]); // returns library id handle            
         } break;
         /*
             NOOP
         */
         case CV::InstructionType::NOOP: {
             st->state = CV::ControlFlowState::CRASH;
-            return ctx->buildNil();            
+            return CV::Build::Nil();            
         } break;
         /*
             INVALID
@@ -2252,7 +2246,7 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
         default: {
             cursor->setError(CV_ERROR_MSG_INVALID_INSTRUCTION, "Instruction Type '"+std::to_string(ins->type)+"' is undefined/invalid", ins->token);
             st->state = CV::ControlFlowState::CRASH;
-            return ctx->buildNil();
+            return CV::Build::Nil();
         };
     }
 }
@@ -2270,7 +2264,7 @@ std::shared_ptr<CV::Quant> CV::Execute(const CV::InsType &entry, const CV::Conte
         st->state == CV::ControlFlowState::CRASH ||
         st->state == CV::ControlFlowState::RETURN
     ){
-        return ctx->buildNil();
+        return CV::Build::Nil();
     }
 
     while(true){
@@ -2291,14 +2285,6 @@ std::shared_ptr<CV::Quant> CV::Execute(const CV::InsType &entry, const CV::Conte
         break;
     }
 
-    // prog->gcOpsMutex.lock();
-    // for(int i = 0; i < prog->gcOps.size(); ++i){
-    //     auto &op = prog->gcOps[i];
-    //     op(prog);
-    // }
-    // prog->gcOps.clear();
-    // prog->gcOpsMutex.unlock();
-
     return result;
 }
 
@@ -2314,108 +2300,6 @@ CV::Context::Context(){
 
 CV::Context::Context(const std::shared_ptr<CV::Context> &head) : Context(){
     this->head = head;
-}
-
-std::shared_ptr<CV::Quant> CV::Context::buildCopy(const std::shared_ptr<CV::Quant> &subject){
-    std::shared_ptr<CV::Quant> c = subject->copy();
-    switch(subject->type){
-        case CV::QuantType::LIST: {
-            auto orig = std::static_pointer_cast<CV::TypeList>(subject);
-            auto target = std::static_pointer_cast<CV::TypeList>(c);
-            for(int i = 0; i < orig->v.size(); ++i){
-                target->v.push_back(this->buildCopy(orig->v[i]));
-            }
-        } break;
-        case CV::QuantType::STORE: {
-            auto orig = std::static_pointer_cast<CV::TypeStore>(subject);
-            auto target = std::static_pointer_cast<CV::TypeStore>(c);
-            for(auto &it : orig->v){
-                target->v[it.first] = this->buildCopy(it.second);
-            }
-        } break;
-    }
-    return c;
-}
-
-std::shared_ptr<CV::TypeNumber> CV::Context::buildNumber(number n){
-    auto t = std::make_shared<CV::TypeNumber>();
-    // this->memoryMutex.lock();
-    // this->memory[t->id] = t;
-    // this->memoryMutex.unlock();
-    t->v = n;
-    return t;
-}
-
-std::shared_ptr<CV::TypeThread> CV::Context::buildThread(){
-    auto t = std::make_shared<CV::TypeThread>();
-    // this->memoryMutex.lock();
-    // this->memory[t->id] = t; 
-    // this->memoryMutex.unlock();
-    t->threadId = GEN_ID();
-    return t; 
-}
-
-std::shared_ptr<CV::Quant> CV::Context::buildNil(){
-    auto t = std::make_shared<CV::Quant>();
-    // this->memoryMutex.lock();
-    // this->memory[t->id] = t;
-    // this->memoryMutex.unlock();
-    return t;
-}
-
-std::shared_ptr<CV::Quant> CV::Context::buildType(int type){
-    switch(type){
-        case CV::QuantType::NUMBER: {
-            return this->buildNumber();
-        };
-        case CV::QuantType::STRING: {
-            return this->buildString();
-        };
-        case CV::QuantType::LIST: {
-            return this->buildList();
-        };
-        case CV::QuantType::STORE: {
-            return this->buildStore();
-        };
-        case CV::QuantType::THREAD: {
-            return this->buildThread();
-        };
-        default:
-        case CV::QuantType::NIL: {
-            return this->buildNil();
-        };
-    }
-}
-
-std::shared_ptr<CV::TypeString> CV::Context::buildString(const std::string &s){
-    auto t = std::make_shared<CV::TypeString>();
-    // this->memoryMutex.lock();
-    // this->memory[t->id] = t;
-    // this->memoryMutex.unlock();
-    t->v = s;
-    return t;
-}
-
-std::shared_ptr<CV::TypeList> CV::Context::buildList(const std::vector<std::shared_ptr<CV::Quant>> &list){
-    auto t = std::make_shared<TypeList>();
-    // this->memoryMutex.lock();
-    // this->memory[t->id] = t;
-    // this->memoryMutex.unlock();
-    for(int i = 0; i < list.size(); ++i){
-        t->v.push_back(list[i]);
-    }
-    return t;
-}
-
-std::shared_ptr<CV::TypeStore> CV::Context::buildStore(const std::unordered_map<std::string, std::shared_ptr<CV::Quant>> &store){
-    auto t = std::make_shared<TypeStore>();
-    // this->memoryMutex.lock();
-    // this->memory[t->id] = t;
-    // this->memoryMutex.unlock();
-    for(auto &it : store){
-        t->v[it.first] = it.second;
-    }
-    return t;
 }
 
 std::shared_ptr<CV::Quant> &CV::Context::get(int id){
@@ -2512,7 +2396,6 @@ void CV::Context::clear(){
     for(auto &it : this->memory){
         auto id = it.first;
         auto &q = it.second;
-        // std::cout << "data " << CV::QuantType::name(q->type) << " " << id << std::endl;
         if(it.second.use_count() <= 1){
             toDelete.push_back(id);
         }
@@ -2521,16 +2404,16 @@ void CV::Context::clear(){
     for(auto &it : this->names){
         auto id = it.first;
         auto &q = it.second;
-        // std::cout << "name " << CV::QuantType::name(q->type) << " " << id << std::endl;
         if(it.second.use_count() <= 1){
             toDelete.push_back(q->id);
         }
     }    
     for(int j = 0; j < toDelete.size(); ++j){
-        if(this->memory[toDelete[j]].use_count() > 0){
-            this->memory[toDelete[j]]->clear();
+        auto &id = toDelete[j];
+        if(this->memory[id].use_count() > 0){
+            this->memory[id]->clear(); // No exactly way to avoid double-frees for inner objects, but ideally should be managed by RAII/STL
         }
-        this->memory.erase(toDelete[j]);
+        this->memory.erase(id);
     }
     this->memoryMutex.unlock();   
 }
@@ -2593,7 +2476,7 @@ bool CV::Program::deleteContext(int id){
     if(this->ctx.count(id) > 0){
         this->ctx[id]->clearPrefetch();
         this->ctx[id]->clear();
-        this->ctx.erase(id); // Careful!! TODO: Check
+        this->ctx.erase(id);
         ctxMutex.unlock();
         return true;
     }
@@ -2607,7 +2490,6 @@ void CV::Program::issueGCOperation(const CV::GCOperation &op){
     this->gcOpsMutex.unlock();
 }
 
-static int c = 0;
 void CV::Program::quickGC(){
     ctxMutex.lock();
     // Clear trailing data
@@ -2620,12 +2502,10 @@ void CV::Program::quickGC(){
         auto &cctx = this->ctx[actx[i]];
         cctx->clear();
         cctx->clearPrefetch();
-        // std::cout << "ctx " << cctx->getMemorySize() << std::endl;
         if(cctx->getMemorySize() == 0){
             dctx.push_back(cctx->id);
         }         
     }
-    // std::cout << "all " << this->ctx.size() << std::endl;
     ctxMutex.unlock();
     for(int i = 0; i < dctx.size(); ++i){
         this->deleteContext(dctx[i]);
@@ -2689,7 +2569,6 @@ bool CV::GetBooleanValue(const std::shared_ptr<CV::Quant> &data){
     }
 }
 
-
 int CV::Import(const std::string &fname, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor){
     if(!CV::Tools::fileExists(fname)){
         cursor->setError(CV_ERROR_MSG_LIBRARY_NOT_VALID, "'"+fname+"' does not exist");
@@ -2710,20 +2589,60 @@ int CV::Import(const std::string &fname, const CV::ProgramType &prog, const CV::
     return 1;
 }
 
-bool CV::Unimport(int id){
+#define CV_IMPORT_LIBRARY_ENTRY_POINT_ARGS const std::shared_ptr<CV::Program> &prog, const CV::ContextType &ctx, const CV::CursorType &cursor
+
+bool CV::UnimportDynamicLibrary(
+    int id,
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::ContextType &ctx,
+    const CV::CursorType &cursor
+){
+    typedef void (*rlib)(CV_IMPORT_LIBRARY_ENTRY_POINT_ARGS);
+
+    prog->loadedDynamicLibsMutex.lock();
+    if(prog->loadedDynamicLibs.count(id) == 0){
+        prog->loadedDynamicLibsMutex.unlock();
+        return false;
+    }
+
+    auto &loadLib = prog->loadedDynamicLibs[id];
+
+    #if (_CV_PLATFORM == _CV_PLATFORM_TYPE_LINUX)
+        auto handle = loadLib.first;
+        const char* error = NULL;        
+
+        rlib unregisterlibrary = (void (*)(CV_IMPORT_LIBRARY_ENTRY_POINT_ARGS)) dlsym( handle, "_CV_UNREGISTER_LIBRARY" );
+        error = dlerror();
+        if(error){
+            fprintf( stderr, "Failed to unload dynamic library to '_CV_UNREGISTER_LIBRARY' from '%s': %s\n", loadLib.second.c_str(), error);
+            dlclose(handle);
+            std::exit(1);
+        }
+        // Try to load
+        (*unregisterlibrary)(prog, ctx, cursor);
+        // Close
+        dlclose(handle);
+        // Remove
+        prog->loadedDynamicLibs.erase(id);
+    #elif  (_CV_PLATFORM == _CV_PLATFORM_TYPE_WINDOWS)
+        // TODO: Do Windows ... And MacOS
+    #endif
+
+    prog->loadedDynamicLibsMutex.unlock();
     return true;
 }
-
-#define CV_IMPORT_LIBRARY_ENTRY_POINT_ARGS const std::shared_ptr<CV::Program> &prog, const CV::ContextType &ctx, const CV::CursorType &cursor
 
 int CV::ImportDynamicLibrary(
     const std::string &path,
     const std::string &fname,
     const std::shared_ptr<CV::Program> &prog,
-    const CV::ContextType &ctx, const CV::CursorType &cursor
+    const CV::ContextType &ctx,
+    const CV::CursorType &cursor
 ){
+    typedef void (*rlib)(CV_IMPORT_LIBRARY_ENTRY_POINT_ARGS);
+
+    // TODO: Add MacOS
     #if (_CV_PLATFORM == _CV_PLATFORM_TYPE_LINUX)
-        typedef void (*rlib)(CV_IMPORT_LIBRARY_ENTRY_POINT_ARGS);
         void* handle = NULL;
         const char* error = NULL;
         handle = dlopen(path.c_str(), RTLD_LAZY);
@@ -2735,17 +2654,18 @@ int CV::ImportDynamicLibrary(
         rlib registerlibrary = (void (*)(CV_IMPORT_LIBRARY_ENTRY_POINT_ARGS)) dlsym( handle, "_CV_REGISTER_LIBRARY" );
         error = dlerror();
         if(error){
-            fprintf( stderr, "Failed to load dynamic library '_CV_REGISTER_LIBRARY' from '%s': %s\n", fname.c_str(), error);
+            fprintf( stderr, "Failed to load dynamic library to '_CV_REGISTER_LIBRARY' from '%s': %s\n", fname.c_str(), error);
             dlclose(handle);
             std::exit(1);
         }
         // Try to load
         (*registerlibrary)(prog, ctx, cursor);
         auto id = GEN_ID();
-        prog->loadedDynamicLibs[id] = handle;
+        prog->loadedDynamicLibsMutex.lock();
+        prog->loadedDynamicLibs[id] = {handle, path};
+        prog->loadedDynamicLibsMutex.unlock();
         return id;
     #elif  (_CV_PLATFORM == _CV_PLATFORM_TYPE_WINDOWS)
-        typedef void (*rlib)(CV_IMPORT_LIBRARY_ENTRY_POINT_ARGS);
 
         rlib entry;
         HMODULE hdll;
@@ -2758,12 +2678,14 @@ int CV::ImportDynamicLibrary(
         // Fetch register's address
         entry = (rlib)GetProcAddress(hdll, "_CV_REGISTER_LIBRARY");
         if(entry == NULL){
-            fprintf( stderr, "Failed to load dynamic library '_CV_REGISTER_LIBRARY' from '%s'\n", fname.c_str());
+            fprintf( stderr, "Failed to load dynamic library to '_CV_REGISTER_LIBRARY' from '%s'\n", fname.c_str());
             std::exit(1);      
         }
         entry(prog, ctx, cursor);
         auto id = GEN_ID();
-        prog->loadedDynamicLibs[id] = hdll;
+        prog->loadedDynamicLibsMutex.lock();
+        prog->loadedDynamicLibs[id] = {hdll, path};
+        prog->loadedDynamicLibsMutex.unlock();
         return id;
     #endif
 }
@@ -2772,7 +2694,7 @@ void CV::SetUseColor(bool v){
     UseColorOnText = v;
 }
 
-std::string CV::GetLogo(){
+std::string CV::GetPrompt(){
     std::string start = CV::Tools::setTextColor(Tools::Color::MAGENTA) + "[" + CV::Tools::setTextColor(Tools::Color::RESET);
     std::string cv = CV::Tools::setTextColor(Tools::Color::CYAN) + "~" + CV::Tools::setTextColor(Tools::Color::RESET);
     std::string end = CV::Tools::setTextColor(Tools::Color::MAGENTA) + "]" + CV::Tools::setTextColor(Tools::Color::RESET);
@@ -2781,4 +2703,93 @@ std::string CV::GetLogo(){
 
 void CV::SetCanvasLibHome(const std::string &path){
     CV_LIB_HOME = path;
+}
+
+
+namespace CV {
+    namespace Build {
+        std::shared_ptr<CV::Quant> Copy(const std::shared_ptr<CV::Quant> &subject){
+            std::shared_ptr<CV::Quant> c = subject->copy();
+            switch(subject->type){
+                case CV::QuantType::LIST: {
+                    auto orig = std::static_pointer_cast<CV::TypeList>(subject);
+                    auto target = std::static_pointer_cast<CV::TypeList>(c);
+                    for(int i = 0; i < orig->v.size(); ++i){
+                        target->v.push_back(Copy(orig->v[i]));
+                    }
+                } break;
+                case CV::QuantType::STORE: {
+                    auto orig = std::static_pointer_cast<CV::TypeStore>(subject);
+                    auto target = std::static_pointer_cast<CV::TypeStore>(c);
+                    for(auto &it : orig->v){
+                        target->v[it.first] = Copy(it.second);
+                    }
+                } break;
+            }
+            return c;
+        }
+
+        std::shared_ptr<CV::TypeNumber> Number(number n){
+            auto t = std::make_shared<CV::TypeNumber>();
+            t->v = n;
+            return t;
+        }
+
+        std::shared_ptr<CV::TypeThread> Thread(){
+            auto t = std::make_shared<CV::TypeThread>();
+            t->threadId = GEN_ID();
+            return t; 
+        }
+
+        std::shared_ptr<CV::Quant> Nil(){
+            auto t = std::make_shared<CV::Quant>();
+            return t;
+        }
+
+        std::shared_ptr<CV::Quant> Type(int type){
+            switch(type){
+                case CV::QuantType::NUMBER: {
+                    return Number();
+                };
+                case CV::QuantType::STRING: {
+                    return String();
+                };
+                case CV::QuantType::LIST: {
+                    return List();
+                };
+                case CV::QuantType::STORE: {
+                    return Store();
+                };
+                case CV::QuantType::THREAD: {
+                    return Thread();
+                };
+                default:
+                case CV::QuantType::NIL: {
+                    return Nil();
+                };
+            }
+        }
+
+        std::shared_ptr<CV::TypeString> String(const std::string &s){
+            auto t = std::make_shared<CV::TypeString>();
+            t->v = s;
+            return t;
+        }
+
+        std::shared_ptr<CV::TypeList> List(const std::vector<std::shared_ptr<CV::Quant>> &list){
+            auto t = std::make_shared<TypeList>();
+            for(int i = 0; i < list.size(); ++i){
+                t->v.push_back(list[i]);
+            }
+            return t;
+        }
+
+        std::shared_ptr<CV::TypeStore> Store(const std::unordered_map<std::string, std::shared_ptr<CV::Quant>> &store){
+            auto t = std::make_shared<TypeStore>();
+            for(auto &it : store){
+                t->v[it.first] = it.second;
+            }
+            return t;
+        }
+    }
 }

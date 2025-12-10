@@ -490,22 +490,10 @@
             std::shared_ptr<CV::Context> head;
             Context();
             Context(const std::shared_ptr<CV::Context> &head);
-            std::shared_ptr<CV::TypeNumber> buildNumber(number n = 0);
-            std::shared_ptr<CV::TypeThread> buildThread();
-            std::shared_ptr<CV::Quant> buildCopy(const std::shared_ptr<CV::Quant> &subject);
-            std::shared_ptr<CV::Quant> buildNil();
-            std::shared_ptr<CV::Quant> buildType(int type);
-            std::shared_ptr<CV::TypeList> buildList(const std::vector<std::shared_ptr<CV::Quant>> &list = {});
-            std::shared_ptr<CV::TypeStore> buildStore(const std::unordered_map<std::string, std::shared_ptr<CV::Quant>> &list = {});
-            std::shared_ptr<CV::TypeString> buildString(const std::string &s = "");
             std::shared_ptr<TypeFunctionBinary> registerBinaryFuntion(const std::string &name, void *ref);
             std::shared_ptr<TypeFunctionBinary> registerBinaryFuntion(const std::string &name, const CV::BinaryFunctionLambda &lambda);
-<<<<<<< HEAD
-            
-=======
             void clear();
             int getMemorySize();
->>>>>>> 83248369ab6db9cb5ebbf3ffdd72a9e0f63eecb4
             std::vector<int> getName(const std::string &name, bool local = false);
             bool isNamed(int id);
             std::shared_ptr<CV::Quant> &get(int id);
@@ -527,7 +515,8 @@
             std::vector<GCOperation> gcOps;
             std::mutex gcOpsMutex;
             std::shared_ptr<Context> rootContext;
-            std::unordered_map<unsigned, void*> loadedDynamicLibs;
+            std::mutex loadedDynamicLibsMutex;
+            std::unordered_map<unsigned, std::pair<void*,std::string>> loadedDynamicLibs;
             void issueGCOperation(const CV::GCOperation &op);
             std::shared_ptr<CV::Instruction> createInstruction(unsigned type, const std::shared_ptr<CV::Token> &token);
             std::shared_ptr<Context> createContext(const std::shared_ptr<CV::Context> &head = std::shared_ptr<CV::Context>(NULL));
@@ -616,13 +605,30 @@
         //// API
         ///////////////////////////
 
+        namespace Build {
+            std::shared_ptr<CV::TypeNumber> Number(number n = 0);
+            std::shared_ptr<CV::TypeThread> Thread();
+            std::shared_ptr<CV::Quant> Copy(const std::shared_ptr<CV::Quant> &subject);
+            std::shared_ptr<CV::Quant> Nil();
+            std::shared_ptr<CV::Quant> Type(int type);
+            std::shared_ptr<CV::TypeList> List(const std::vector<std::shared_ptr<CV::Quant>> &list = {});
+            std::shared_ptr<CV::TypeStore> Store(const std::unordered_map<std::string, std::shared_ptr<CV::Quant>> &list = {});
+            std::shared_ptr<CV::TypeString> String(const std::string &s = "");            
+        }
+
         int ImportDynamicLibrary(const std::string &path, const std::string &fname, const std::shared_ptr<CV::Program> &prog, const CV::ContextType &ctx, const CV::CursorType &cursor);
+        bool UnimportDynamicLibrary(
+            int id,
+            const std::shared_ptr<CV::Program> &prog,
+            const CV::ContextType &ctx,
+            const CV::CursorType &cursor            
+        );
+
         int Import(const std::string &name, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor);
-        bool Unimport(int id);
         bool GetBooleanValue(const std::shared_ptr<CV::Quant> &data);
         std::string QuantToText(const std::shared_ptr<CV::Quant> &t);
         void SetUseColor(bool v);
-        std::string GetLogo();
+        std::string GetPrompt();
         void InitializeCore(const CV::ProgramType &prog);
         std::shared_ptr<CV::Quant> Execute(const CV::InsType &entry, const CV::ContextType &ctx, const CV::ProgramType &prog, const CV::CursorType &cursor, CFType cf);
         CV::InsType Compile(const std::string &input, const CV::ProgramType &prog, const CV::CursorType &cursor, const CV::ContextType &ctx = CV::ContextType(NULL));
