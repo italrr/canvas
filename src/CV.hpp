@@ -37,7 +37,7 @@
     #define _CV_PLATFORM_TYPE_OSX 2
     #define _CV_PLATFORM_TYPE_UNDEFINED 4
 
-    #define CV_BINARY_FN_PARAMS const std::vector<std::shared_ptr<CV::Instruction>> &, const std::string&, const CV::TokenType &, const CV::CursorType &, int, int, int, const std::shared_ptr<CV::Program> &, const CV::CFType &
+    #define CV_BINARY_FN_PARAMS const std::vector<std::shared_ptr<CV::Instruction>> &, const std::string&, const std::shared_ptr<CV::Token> &, const std::shared_ptr<CV::Cursor> &, int, int, int, const std::shared_ptr<CV::Program> &, const std::shared_ptr<CV::ControlFlow> &
 
     namespace CV {
 
@@ -164,6 +164,13 @@
             }
         }
 
+        struct Token;
+        struct Cursor;
+        struct Program;
+        struct ControlFlow;
+        struct Instruction;
+        typedef std::function<void(CV_BINARY_FN_PARAMS)> BinaryFunctionLambda;
+
         struct Quant {
             int id;
             int type;
@@ -221,6 +228,7 @@
         struct Program;
         struct TypeFunctionBinary : TypeFunction {
             void *ref;
+            CV::BinaryFunctionLambda lambda;
             std::unordered_map<int, bool> multiParam;
             TypeFunctionBinary();
             virtual bool clear();
@@ -477,7 +485,7 @@
             std::mutex nameMutex;
             std::mutex prefetchMutex;
             std::unordered_map<unsigned, std::vector<unsigned>> prefetched;
-            std::unordered_map<std::string, unsigned> names;
+            std::unordered_map<std::string, std::shared_ptr<CV::Quant>> names;
             std::unordered_map<unsigned, std::shared_ptr<CV::Quant>> memory;
             std::shared_ptr<CV::Context> head;
             Context();
@@ -491,22 +499,32 @@
             std::shared_ptr<CV::TypeStore> buildStore(const std::unordered_map<std::string, std::shared_ptr<CV::Quant>> &list = {});
             std::shared_ptr<CV::TypeString> buildString(const std::string &s = "");
             std::shared_ptr<TypeFunctionBinary> registerBinaryFuntion(const std::string &name, void *ref);
+            std::shared_ptr<TypeFunctionBinary> registerBinaryFuntion(const std::string &name, const CV::BinaryFunctionLambda &lambda);
+            void clear();
+            int getMemorySize();
             std::vector<int> getName(const std::string &name, bool local = false);
+            bool isNamed(int id);
             std::shared_ptr<CV::Quant> &get(int id);
             void set(int id, const std::shared_ptr<CV::Quant> &q);
-            void setName(const std::string &name, unsigned id);
+            void setName(const std::string &name, const std::shared_ptr<CV::Quant> &q);
             void setPrefetch(unsigned id, const std::vector<unsigned> &v);
             std::vector<unsigned> getPrefetch(unsigned id);
             bool isPrefetched(unsigned id);
             void clearPrefetch();
         };
 
+        struct Program;
+        typedef std::function<void(const std::shared_ptr<Program> &prog)> GCOperation;
+
         struct Program {
             std::mutex ctxMutex;
             std::mutex threadMutex;
             unsigned entrypointIns;
+            std::vector<GCOperation> gcOps;
+            std::mutex gcOpsMutex;
             std::shared_ptr<Context> rootContext;
             std::unordered_map<unsigned, void*> loadedDynamicLibs;
+            void issueGCOperation(const CV::GCOperation &op);
             std::shared_ptr<CV::Instruction> createInstruction(unsigned type, const std::shared_ptr<CV::Token> &token);
             std::shared_ptr<Context> createContext(const std::shared_ptr<CV::Context> &head = std::shared_ptr<CV::Context>(NULL));
             bool deleteContext(int id);
