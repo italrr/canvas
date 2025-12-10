@@ -428,7 +428,7 @@ static void __CV_STD_BMP_CREATE(
 
     int total = width * height * nrChannels;
     for(int i = 0; i < total; ++i){
-        pixels->v.push_back(CV::Build::Number(0));
+        pixels->v.push_back(CV::Build::Number(1));
     }
 
 

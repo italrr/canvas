@@ -2399,15 +2399,7 @@ void CV::Context::clear(){
         if(it.second.use_count() <= 1){
             toDelete.push_back(id);
         }
-    }
-    // Check trailing names
-    for(auto &it : this->names){
-        auto id = it.first;
-        auto &q = it.second;
-        if(it.second.use_count() <= 1){
-            toDelete.push_back(q->id);
-        }
-    }    
+    }  
     for(int j = 0; j < toDelete.size(); ++j){
         auto &id = toDelete[j];
         if(this->memory[id].use_count() > 0){
@@ -2491,6 +2483,7 @@ void CV::Program::issueGCOperation(const CV::GCOperation &op){
 }
 
 void CV::Program::quickGC(){
+    return;
     ctxMutex.lock();
     // Clear trailing data
     std::vector<int> actx;
