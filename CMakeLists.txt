@@ -8,11 +8,14 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/builds/cmake)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib/)
 
 
+# TODO: Install script should move the libraries to its respective directory in the system. Perhaps /usr/lib/canvasv/?
+
 macro (mvLib t) 
+    # Seems we only need to do this on Windows, GCC on Linux moves .sos to the lib directory
     IF(WIN32)
         add_custom_command(TARGET ${t} POST_BUILD COMMAND mv ./lib${t}.dll ./lib/)
-    ELSE()    
-        add_custom_command(TARGET ${t} POST_BUILD COMMAND mv ./lib${t}.dll ./lib/)
+    # ELSE()    
+    #     add_custom_command(TARGET ${t} POST_BUILD COMMAND mv ./lib${t}.so ./lib/)
     ENDIF(WIN32)
 
 endmacro()

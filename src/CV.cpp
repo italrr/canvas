@@ -1242,7 +1242,8 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                 }  
                 fn->params.push_back(name);
                 auto v = fctx->buildNil();
-                fctx->setName(name, v->id);
+                fctx->set(v->id, v);
+                fctx->setName(name, v);
             }
 
             auto target = CV::Translate(token->inner[1], prog, fctx, cursor);
@@ -1273,6 +1274,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
             }
             auto ins = prog->createInstruction(CV::InstructionType::CARBON_COPY, token);
             auto nv = ctx->buildNil();
+            ctx->set(nv->id, nv);
             ins->data.push_back(ctx->id);
             ins->data.push_back(nv->id);
             ins->params.push_back(target->id);
@@ -1340,17 +1342,18 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
 
                 auto &targetData = prog->getCtx(target->data[2])->get(target->data[3]);
                 ctx->set(targetData->id, targetData);
-                ctx->setName(name, targetData->id);  
+                ctx->setName(name, targetData);  
                 return target;
 
             }else
             if(target->type == CV::InstructionType::PROXY_STATIC){
                 auto &targetData = prog->getCtx(target->data[0])->get(target->data[1]);
                 ctx->set(targetData->id, targetData);
-                ctx->setName(name, targetData->id);  
+                ctx->setName(name, targetData);  
                 return target;
             }else{
                 auto targetData = ctx->buildNil();
+                ctx->set(targetData->id, targetData);
 
                 auto ins = prog->createInstruction(CV::InstructionType::LET, token);
                 ins->literal.push_back(name);
@@ -1358,7 +1361,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                 ins->data.push_back(targetData->id);
                 ins->params.push_back(target->id);
 
-                ctx->setName(name, targetData->id);  
+                ctx->setName(name, targetData);  
 
                 return ins;
             }
@@ -1403,8 +1406,8 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
             }else{            
                 auto ins = prog->createInstruction(CV::InstructionType::PROXY_STATIC, token);
                 auto string = ctx->buildString("");
-                string->v = token->first.substr(1, token->first.length() - 2);
                 ctx->set(string->id, string);
+                string->v = token->first.substr(1, token->first.length() - 2);
                 ins->data.push_back(ctx->id);
                 ins->data.push_back(string->id);
                 return ins;
@@ -1526,15 +1529,17 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                     ghostData = prog->getCtx(fetched->data[0])->get(fetched->data[1]);
                 }else{
                     ghostData = ctx->buildNil();
+                    ctx->set(ghostData->id, ghostData);
                 }
                 if(ctx->getName(name, true).size() == 0){
-                    ctx->setName(name, ghostData->id);
+                    ctx->setName(name, ghostData);
                 }
                 ins->params.push_back(fetched->id);
             }else{
                 ghostData = ctx->buildNil();
+                ctx->set(ghostData->id, ghostData);
                 if(ctx->getName(name, true).size() == 0){
-                    ctx->setName(name, ghostData->id);
+                    ctx->setName(name, ghostData);
                 }
             }
             // Pass rest of data to ins
@@ -1591,6 +1596,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
 
                         auto childIns = prog->createInstruction(CV::InstructionType::PROXY_PROMISE, token);
                         auto targetData = hctx->buildNil();
+                        hctx->set(targetData->id, targetData);
                         childIns->data.push_back(hctx->id);
                         childIns->data.push_back(targetData->id);
                         childIns->params.push_back(ins->id);
@@ -1635,6 +1641,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                         // Build Promise Proxy to store result value 
                         auto childIns = prog->createInstruction(CV::InstructionType::PROXY_PROMISE, token);
                         auto targetData = hctx->buildNil();
+                        hctx->set(targetData->id, targetData);;
                         childIns->data.push_back(hctx->id);
                         childIns->data.push_back(targetData->id);
                         childIns->params.push_back(ins->id);
@@ -1682,6 +1689,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                                 // Several names returns a list of values
                                     auto ins = prog->createInstruction(CV::InstructionType::CONSTRUCT_LIST, token);
                                     auto list = hctx->buildList();
+                                    hctx->set(list->id, list);
                                     ins->data.push_back(hctx->id);
                                     ins->data.push_back(list->id);
                                     for(int i = 0; i < names.size(); ++i){
@@ -1907,6 +1915,7 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
                     auto ghostDataId = ins->data[3];
                     auto ghostDataCtxId = ins->data[2];
                     auto &cctx = prog->getCtx(ghostDataCtxId);
+                    // Unlike let, the target's id is not mutated
                     cctx->set(ghostDataId, quant); 
                 }  
             }else{
@@ -2049,6 +2058,8 @@ static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
                 st->state = CV::ControlFlowState::CRASH;
                 return v;
             }
+            // Target data's id is mutated _after_
+            v->id = targetDataID;
             cctx->set(targetDataID, v);
 
             ctx->setPrefetch(ins->id, {(unsigned)cctx->id, (unsigned)targetDataID});
@@ -2419,9 +2430,9 @@ void CV::Context::set(int id, const std::shared_ptr<CV::Quant> &q){
     memoryMutex.unlock();
 }
 
-void CV::Context::setName(const std::string &name, unsigned id){
+void CV::Context::setName(const std::string &name, const std::shared_ptr<CV::Quant> &q){
     nameMutex.lock();
-    this->names[name] = id;
+    this->names[name] = q;
     nameMutex.unlock();
 }
 
@@ -2456,10 +2467,15 @@ std::shared_ptr<CV::TypeFunctionBinary> CV::Context::registerBinaryFuntion(const
     fn->ref = ref;
     fn->ctxId = this->id;
     fn->name = name;
+    
     this->memoryMutex.lock();
     this->memory[fn->id] = fn;
     this->memoryMutex.unlock();
-    this->names[name] = fn->id;
+    
+    this->nameMutex.lock();
+    this->names[name] = fn;
+    this->nameMutex.unlock();
+
     return fn;
 }
 
@@ -2468,11 +2484,54 @@ std::shared_ptr<CV::TypeFunctionBinary> CV::Context::registerBinaryFuntion(const
     fn->lambda = lambda;
     fn->ctxId = this->id;
     fn->name = name;
+
     this->memoryMutex.lock();
     this->memory[fn->id] = fn;
     this->memoryMutex.unlock();
-    this->names[name] = fn->id;
+
+    this->nameMutex.lock();
+    this->names[name] = fn;
+    this->nameMutex.unlock();
+
     return fn;  
+}
+
+int CV::Context::getMemorySize(){
+    int n = 0;
+    this->memoryMutex.lock();
+    n = this->memory.size();
+    this->memoryMutex.unlock();    
+    return n;
+}
+
+void CV::Context::clear(){
+    this->memoryMutex.lock();
+    std::vector<int> toDelete;
+    // Check trailing data
+    for(auto &it : this->memory){
+        auto id = it.first;
+        auto &q = it.second;
+        // std::cout << "data " << CV::QuantType::name(q->type) << " " << id << std::endl;
+        if(it.second.use_count() <= 1){
+            toDelete.push_back(id);
+        }
+    }
+    // Check trailing names
+    for(auto &it : this->names){
+        auto id = it.first;
+        auto &q = it.second;
+        // std::cout << "name " << CV::QuantType::name(q->type) << " " << id << std::endl;
+        if(it.second.use_count() <= 1){
+            toDelete.push_back(q->id);
+        }
+    }    
+    for(int j = 0; j < toDelete.size(); ++j){
+        if(this->memory[toDelete[j]].use_count() > 0){
+            this->memory[toDelete[j]]->clear();
+        }
+        this->memory.erase(toDelete[j]);
+    }
+    this->memoryMutex.unlock();   
 }
 
 // Name's context Id and data Id upwards
@@ -2481,7 +2540,7 @@ std::vector<int> CV::Context::getName(const std::string &name, bool local){
     if(this->names.count(name) > 0){
         std::vector<int> ids;
         ids.push_back(this->id);
-        ids.push_back(this->get(this->names[name])->id);
+        ids.push_back(this->names[name]->id);
         this->nameMutex.unlock();
         return ids;
     }
@@ -2492,7 +2551,7 @@ std::vector<int> CV::Context::getName(const std::string &name, bool local){
 bool CV::Context::isNamed(int id){
     this->nameMutex.lock();
     for(auto &it : this->names){
-        if(it.second == id){
+        if(it.second->id == id){
             this->nameMutex.unlock();
             return true;
         }
@@ -2532,6 +2591,7 @@ bool CV::Program::deleteContext(int id){
     ctxMutex.lock();
     if(this->ctx.count(id) > 0){
         this->ctx[id]->clearPrefetch();
+        this->ctx[id]->clear();
         this->ctx.erase(id); // Careful!! TODO: Check
         ctxMutex.unlock();
         return true;
@@ -2546,6 +2606,7 @@ void CV::Program::issueGCOperation(const CV::GCOperation &op){
     this->gcOpsMutex.unlock();
 }
 
+static int c = 0;
 void CV::Program::quickGC(){
     ctxMutex.lock();
     // Clear trailing data
@@ -2556,30 +2617,15 @@ void CV::Program::quickGC(){
     }
     for(int i = 0; i < actx.size(); ++i){
         auto &cctx = this->ctx[actx[i]];
-        cctx->memoryMutex.lock();
-        std::vector<int> toDelete;
-        for(auto &it : cctx->memory){
-            auto id = it.first;
-            auto &q = it.second;
-            std::cout << CV::QuantType::name(q->type) << " " << id << std::endl;
-            if(it.second.use_count() == 1 && !cctx->isNamed(id)){
-                toDelete.push_back(id);
-            }
-        }
-        for(int j = 0; j < toDelete.size(); ++j){
-            cctx->memory[toDelete[j]]->clear();
-            cctx->memory.erase(toDelete[j]);
-        }
-        std::cout << "ctx " << cctx->memory.size() << std::endl;
-        if(cctx->memory.size() == 0){
-            dctx.push_back(cctx->id);
-        }
-        cctx->memoryMutex.unlock();
+        cctx->clear();
         cctx->clearPrefetch();
+        // std::cout << "ctx " << cctx->getMemorySize() << std::endl;
+        if(cctx->getMemorySize() == 0){
+            dctx.push_back(cctx->id);
+        }         
     }
-    std::cout << "all " << this->ctx.size() << std::endl;
+    // std::cout << "all " << this->ctx.size() << std::endl;
     ctxMutex.unlock();
-    // Empty contexts must be deleted
     for(int i = 0; i < dctx.size(); ++i){
         this->deleteContext(dctx[i]);
     }
@@ -2606,10 +2652,17 @@ void CV::Program::deleteThread(unsigned id){
 }
 
 void CV::Program::end(){
+    // Finish threads
     for(auto &it : threads){
         // We shall finish for threads to finish
         it.second.join(); 
     }
+    // Same for contexts
+    for(auto &it : this->ctx){
+        it.second->clear();
+        it.second->clearPrefetch();
+    }
+    this->ctx.clear();
 }
 
 
@@ -2660,9 +2713,16 @@ bool CV::Unimport(int id){
     return true;
 }
 
-int CV::ImportDynamicLibrary(const std::string &path, const std::string &fname, const std::shared_ptr<CV::Program> &prog, const CV::ContextType &ctx, const CV::CursorType &cursor){
+#define CV_IMPORT_LIBRARY_ENTRY_POINT_ARGS const std::shared_ptr<CV::Program> &prog, const CV::ContextType &ctx, const CV::CursorType &cursor
+
+int CV::ImportDynamicLibrary(
+    const std::string &path,
+    const std::string &fname,
+    const std::shared_ptr<CV::Program> &prog,
+    const CV::ContextType &ctx, const CV::CursorType &cursor
+){
     #if (_CV_PLATFORM == _CV_PLATFORM_TYPE_LINUX)
-        void (*registerlibrary )(const std::shared_ptr<CV::Stack> &stack);
+        typedef void (*rlib)(CV_IMPORT_LIBRARY_ENTRY_POINT_ARGS);
         void* handle = NULL;
         const char* error = NULL;
         handle = dlopen(path.c_str(), RTLD_LAZY);
@@ -2671,7 +2731,7 @@ int CV::ImportDynamicLibrary(const std::string &path, const std::string &fname, 
             std::exit(1);
         }
         dlerror();
-        registerlibrary = (void (*)(const std::shared_ptr<CV::Stack> &stack)) dlsym( handle, "_CV_REGISTER_LIBRARY" );
+        rlib registerlibrary = (void (*)(CV_IMPORT_LIBRARY_ENTRY_POINT_ARGS)) dlsym( handle, "_CV_REGISTER_LIBRARY" );
         error = dlerror();
         if(error){
             fprintf( stderr, "Failed to load dynamic library '_CV_REGISTER_LIBRARY' from '%s': %s\n", fname.c_str(), error);
@@ -2679,11 +2739,12 @@ int CV::ImportDynamicLibrary(const std::string &path, const std::string &fname, 
             std::exit(1);
         }
         // Try to load
-        (*registerlibrary)(stack);
-        loadedLibraries.push_back(handle);
+        (*registerlibrary)(prog, ctx, cursor);
+        auto id = GEN_ID();
+        prog->loadedDynamicLibs[id] = handle;
         return true;
     #elif  (_CV_PLATFORM == _CV_PLATFORM_TYPE_WINDOWS)
-        typedef void (*rlib)(const std::shared_ptr<CV::Program> &prog, const CV::ContextType &ctx, const CV::CursorType &cursor);
+        typedef void (*rlib)(CV_IMPORT_LIBRARY_ENTRY_POINT_ARGS);
 
         rlib entry;
         HMODULE hdll;
@@ -2720,31 +2781,3 @@ std::string CV::GetLogo(){
 void CV::SetCanvasLibHome(const std::string &path){
     CV_LIB_HOME = path;
 }
-
-// int main(){
-
-//     auto cursor = std::make_shared<CV::Cursor>();
-//     auto program = std::make_shared<CV::Program>();
-//     program->rootContext = program->createContext();
-    
-//     CV::InitializeCore(program);
-
-//     auto entrypoint = CV::Compile("print 'hello world'", program, cursor);
-//     if(cursor->error){
-//         std::cout << cursor->getRaised() << std::endl;
-//         std::exit(1);
-//     }
-//     program->entrypointIns = entrypoint->id;
-//     auto result = CV::Execute(entrypoint, program->rootContext, program, cursor);
-//     if(cursor->error){
-//         std::cout << cursor->getRaised() << std::endl;
-//         std::exit(1);
-//     }
-
-//     std::cout << CV::QuantToText(result) << std::endl;
-
-//     std::cout << "exit" << std::endl;
-
-//     return 0;
-
-// }

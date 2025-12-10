@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <iostream>
+#include "thirdparty/cpp-linenoise.hpp"
 #include "CV.hpp"
 
 struct ExecArg {
@@ -145,12 +146,36 @@ int main(int argc, char* argv[]){
 
 		printVersion(false, useRelaxed ? "RELAXED" : "");
 
+		linenoise::SetCompletionCallback([&](const char* editBuffer, std::vector<std::string>& completions){
+			// Should probably be improved to be context aware
+
+			program->rootContext->nameMutex.lock();
+			auto names = program->rootContext->names;
+			program->rootContext->nameMutex.unlock();
+
+			for(auto &it : names){
+				if(it.first[0] == editBuffer[0]){
+					completions.push_back(it.first);
+				}
+			}
+		});
+
+		linenoise::SetMultiLine(false);
+		linenoise::SetHistoryMaxLen(1000);
+
 		while(true){
 			auto st = std::make_shared<CV::ControlFlow>();
+
+			// Read line
 			std::string input = "";
-			std::cout << CV::GetLogo() << "> ";
-			std::getline (std::cin, input);
-			
+			auto quit = linenoise::Readline(
+				(CV::GetLogo()+"> ").c_str(),
+				input
+			);
+			if(quit){
+				break;
+			}
+
 			if(input.size() > 0){
 				// Compile
 				auto entrypoint = CV::Compile(input, program, cursor);
@@ -180,6 +205,8 @@ int main(int argc, char* argv[]){
 				if(!useNoReturn){
 					std::cout << CV::QuantToText(result) << std::endl;
 				}
+				// Add to history
+				linenoise::AddHistory(input.c_str());				
 			}
 			program->quickGC();
 		}

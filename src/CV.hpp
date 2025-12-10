@@ -485,7 +485,7 @@
             std::mutex nameMutex;
             std::mutex prefetchMutex;
             std::unordered_map<unsigned, std::vector<unsigned>> prefetched;
-            std::unordered_map<std::string, unsigned> names;
+            std::unordered_map<std::string, std::shared_ptr<CV::Quant>> names;
             std::unordered_map<unsigned, std::shared_ptr<CV::Quant>> memory;
             std::shared_ptr<CV::Context> head;
             Context();
@@ -500,12 +500,13 @@
             std::shared_ptr<CV::TypeString> buildString(const std::string &s = "");
             std::shared_ptr<TypeFunctionBinary> registerBinaryFuntion(const std::string &name, void *ref);
             std::shared_ptr<TypeFunctionBinary> registerBinaryFuntion(const std::string &name, const CV::BinaryFunctionLambda &lambda);
-            
+            void clear();
+            int getMemorySize();
             std::vector<int> getName(const std::string &name, bool local = false);
             bool isNamed(int id);
             std::shared_ptr<CV::Quant> &get(int id);
             void set(int id, const std::shared_ptr<CV::Quant> &q);
-            void setName(const std::string &name, unsigned id);
+            void setName(const std::string &name, const std::shared_ptr<CV::Quant> &q);
             void setPrefetch(unsigned id, const std::vector<unsigned> &v);
             std::vector<unsigned> getPrefetch(unsigned id);
             bool isPrefetched(unsigned id);
