@@ -22,7 +22,8 @@ endmacro()
 
 set (cv_src 
             src/CV.cpp
-            src/Core.cpp)
+            # src/Core.cpp
+            )
 
 if(UNIX AND NOT APPLE)
     set(LINUX TRUE)
@@ -45,12 +46,12 @@ target_link_libraries(cv cv_bin)
 # LIBRARIES
 # -------------------------------------------------------------------------- #
 
-# io
-add_library(io SHARED src/libs/io.cpp src/CV.cpp src/Core.cpp)
-mvLib(io)
-# json
-add_library(json SHARED src/libs/json.cpp src/libs/thirdparty/json11.cpp src/CV.cpp src/Core.cpp)
-mvLib(json)
-# bmp
-add_library(bmp SHARED src/libs/bmp.cpp src/CV.cpp src/Core.cpp)
-mvLib(bmp)
+# # io
+# add_library(io SHARED src/libs/io.cpp src/CV.cpp src/Core.cpp)
+# mvLib(io)
+# # json
+# add_library(json SHARED src/libs/json.cpp src/libs/thirdparty/json11.cpp src/CV.cpp src/Core.cpp)
+# mvLib(json)
+# # bmp
+# add_library(bmp SHARED src/libs/bmp.cpp src/CV.cpp src/Core.cpp)
+# mvLib(bmp)

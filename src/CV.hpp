@@ -6,14 +6,13 @@
     #include <unordered_map>
     #include <memory>
     #include <thread>
+    #include <set>
     #include <string>
     #include <functional>
     #include <mutex>
 
     #define CV_DEFAULT_NUMBER_TYPE double
-    typedef CV_DEFAULT_NUMBER_TYPE number;
-    static const number CV_RELEASE_VERSION[3] = { 0, 9, 1 };
-    static const std::string CV_RELEASE_DATE = "Aug. 30th 2025"; 
+    typedef CV_DEFAULT_NUMBER_TYPE CV_NUMBER;
 
     #define CV_ERROR_MSG_NOOP_NO_INSTRUCTIONS "Provided no instructions"
     #define CV_ERROR_MSG_WRONG_TYPE "Provided wrong types"
@@ -32,14 +31,11 @@
     #define CV_ERROR_MSG_LIBRARY_NOT_VALID "Invalid Library Import"
     #define CV_ERROR_MSG_STORE_UNDEFINED_MEMBER "Undefined Named Type"
 
-    #define _CV_PLATFORM_TYPE_LINUX 0
-    #define _CV_PLATFORM_TYPE_WINDOWS 1
-    #define _CV_PLATFORM_TYPE_OSX 2
-    #define _CV_PLATFORM_TYPE_UNDEFINED 4
-
-    #define CV_BINARY_FN_PARAMS const std::vector<std::shared_ptr<CV::Instruction>> &, const std::string&, const std::shared_ptr<CV::Token> &, const std::shared_ptr<CV::Cursor> &, int, int, int, const std::shared_ptr<CV::Program> &, const std::shared_ptr<CV::ControlFlow> &
 
     namespace CV {
+
+        static const CV_NUMBER VERSION[3] = { 0, 9, 1 };
+        static const std::string RELEASE = "Dec. 20th 2025"; 
 
         ////////////////////////////
         //// PLATFORM
@@ -117,123 +113,38 @@
         //// TYPES
         ///////////////////////////
 
-        namespace QuantType {
-            enum QuantType : int {
-                NIL,
-                NUMBER,
-                STRING,
-                LIST,
-                STORE,
-                PROTOTYPE,
-                FUNCTION,
-                BINARY_FUNCTION,
-                THREAD
-            };
-            static std::string name(int t){
-                switch(t){
-                    case QuantType::NIL: {
-                        return "NIL";
-                    };
-                    case QuantType::NUMBER: {
-                        return "NUMBER";
-                    };
-                    case QuantType::STRING: {
-                        return "STRING";
-                    };
-                    case QuantType::LIST: {
-                        return "LIST";
-                    };
-                    case QuantType::STORE: {
-                        return "STORE";
-                    };
-                    case QuantType::PROTOTYPE: {
-                        return "PROTOTYPE";
-                    };
-                    case QuantType::FUNCTION: {
-                        return "FUNCTION";
-                    };
-                    case QuantType::BINARY_FUNCTION: {
-                        return "BINARY_FUNCTION";
-                    };
-                    case QuantType::THREAD: {
-                        return "THREAD";
-                    };
-                    default:
-                        return "UNDEFINED";
-                }
+        enum DataType {
+            NIL,
+            NUMBER,
+            STRING,
+            LIST,
+            STORE,
+            FUNCTION
+        };
+
+        static std::string DataTypeName(int v){
+            switch(v){
+                case CV::DataType::NUMBER: {
+                    return "NUMBER";
+                };
+                case CV::DataType::STRING: {
+                    return "STRING";
+                };
+                case CV::DataType::LIST: {
+                    return "LIST";
+                };  
+                case CV::DataType::STORE: {
+                    return "STORE";
+                };
+                case CV::DataType::FUNCTION: {
+                    return "FUNCTION";
+                };                                                                                                  
+                default:
+                case CV::DataType::NIL: {
+                    return "NIL";
+                };
             }
         }
-
-        struct Token;
-        struct Cursor;
-        struct Program;
-        struct ControlFlow;
-        struct Instruction;
-        typedef std::function<void(CV_BINARY_FN_PARAMS)> BinaryFunctionLambda;
-
-        struct Quant {
-            int id;
-            int type;
-            Quant();
-            virtual bool clear(){
-                return true;
-            }
-            virtual bool isInit(){
-                return true;
-            }
-            virtual std::shared_ptr<Quant> copy();
-        };
-
-        struct TypeNumber : CV::Quant {
-            number v;
-            TypeNumber();
-            virtual bool clear();
-            virtual std::shared_ptr<CV::Quant> copy();
-        };
-
-        struct TypeString : CV::Quant {
-            std::string v;
-            TypeString();
-            virtual bool clear();
-            virtual std::shared_ptr<CV::Quant> copy();
-        };
-
-        struct TypeList : CV::Quant {
-            std::vector<std::shared_ptr<CV::Quant>> v;
-            TypeList();
-            virtual bool isInit();        
-            virtual bool clear();
-            virtual std::shared_ptr<CV::Quant> copy();
-        };
-
-        struct TypeStore : CV::Quant {
-            std::unordered_map<std::string, std::shared_ptr<CV::Quant>> v;
-            TypeStore();
-            virtual bool isInit();    
-            virtual bool clear();
-            virtual std::shared_ptr<CV::Quant> copy();
-        };        
-        struct Token;
-        struct TypeFunction : CV::Quant {
-            int entrypoint;
-            int ctxId;
-            std::string name;
-            std::vector<std::string> params;
-            std::shared_ptr<CV::Token> body;
-            TypeFunction();
-            virtual bool clear();
-            virtual std::shared_ptr<CV::Quant> copy();
-        };        
-
-        struct Program;
-        struct TypeFunctionBinary : TypeFunction {
-            void *ref;
-            CV::BinaryFunctionLambda lambda;
-            std::unordered_map<int, bool> multiParam;
-            TypeFunctionBinary();
-            virtual bool clear();
-            virtual std::shared_ptr<CV::Quant> copy();
-        };          
 
         namespace ThreadState {
             enum ThreadState : int {
@@ -260,19 +171,70 @@
             } 
         }
 
-        struct TypeThread : CV::Quant {
-            int entrypoint;
-            int ctxId;
-            int threadId;
-            int state;
-            int returnId;
-            std::mutex accessMutex;
-            TypeThread();
-            void setState(int nstate);
-            virtual bool clear();
-            virtual std::shared_ptr<CV::Quant> copy();
-        };          
+        struct Program;
+        struct Context;
+        struct Cursor;
+        struct Token;
+        struct ControlFlow;        
+        struct Data;
+        struct Instruction;
 
+        typedef std::function<CV::Data*(
+            const std::shared_ptr<CV::Program> &prog,
+            const std::string &name,
+            const std::vector<std::pair<std::string, std::shared_ptr<CV::Instruction>>> &params,
+            const std::shared_ptr<CV::Token> &token,
+            const std::shared_ptr<CV::Cursor> &cursor,
+            const std::shared_ptr<CV::Context> &ctx,
+            const std::shared_ptr<CV::ControlFlow> &st            
+        )> Lambda;
+
+        struct Data {
+            int id;
+            int ref;
+            CV::DataType type;
+            std::mutex mutexRefCount;
+            Data();
+            virtual void clear(const std::shared_ptr<CV::Program> &prog);
+            virtual void build(const std::shared_ptr<CV::Program> &prog);
+            int getRefCount();
+            void incRefCount();
+            void decRefCount();          
+        };
+
+        struct DataNumber : Data {
+            CV_NUMBER value;
+            DataNumber(CV_NUMBER n = 0);
+        };
+
+        struct DataString : Data {
+            std::string value;
+            DataString(const std::string &value = "");
+        };        
+
+        struct DataList : Data {
+            std::vector<int> value;
+            DataList();
+            void clear(const std::shared_ptr<CV::Program> &prog);
+        };       
+
+        struct DataStore : Data {
+            std::unordered_map<std::string, int> value;
+            DataStore();
+            void clear(const std::shared_ptr<CV::Program> &prog);
+        };           
+        
+
+        struct DataFunction : Data {
+            bool isBinary;
+            bool isVariadic;
+            CV::Lambda lambda;
+            std::shared_ptr<CV::Token> body;
+            std::vector<std::string> params;
+            DataFunction();
+            void clear(const std::shared_ptr<CV::Program> &prog);
+        };            
+        
         ////////////////////////////
         //// PARSING
         ///////////////////////////
@@ -323,52 +285,23 @@
             void setError(const std::string &title, const std::string &message, int line);
         };
 
+        typedef std::shared_ptr<Cursor> CursorType;
+
         struct Token {
             std::string first;
             unsigned line;
             bool solved;
             bool complex;
             std::vector<std::shared_ptr<Token>> inner;
-            Token(){
-                solved = false;
-                complex = false;
-            }
-            Token(const std::string &first, unsigned line){
-                this->first = first;
-                this->line = line;
-                refresh();
-            }    
-            std::shared_ptr<CV::Token> emptyCopy(){
-                auto c = std::make_shared<CV::Token>();
-                c->first = this->first;
-                c->line = this->line;
-                c->refresh();
-                return c;
-            }
-            std::shared_ptr<CV::Token> copy(){
-                auto c = std::make_shared<CV::Token>();
-                c->first = this->first;
-                c->line = this->line;
-                c->inner = this->inner;
-                c->refresh();
-                return c;
-            }
-            std::string str() const {
-                auto f = this->first;
-                std::string out = f + (this->first.size() > 0 && this->inner.size() > 0  ? " " : "");
-                for(int i = 0; i < this->inner.size(); ++i){
-                    out += inner[i]->inner.size() == 0 ? inner[i]->first : inner[i]->str();
-                    if(i < this->inner.size()-1){
-                        out += " ";
-                    }
-                }
-                return this->inner.size() > 0 ? "[" + out + "]" : out;
-            }
-            void refresh(){
-                complex = this->inner.size() > 0;
-                solved = !(first.length() >= 3 && first[0] == '[' && first[first.size()-1] == ']');
-            }
+            Token();
+            Token(const std::string &first, unsigned line);    
+            std::shared_ptr<CV::Token> emptyCopy();
+            std::shared_ptr<CV::Token> copy();
+            std::string str() const;
+            void refresh();
         };
+
+        typedef std::shared_ptr<Token> TokenType;
 
         ////////////////////////////
         //// JIT
@@ -399,17 +332,17 @@
                 CF_LOOP_FOR,
                 CF_LOOP_ITER,            
                 CF_INVOKE_FUNCTION,
-                CF_INVOKE_BINARY_FUNCTION,                  // DATA[0] -> CTX_ID, DATA[1] -> DATA_ID(owner), DATA[2]-> N_ARGS DATA[3] -> TARGET_DATA_ID | PARAMS... -> ARG_INS...
+                CF_INVOKE_BINARY_FUNCTION,
                 CF_RAW_TOKEN_REFERENCE,
 
                 // PROXIES
-                PROXY_STATIC = CV_INS_RANGE_TYPE_PROXY,     // DATA[0] -> CTX_ID, DATA[1] -> DATA_ID
-                PROXY_PROMISE,                              // DATA[0] -> CTX_ID, DATA[1] -> PROMISED_DATA_ID |  PARAM[0] -> TARGET_INS, 
-                PROXY_DYNAMIC,                              // DATA[0] -> CTX_ID, DATA[1] -> DATA_ID, DATA[n] -> ...LITERAL, OPTIONAL: PARAM[0] -> preprocess
-                PROXY_NAMER,                                // PARAM[0] -> TARGET_INS | LITERAL[0] -> NAME                            
-                PROXY_EXPANDER,                             // PARAM[0] -> TARGET_INS
-                PROXY_PARALELER,                            // DATA[0] -> CTX_ID, DATA[1] -> DATA_ID | PARAM[0] -> TARGET_INS
-                PROXY_ACCESS,                               // DATA[0] -> CTX_ID, DATA[1] -> DATA_ID, LITERAL[0] -> NAME
+                PROXY_STATIC = CV_INS_RANGE_TYPE_PROXY,
+                PROXY_PROMISE,
+                PROXY_DYNAMIC,
+                PROXY_NAMER,
+                PROXY_EXPANDER,
+                PROXY_PARALELER,
+                PROXY_ACCESS,
             };
         }
 
@@ -479,58 +412,7 @@
             }
         };
 
-        struct Context {
-            int id;
-            std::mutex memoryMutex;
-            std::mutex nameMutex;
-            std::mutex prefetchMutex;
-            std::unordered_map<unsigned, std::vector<unsigned>> prefetched;
-            std::unordered_map<std::string, std::shared_ptr<CV::Quant>> names;
-            std::unordered_map<unsigned, std::shared_ptr<CV::Quant>> memory;
-            std::shared_ptr<CV::Context> head;
-            Context();
-            Context(const std::shared_ptr<CV::Context> &head);
-            std::shared_ptr<TypeFunctionBinary> registerBinaryFuntion(const std::string &name, void *ref);
-            std::shared_ptr<TypeFunctionBinary> registerBinaryFuntion(const std::string &name, const CV::BinaryFunctionLambda &lambda);
-            void clear();
-            int getMemorySize();
-            std::vector<int> getName(const std::string &name, bool local = false);
-            bool isNamed(int id);
-            std::shared_ptr<CV::Quant> &get(int id);
-            void set(int id, const std::shared_ptr<CV::Quant> &q);
-            void setName(const std::string &name, const std::shared_ptr<CV::Quant> &q);
-            void setPrefetch(unsigned id, const std::vector<unsigned> &v);
-            std::vector<unsigned> getPrefetch(unsigned id);
-            bool isPrefetched(unsigned id);
-            void clearPrefetch();
-        };
-
-        struct Program;
-        typedef std::function<void(const std::shared_ptr<Program> &prog)> GCOperation;
-
-        struct Program {
-            std::mutex ctxMutex;
-            std::mutex threadMutex;
-            unsigned entrypointIns;
-            std::vector<GCOperation> gcOps;
-            std::mutex gcOpsMutex;
-            std::shared_ptr<Context> rootContext;
-            std::mutex loadedDynamicLibsMutex;
-            std::unordered_map<unsigned, std::pair<void*,std::string>> loadedDynamicLibs;
-            void issueGCOperation(const CV::GCOperation &op);
-            std::shared_ptr<CV::Instruction> createInstruction(unsigned type, const std::shared_ptr<CV::Token> &token);
-            std::shared_ptr<Context> createContext(const std::shared_ptr<CV::Context> &head = std::shared_ptr<CV::Context>(NULL));
-            bool deleteContext(int id);
-            std::shared_ptr<CV::Context> &getCtx(int id);
-            std::mutex insMutex;
-            std::shared_ptr<CV::Instruction> &getIns(int id);
-            void deleteThread(unsigned id);
-            void end();
-            std::unordered_map<unsigned, std::shared_ptr<CV::Instruction>> instructions;
-            std::unordered_map<unsigned, std::shared_ptr<CV::Context>> ctx; 
-            std::unordered_map<unsigned, std::thread> threads;
-            void quickGC();
-        };
+        typedef std::shared_ptr<CV::Instruction> InsType;
 
         struct ControlFlow {
             int state;
@@ -539,7 +421,7 @@
             int next;
             int current;
             int prev;
-            std::shared_ptr<CV::Quant> payload;
+            CV::Data* payload;
             ControlFlow(){
                 this->state = CV::ControlFlowState::CONTINUE;
                 this->ref = 0;
@@ -549,32 +431,100 @@
                 this->prev = CV::InstructionType::INVALID;                
             }
         };
-
-        typedef std::shared_ptr<CV::Instruction> InsType;
-        typedef std::shared_ptr<CV::Cursor> CursorType;
-        typedef std::shared_ptr<CV::Program> ProgramType;
-        typedef std::shared_ptr<CV::Token> TokenType;
-        typedef std::shared_ptr<CV::Context> ContextType;
+        
         typedef std::shared_ptr<CV::ControlFlow> CFType;
+
+        ////////////////////////////
+        //// Context
+        ///////////////////////////        
+        struct Context {
+            int id;
+            int top;
+            std::set<int> dependants;
+            std::mutex mutexData;
+            std::mutex mutexNames;
+            std::mutex mutexDependants;
+            std::unordered_map<std::string, int> names;
+            std::set<int> data;
+            Context(int root = -1);
+            void insertDependant(int ctxId);
+            bool removeDependant(int id);
+            bool isNamed(int dataId);
+            std::pair<int,int> getNamed(const std::shared_ptr<CV::Program> &prog, const std::string &name, bool localOnly = false);
+            bool isName(const std::string &name);
+            void setName(const std::string &name, int id);
+            bool removeName(int id);
+            bool isDataIn(int id);
+            bool setData(const std::shared_ptr<CV::Program> &prog, int dataId);
+            bool removeData(const std::shared_ptr<CV::Program> &prog, int dataId);
+            void clear(const std::shared_ptr<CV::Program> &prog);
+            void registerFunction(
+                const std::shared_ptr<CV::Program> &prog,
+                const std::string &name,
+                const std::vector<std::string> &params,
+                const CV::Lambda &lambda
+            );
+            void registerFunction(
+                const std::shared_ptr<CV::Program> &prog,
+                const std::string &name,
+                const CV::Lambda &lambda
+            );            
+        };
+        typedef std::shared_ptr<CV::Context> ContextType;
+        
+        ////////////////////////////
+        //// Program
+        ///////////////////////////
+        struct Program : std::enable_shared_from_this<Program> {
+            std::mutex mutexContext;
+            std::mutex mutexStack;
+            std::mutex mutexIns;
+
+            std::unordered_map<int, std::shared_ptr<CV::Context>> contexts;
+            std::unordered_map<int, CV::Data*> stack;
+            std::unordered_map<int, CV::InsType> instructions;
+
+            std::mutex prefetchMutex;
+            std::unordered_map<int, int> prefetched;
+
+            CV::ContextType root;
+
+            Program();
+            ~Program();
+
+            void setPrefetch(int insId, int v);
+            bool removePrefetch(int insId);
+            int getPrefetch(int id);
+            bool isPrefetched(int id);
+            void clearPrefetch();            
+
+            void end();
+            CV::InsType createInstruction(unsigned type, const std::shared_ptr<CV::Token> &token);
+            std::shared_ptr<CV::Instruction> &getIns(int id);
+
+            bool swapId(int fdataId, int tdataId);
+            bool placeData(int dataId, int ctxId);
+            bool moveData(int dataId, int fctxId, int tctxId);
+            
+            CV::ContextType getContext(int id);
+            CV::ContextType createContext(int root = -1);
+            bool removeContext(int id);
+
+            CV::Data *getData(int dataId);
+
+            int allocateData(CV::Data *ref);
+            bool deallocateData(int id);
+
+            CV::Data* buildNil();
+
+            void quickGC();
+        };
+
+        typedef std::shared_ptr<CV::Program> ProgramType;
 
         ////////////////////////////
         //// TOOLS
         ///////////////////////////
-
-        namespace Test {
-            bool IsItPrefixInstruction(const std::shared_ptr<CV::Instruction> &ins);
-        }
-        
-        namespace ErrorCheck {
-            bool AllNumbers(const std::vector<std::shared_ptr<CV::Quant>> &args, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor);
-            bool ExpectsOperands(int prov, int exp, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor);
-            bool ExpectsTypeAt(int type, int exp, int at, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor);
-            bool ExpectsNoMoreOperands(int prov, int max, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor);
-            bool ExpectsExactlyOperands(int prov, int exp, const std::string &name, const CV::TokenType &token, const CV::CursorType &cursor);
-            bool ExpectsExactlyOperands(int prov, int exp, const std::string &name, const std::vector<std::string> &names, const CV::TokenType &token, const CV::CursorType &cursor);
-            bool ExpectNoPrefixer(const std::string &name, const std::vector<std::shared_ptr<CV::Instruction>> &args, const CV::TokenType &token, const CV::CursorType &cursor);
-        }
-
         namespace Tools {
             namespace Color {
                 enum Color : int {
@@ -599,42 +549,36 @@
             std::string lower(const std::string &in);
             std::string upper(const std::string &in);
             std::string fileExtension(const std::string &filename);
-        }
+            bool isInList(const std::string &v, const std::vector<std::string> &list);
+
+            namespace ErrorCheck {
+                bool AreAllType(
+                    const std::string &name,
+                    const std::vector<CV::Data*> &params,
+                    const std::shared_ptr<CV::Cursor> &cursor,
+                    const CV::TokenType &token,
+                    int expType
+                );
+            }
+
+        }        
+
+
+        ////////////////////////////
+        //// Data To Text
+        ///////////////////////////
+        std::string DataToText(const std::shared_ptr<CV::Program> &prog, CV::Data *t);        
+
 
         ////////////////////////////
         //// API
-        ///////////////////////////
-
-        namespace Build {
-            std::shared_ptr<CV::TypeNumber> Number(number n = 0);
-            std::shared_ptr<CV::TypeThread> Thread();
-            std::shared_ptr<CV::Quant> Copy(const std::shared_ptr<CV::Quant> &subject);
-            std::shared_ptr<CV::Quant> Nil();
-            std::shared_ptr<CV::Quant> Type(int type);
-            std::shared_ptr<CV::TypeList> List(const std::vector<std::shared_ptr<CV::Quant>> &list = {});
-            std::shared_ptr<CV::TypeStore> Store(const std::unordered_map<std::string, std::shared_ptr<CV::Quant>> &list = {});
-            std::shared_ptr<CV::TypeString> String(const std::string &s = "");            
-        }
-
-        int ImportDynamicLibrary(const std::string &path, const std::string &fname, const std::shared_ptr<CV::Program> &prog, const CV::ContextType &ctx, const CV::CursorType &cursor);
-        bool UnimportDynamicLibrary(
-            int id,
-            const std::shared_ptr<CV::Program> &prog,
-            const CV::ContextType &ctx,
-            const CV::CursorType &cursor            
-        );
-
-        int Import(const std::string &name, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor);
-        bool GetBooleanValue(const std::shared_ptr<CV::Quant> &data);
-        std::string QuantToText(const std::shared_ptr<CV::Quant> &t);
-        void SetUseColor(bool v);
-        std::string GetPrompt();
-        void InitializeCore(const CV::ProgramType &prog);
-        std::shared_ptr<CV::Quant> Execute(const CV::InsType &entry, const CV::ContextType &ctx, const CV::ProgramType &prog, const CV::CursorType &cursor, CFType cf);
-        CV::InsType Compile(const std::string &input, const CV::ProgramType &prog, const CV::CursorType &cursor, const CV::ContextType &ctx = CV::ContextType(NULL));
-        CV::InsType Compile(const CV::TokenType &input, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor);
+        ///////////////////////////        
+        CV::InsType Compile(const std::string &input, const CV::ProgramType &prog, const CV::CursorType &cursor, const CV::ContextType &ctx = NULL);
+        CV::InsType Compile(const CV::TokenType &input, const CV::ProgramType &prog, const CV::CursorType &cursor, const CV::ContextType &ctx);
         CV::InsType Translate(const CV::TokenType &token, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor);
-        void SetCanvasLibHome(const std::string &path);
+        CV::Data *Execute(const CV::InsType &entry, const CV::ProgramType &prog, const CV::CursorType &cursor, const CV::ContextType &ctx, CFType cf);
+        void SetupCore(const CV::ProgramType &prog);
+     
     }
 
 #endif
