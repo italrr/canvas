@@ -9,8 +9,7 @@ int main(){
 	auto program = std::make_shared<CV::Program>();
 	auto st = std::make_shared<CV::ControlFlow>();    
     CV::SetupCore(program);
-    auto entrypoint = CV::Compile("[[let t [1 2 3]][t]]", program, cursor);
-
+    auto entrypoint = CV::Compile("[[nth [1 2 3] 2]]", program, cursor);
 
     if(cursor->error){
         std::cerr << cursor->getRaised() << std::endl;

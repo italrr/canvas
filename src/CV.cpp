@@ -279,6 +279,18 @@ namespace CV {
             return false;
         }
 
+        std::shared_ptr<CV::Instruction> fetchInstruction(
+            const std::string &name,
+            const std::vector<std::pair<std::string, std::shared_ptr<CV::Instruction>>> &ins
+        ){
+            for(int i = 0; i < ins.size(); ++i){
+                if(ins[i].first == name){
+                    return ins[i].second;
+                }
+            }
+            return NULL;
+        }
+
         std::string readFile(const std::string &path){
             std::string buffer;
             std::ifstream file(path);
@@ -294,10 +306,59 @@ namespace CV {
 
         namespace ErrorCheck {
 
+            CV::Data *SolveInstruction(
+                const std::shared_ptr<CV::Program> &prog,
+                const std::string &fname,
+                const std::string &vname,
+                const std::vector<std::pair<std::string, std::shared_ptr<CV::Instruction>>> &ins,
+                const std::shared_ptr<CV::Context> &ctx,
+                const std::shared_ptr<CV::Cursor> &cursor,
+                const std::shared_ptr<CV::ControlFlow> &st,
+                const CV::TokenType &token,
+                int expType
+            ){
+
+                auto param0 = CV::Tools::ErrorCheck::FetchInstruction(fname, vname, ins, cursor, st, token);
+                if(cursor->error){
+                    return NULL;
+                } 
+                auto param0v = CV::Execute(param0, prog, cursor, ctx, st);
+                if(cursor->error){
+                    return NULL;
+                } 
+                if(!CV::Tools::ErrorCheck::IsType(fname, vname, param0v, cursor, st, token, expType)){
+                    return NULL;
+                }
+                
+                return param0v;
+            }
+
+            bool IsType(
+                const std::string &fname,
+                const std::string &vname,
+                CV::Data* v,
+                const std::shared_ptr<CV::Cursor> &cursor,
+                const std::shared_ptr<CV::ControlFlow> &st,
+                const CV::TokenType &token,
+                int expType
+            ){
+                if(v->type != expType){
+                    cursor->setError(
+                        CV_ERROR_MSG_WRONG_OPERANDS,
+                        "Imperative '"+fname+"' expects operand '"+vname+"' to be "+CV::DataTypeName(expType)+", provided "+CV::DataTypeName(v->type),
+                        token
+                    );
+                    st->state = CV::ControlFlowState::CRASH;
+                    return false;
+                }          
+                return true;            
+            } 
+
             bool AreAllType(
                 const std::string &name,
                 const std::vector<CV::Data*> &params,
                 const std::shared_ptr<CV::Cursor> &cursor,
+                const std::shared_ptr<CV::ControlFlow> &st,
                 const CV::TokenType &token,
                 int expType
             ){
@@ -309,11 +370,31 @@ namespace CV {
                             "Imperative '"+name+"' expects all operands to be "+CV::DataTypeName(expType)+": operand "+std::to_string(i)+" is "+CV::DataTypeName(data->type),
                             token
                         );
+                        st->state = CV::ControlFlowState::CRASH;
                         return false;
                     }
                 }            
                 return true;            
             }    
+
+
+            std::shared_ptr<CV::Instruction> FetchInstruction(
+                const std::string &fname,
+                const std::string &vname,
+                const std::vector<std::pair<std::string, std::shared_ptr<CV::Instruction>>> &ins,
+                const std::shared_ptr<CV::Cursor> &cursor,
+                const std::shared_ptr<CV::ControlFlow> &st,
+                const CV::TokenType &token
+            ){
+                auto gins = CV::Tools::fetchInstruction(vname, ins);
+                if(gins == NULL){
+                    std::string err = "expects argument '"+vname+"' but was not provided (with or without named positional arguments)";
+                    cursor->setError(CV_ERROR_MSG_MISUSED_FUNCTION, "Function '"+fname+"' "+err, token);    
+                    st->state = CV::ControlFlowState::CRASH;
+                    return NULL;
+                }
+                return gins;
+            }                 
         }        
         
     }
@@ -1442,14 +1523,20 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
 
             // }else
 
-            auto ghostData = prog->buildNil();
-            ctx->setData(prog, ghostData->id);
-            ctx->setName(name, ghostData->id);
-
             auto ins = prog->createInstruction(CV::InstructionType::LET, token);
             ins->literal.push_back(name);
-            ins->data.push_back(ghostData->id);
-            ins->params.push_back(target->id);
+
+            if(target->type == CV::InstructionType::PROXY_STATIC){
+                ctx->setName(name, target->data[0]);                  
+                ctx->setData(prog, target->data[0]);
+                ins->data.push_back(target->data[0]);
+            }else{
+                auto ghostData = prog->buildNil();
+                ctx->setData(prog, ghostData->id);
+                ctx->setName(name, ghostData->id);                
+                ins->data.push_back(ghostData->id);
+                ins->params.push_back(target->id);                
+            }
 
             return ins;
 
@@ -1991,19 +2078,28 @@ static CV::Data *__flow(  const CV::InsType &ins,
                 return prog->getData(prog->getPrefetch(ins->id));
             }
 
-            auto &name = ins->literal[0];
-            auto &entrypoint = prog->getIns(ins->params[0]);
-            auto dataId = ins->data[0];
-
-            auto v = CV::Execute(entrypoint, prog, cursor, ctx, st);
-            if(cursor->error){
-                st->state = CV::ControlFlowState::CRASH;
-                return v;
-            }
-            v->incRefCount();
-            ctx->setData(prog, v->id);
-            prog->swapId(dataId, v->id);
+            CV::Data *v;
             
+            if(ins->params.size() == 0){
+                auto dataId = ins->data[0];
+                v = prog->getData(dataId);
+                v->incRefCount();
+                return v;
+            }else{            
+                auto &name = ins->literal[0];
+                auto &entrypoint = prog->getIns(ins->params[0]);
+                auto dataId = ins->data[0];
+
+                v = CV::Execute(entrypoint, prog, cursor, ctx, st);
+                if(cursor->error){
+                    st->state = CV::ControlFlowState::CRASH;
+                    return v;
+                }
+                v->incRefCount();
+                ctx->setData(prog, v->id);
+                prog->swapId(dataId, v->id);
+            }
+
             prog->setPrefetch(ins->id, v->id);
 
             return v;
@@ -2813,7 +2909,7 @@ void CV::SetupCore(const CV::ProgramType &prog){
                 if(cursor->error){
                     return prog->buildNil();
                 } 
-                if(!CV::Tools::ErrorCheck::AreAllType(name, {v}, cursor, token, CV::DataType::NUMBER)){
+                if(!CV::Tools::ErrorCheck::AreAllType(name, {v}, cursor, st, token, CV::DataType::NUMBER)){
                     return prog->buildNil();
                 }
                 result->value += static_cast<CV::DataNumber*>(v)->value;
@@ -2825,44 +2921,44 @@ void CV::SetupCore(const CV::ProgramType &prog){
     ////////////////////////////
     //// LISTS
     ///////////////////////////  
-    // prog->root->registerFunction(prog, "nth",
-    //     {
-    //         "list",
-    //         "index"
-    //     },
-    //     [&](
-    //         const std::shared_ptr<CV::Program> &prog,
-    //         const std::string &name,
-    //         const std::vector<std::pair<std::string, std::shared_ptr<CV::Instruction>>> &args,
-    //         const std::shared_ptr<CV::Token> &token,
-    //         const std::shared_ptr<CV::Cursor> &cursor,
-    //         const std::shared_ptr<CV::Context> &ctx,
-    //         const std::shared_ptr<CV::ControlFlow> &st             
-    //     ) -> CV::Data* {
+    prog->root->registerFunction(prog, "nth",
+        {
+            "list",
+            "index"
+        },
+        [&](
+            const std::shared_ptr<CV::Program> &prog,
+            const std::string &name,
+            const std::vector<std::pair<std::string, std::shared_ptr<CV::Instruction>>> &args,
+            const std::shared_ptr<CV::Token> &token,
+            const std::shared_ptr<CV::Cursor> &cursor,
+            const std::shared_ptr<CV::Context> &ctx,
+            const std::shared_ptr<CV::ControlFlow> &st             
+        ) -> CV::Data* {
 
+            auto param0 = CV::Tools::ErrorCheck::SolveInstruction(prog,name,"list",args,ctx,cursor,st,token,CV::DataType::LIST);
+            if(cursor->error){
+                return prog->buildNil();
+            } 
+            auto list = static_cast<CV::DataList*>(param0);
+
+            auto param1 = CV::Tools::ErrorCheck::SolveInstruction(prog,name,"index",args,ctx,cursor,st,token,CV::DataType::NUMBER);
+            if(cursor->error){
+                return prog->buildNil();
+            } 
+            auto index = static_cast<int>(static_cast<CV::DataNumber*>(param1)->value);
             
-    //         auto target = CV::Execute(arg, prog, cursor, ctx, st);
-    //         if(cursor->error){
-    //             return prog->buildNil();
-    //         } 
+            if(index < 0 || index >= list->value.size()){
+                cursor->setError(
+                    CV_ERROR_MSG_INVALID_INDEX,
+                    "Provided out-of-bounds index: Expected 0 to "+std::to_string(list->value.size()-1)+", provided "+std::to_string(index),
+                    token
+                );
+                st->state = CV::ControlFlowState::CRASH;
+                return prog->buildNil();
+            }
 
-            
-    //         auto result = new CV::DataNumber();
-    //         prog->allocateData(result);
-
-    //         for(int i = 0; i < args.size(); ++i){
-    //             auto &arg = args[i].second;
-    //             auto v = CV::Execute(arg, prog, cursor, ctx, st);
-    //             if(cursor->error){
-    //                 return prog->buildNil();
-    //             } 
-    //             if(!CV::Tools::ErrorCheck::AreAllType(name, {v}, cursor, token, CV::DataType::NUMBER)){
-    //                 return prog->buildNil();
-    //             }
-    //             result->value += static_cast<CV::DataNumber*>(v)->value;
-    //         }
-
-    //         return static_cast<CV::Data*>(result);
-    //     }
-    // );          
+            return prog->getData(list->value[index]);
+        }
+    );          
 }

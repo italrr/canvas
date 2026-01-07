@@ -550,15 +550,48 @@
             std::string upper(const std::string &in);
             std::string fileExtension(const std::string &filename);
             bool isInList(const std::string &v, const std::vector<std::string> &list);
-
+            std::shared_ptr<CV::Instruction> fetchInstruction(
+                const std::string &name,
+                const std::vector<std::pair<std::string, std::shared_ptr<CV::Instruction>>> &ins
+            );
             namespace ErrorCheck {
+                bool IsType(
+                    const std::string &fname,
+                    const std::string &vname,
+                    CV::Data* v,
+                    const std::shared_ptr<CV::Cursor> &cursor,
+                    const std::shared_ptr<CV::ControlFlow> &st,
+                    const CV::TokenType &token,
+                    int expType
+                );
                 bool AreAllType(
                     const std::string &name,
                     const std::vector<CV::Data*> &params,
                     const std::shared_ptr<CV::Cursor> &cursor,
+                    const std::shared_ptr<CV::ControlFlow> &st,
                     const CV::TokenType &token,
                     int expType
                 );
+                std::shared_ptr<CV::Instruction> FetchInstruction(
+                    const std::string &fname,
+                    const std::string &vname,
+                    const std::vector<std::pair<std::string, std::shared_ptr<CV::Instruction>>> &ins,
+                    const std::shared_ptr<CV::Cursor> &cursor,
+                    const std::shared_ptr<CV::ControlFlow> &st,
+                    const CV::TokenType &token
+                );   
+                
+                CV::Data *SolveInstruction(
+                    const std::shared_ptr<CV::Program> &prog,
+                    const std::string &fname,
+                    const std::string &vname,
+                    const std::vector<std::pair<std::string, std::shared_ptr<CV::Instruction>>> &ins,
+                    const std::shared_ptr<CV::Context> &ctx,
+                    const std::shared_ptr<CV::Cursor> &cursor,
+                    const std::shared_ptr<CV::ControlFlow> &st,
+                    const CV::TokenType &token,
+                    int expType
+                );                
             }
 
         }        
