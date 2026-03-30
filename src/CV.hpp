@@ -195,6 +195,7 @@
             CV::DataType type;
             std::mutex mutexRefCount;
             Data();
+            virtual ~Data() = default;
             virtual void clear(const std::shared_ptr<CV::Program> &prog);
             virtual void build(const std::shared_ptr<CV::Program> &prog);
             int getRefCount();
@@ -224,13 +225,14 @@
             void clear(const std::shared_ptr<CV::Program> &prog);
         };           
         
-
         struct DataFunction : Data {
             bool isBinary;
             bool isVariadic;
             CV::Lambda lambda;
+            int closureCtxId;
             std::shared_ptr<CV::Token> body;
             std::vector<std::string> params;
+            std::vector<std::string> mandatory;
             DataFunction();
             void clear(const std::shared_ptr<CV::Program> &prog);
         };            
@@ -467,6 +469,13 @@
             void registerFunction(
                 const std::shared_ptr<CV::Program> &prog,
                 const std::string &name,
+                const std::vector<std::string> &params,
+                const std::vector<std::string> &mandatory,
+                const CV::Lambda &lambda
+            );            
+            void registerFunction(
+                const std::shared_ptr<CV::Program> &prog,
+                const std::string &name,
                 const CV::Lambda &lambda
             );            
         };
@@ -508,7 +517,7 @@
             
             CV::ContextType getContext(int id);
             CV::ContextType createContext(int root = -1);
-            bool removeContext(int id);
+            bool deleteContext(int id);
 
             CV::Data *getData(int dataId);
 
@@ -591,6 +600,21 @@
                     const std::shared_ptr<CV::ControlFlow> &st,
                     const CV::TokenType &token,
                     int expType
+                );        
+                std::shared_ptr<CV::Instruction> FetchInstructionIfExists(
+                    const std::string &vname,
+                    const std::vector<std::pair<std::string, std::shared_ptr<CV::Instruction>>> &ins
+                );
+                CV::Data *SolveInstructionIfExists(
+                    const std::shared_ptr<CV::Program> &prog,
+                    const std::string &fname,
+                    const std::string &vname,
+                    const std::vector<std::pair<std::string, std::shared_ptr<CV::Instruction>>> &ins,
+                    const std::shared_ptr<CV::Context> &ctx,
+                    const std::shared_ptr<CV::Cursor> &cursor,
+                    const std::shared_ptr<CV::ControlFlow> &st,
+                    const std::shared_ptr<CV::Token> &token,
+                    int expType
                 );                
             }
 
@@ -611,6 +635,13 @@
         CV::InsType Translate(const CV::TokenType &token, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor);
         CV::Data *Execute(const CV::InsType &entry, const CV::ProgramType &prog, const CV::CursorType &cursor, const CV::ContextType &ctx, CFType cf);
         void SetupCore(const CV::ProgramType &prog);
+        void SetUseColor(bool v);
+        std::string GetPrompt();
+        bool GetBooleanValue(CV::Data *input);
+        CV::Data *Copy(
+            const std::shared_ptr<CV::Program> &prog,
+            CV::Data *subject            
+        );
      
     }
 
