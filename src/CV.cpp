@@ -3016,6 +3016,10 @@ void CV::SetupCore(const CV::ProgramType &prog){
     char *cvLibPath = std::getenv("CANVAS_LIB_HOME");
     CV_LIB_HOME = cvLibPath != nullptr ? std::string(cvLibPath) : "./lib";
 
+    auto UnwrapNamedInstruction = [](const CV::ProgramType &prog, const CV::InsType &ins){
+        return ins->type == CV::InstructionType::PROXY_NAMER ? prog->getIns(ins->params[0]) : ins;
+    };
+
     ////////////////////////////
     //// ARITHMETIC
     ///////////////////////////    
@@ -3817,7 +3821,6 @@ void CV::SetupCore(const CV::ProgramType &prog){
             }
 
             ++static_cast<CV::DataNumber*>(subject)->value;
-
             return subject;
         }
     );
@@ -4043,10 +4046,20 @@ void CV::SetupCore(const CV::ProgramType &prog){
             }
 
             auto stepIns = CV::Tools::ErrorCheck::FetchInstructionIfExists("step", args);
-            auto bodyIns = CV::Tools::ErrorCheck::FetchInstructionIfExists("body", args);
+            if(stepIns){
+                stepIns = UnwrapNamedInstruction(
+                    prog,
+                    stepIns
+                );
+            }
 
-            std::cout << stepIns->token->str() << std::endl;
-            std::exit(1);
+            auto bodyIns = CV::Tools::ErrorCheck::FetchInstructionIfExists("body", args);
+            if(bodyIns){
+                bodyIns = UnwrapNamedInstruction(
+                    prog,
+                    bodyIns
+                );
+            }            
 
             auto from = static_cast<CV::DataNumber*>(fromData);
             auto to = static_cast<CV::DataNumber*>(toData);
@@ -4054,6 +4067,7 @@ void CV::SetupCore(const CV::ProgramType &prog){
             bool running = true;
 
             while(running && from->value != to->value){
+
                 auto deepExecCtx = prog->createContext(ctx->id);
 
                 bool shouldBreak = false;
@@ -4084,6 +4098,7 @@ void CV::SetupCore(const CV::ProgramType &prog){
 
                 if(running){
                     if(stepIns){
+
                         auto stepResult = CV::Execute(stepIns, prog, cursor, deepExecCtx, st);
                         if(cursor->error){
                             prog->deleteContext(deepExecCtx->id);
