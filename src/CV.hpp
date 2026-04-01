@@ -119,7 +119,8 @@
             STRING,
             LIST,
             STORE,
-            FUNCTION
+            FUNCTION,
+            THREAD
         };
 
         static std::string DataTypeName(int v){
@@ -138,37 +139,15 @@
                 };
                 case CV::DataType::FUNCTION: {
                     return "FUNCTION";
-                };                                                                                                  
+                };    
+                case CV::DataType::THREAD: {
+                    return "THREAD";
+                };                                                                                                                  
                 default:
                 case CV::DataType::NIL: {
                     return "NIL";
                 };
             }
-        }
-
-        namespace ThreadState {
-            enum ThreadState : int {
-                UNDEFINED = 0,
-                CREATED = 10,
-                STARTED,
-                FINISHED
-            };
-            static std::string name(int state){
-                switch(state){
-                    case CV::ThreadState::CREATED: {
-                        return "CREATED";
-                    };
-                    case CV::ThreadState::STARTED: {
-                        return "STARTED";
-                    };
-                    case CV::ThreadState::FINISHED: {
-                        return "FINISHED";
-                    };
-                    default: {
-                        return "UNDEFINED";
-                    };
-                }
-            } 
         }
 
         struct Program;
@@ -178,17 +157,31 @@
         struct ControlFlow;        
         struct Data;
         struct Instruction;
+        struct Data;
 
-        typedef std::function<CV::Data*(
-            const std::shared_ptr<CV::Program> &prog,
-            const std::string &name,
-            const std::vector<std::pair<std::string, std::shared_ptr<CV::Instruction>>> &params,
-            const std::shared_ptr<CV::Token> &token,
-            const std::shared_ptr<CV::Cursor> &cursor,
-            const std::shared_ptr<CV::Context> &ctx,
-            const std::shared_ptr<CV::ControlFlow> &st            
-        )> Lambda;
+        using Lambda = std::function<
+            CV::Data*(
+                const std::shared_ptr<CV::Program> &prog,
+                const std::string &name,
+                const std::vector<std::pair<std::string, std::shared_ptr<CV::Instruction>>> &args,
+                const std::shared_ptr<CV::Token> &token,
+                const std::shared_ptr<CV::Cursor> &cursor,
+                const std::shared_ptr<CV::Context> &ctx,
+                const std::shared_ptr<CV::ControlFlow> &st
+            )
+        >;
 
+        using LambdaPtr =
+            CV::Data* (*)(
+                const std::shared_ptr<CV::Program> &prog,
+                const std::string &name,
+                const std::vector<std::pair<std::string, std::shared_ptr<CV::Instruction>>> &args,
+                const std::shared_ptr<CV::Token> &token,
+                const std::shared_ptr<CV::Cursor> &cursor,
+                const std::shared_ptr<CV::Context> &ctx,
+                const std::shared_ptr<CV::ControlFlow> &st
+            );
+            
         struct Data {
             int id;
             int ref;
@@ -229,13 +222,46 @@
             bool isBinary;
             bool isVariadic;
             CV::Lambda lambda;
+            CV::LambdaPtr blambda;
             int closureCtxId;
             std::shared_ptr<CV::Token> body;
             std::vector<std::string> params;
-            std::vector<std::string> mandatory;
             DataFunction();
             void clear(const std::shared_ptr<CV::Program> &prog);
-        };            
+        };
+        
+        namespace ThreadState {
+            enum ThreadState : int {
+                UNDEFINED = 0,
+                CREATED = 10,
+                STARTED,
+                FINISHED
+            };
+
+            static std::string name(int state){
+                switch(state){
+                    case CV::ThreadState::CREATED:  return "CREATED";
+                    case CV::ThreadState::STARTED:  return "STARTED";
+                    case CV::ThreadState::FINISHED: return "FINISHED";
+                    default:                        return "UNDEFINED";
+                }
+            }
+        }
+
+        struct DataThread : Data {
+            int entrypointInsId;
+            int ctxId;
+            int threadId;
+            int state;
+            int returnId;
+            std::mutex accessMutex;
+
+            DataThread();
+
+            void setState(int nstate);
+            void clear(const std::shared_ptr<CV::Program> &prog) override;
+            void setPayload(const std::shared_ptr<CV::Program> &prog, int dataId);
+        };        
         
         ////////////////////////////
         //// PARSING
@@ -334,8 +360,8 @@
                 CF_LOOP_FOR,
                 CF_LOOP_ITER,            
                 CF_INVOKE_FUNCTION,
-                CF_INVOKE_BINARY_FUNCTION,
                 CF_RAW_TOKEN_REFERENCE,
+                CF_AWAIT,
 
                 // PROXIES
                 PROXY_STATIC = CV_INS_RANGE_TYPE_PROXY,
@@ -469,15 +495,20 @@
             void registerFunction(
                 const std::shared_ptr<CV::Program> &prog,
                 const std::string &name,
-                const std::vector<std::string> &params,
-                const std::vector<std::string> &mandatory,
                 const CV::Lambda &lambda
-            );            
-            void registerFunction(
+            );   
+            void registerFunctionPtr(
                 const std::shared_ptr<CV::Program> &prog,
                 const std::string &name,
-                const CV::Lambda &lambda
-            );            
+                const std::vector<std::string> &params,
+                const CV::LambdaPtr lambda
+            );
+
+            void registerFunctionPtr(
+                const std::shared_ptr<CV::Program> &prog,
+                const std::string &name,
+                const CV::LambdaPtr lambda
+            );                     
         };
         typedef std::shared_ptr<CV::Context> ContextType;
         
@@ -485,9 +516,12 @@
         //// Program
         ///////////////////////////
         struct Program : std::enable_shared_from_this<Program> {
+            bool shuttingDown;
             std::mutex mutexContext;
             std::mutex mutexStack;
             std::mutex mutexIns;
+            std::mutex mutexThreads;
+            std::mutex loadedDynamicLibsMutex;
 
             std::unordered_map<int, std::shared_ptr<CV::Context>> contexts;
             std::unordered_map<int, CV::Data*> stack;
@@ -498,6 +532,10 @@
 
             CV::ContextType root;
 
+            std::unordered_map<unsigned, std::thread> threads;
+
+            std::unordered_map<unsigned, std::pair<void*,std::string>> loadedDynamicLibs;
+
             Program();
             ~Program();
 
@@ -506,6 +544,8 @@
             int getPrefetch(int id);
             bool isPrefetched(int id);
             void clearPrefetch();            
+
+            void deleteThread(unsigned id);
 
             void end();
             CV::InsType createInstruction(unsigned type, const std::shared_ptr<CV::Token> &token);
@@ -525,6 +565,7 @@
             bool deallocateData(int id);
 
             CV::Data* buildNil();
+            CV::DataNumber* buildNumber(CV_NUMBER n);
 
             void quickGC();
         };
@@ -642,6 +683,19 @@
             const std::shared_ptr<CV::Program> &prog,
             CV::Data *subject            
         );
+        int Import(
+            const std::string &fname,
+            const std::shared_ptr<CV::Program> &prog,
+            const std::shared_ptr<CV::Context> &ctx,
+            const std::shared_ptr<CV::Cursor> &cursor
+        );
+        int ImportDynamicLibrary(
+            const std::string &path,
+            const std::string &fname,
+            const std::shared_ptr<CV::Program> &prog,
+            const std::shared_ptr<CV::Context> &ctx,
+            const std::shared_ptr<CV::Cursor> &cursor
+        );        
      
     }
 

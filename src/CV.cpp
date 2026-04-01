@@ -5,6 +5,14 @@
 #include <sys/stat.h>
 #include <fstream>
 
+// DYNAMIC LIBRARY STUFF
+#if (_CV_PLATFORM == _CV_PLATFORM_TYPE_LINUX)
+    #include <dlfcn.h> 
+#elif  (_CV_PLATFORM == _CV_PLATFORM_TYPE_WINDOWS)
+    // should prob move the entire DLL loading routines to its own file
+    #include <Libloaderapi.h>
+#endif
+
 #include "CV.hpp"
 
 
@@ -36,9 +44,9 @@ namespace CV {
             }
             return true;
         }
-        // bool IsItPrefixInstruction(const std::shared_ptr<CV::Instruction> &ins){
-        //     return ins->data.size() >= 2 && ins->data[0] == CV_INS_PREFIXER_IDENTIFIER_INSTRUCTION;
-        // }
+        bool IsItPrefixInstruction(const std::shared_ptr<CV::Instruction> &ins){
+            return ins->data.size() >= 2 && ins->data[0] == CV_INS_PREFIXER_IDENTIFIER_INSTRUCTION;
+        }
     }
     namespace Tools {
 
@@ -158,8 +166,8 @@ namespace CV {
 
         bool isReservedWord(const std::string &name){
             static const std::vector<std::string> reserved {
-                "let", "bring", "bring:dynamic-library", "~", ".", "|", "`", "cc", "mut", "fn",
-                "return", "yield", "skip", "b:list", "b:store", "untether", "async"
+                "let", "import", "import:dynamic-library", "~", ".", "|", "`", "cc", "mut", "fn",
+                "return", "yield", "skip", "b:list", "b:store", "await"
             };
             for(int i = 0; i < reserved.size(); ++i){
                 if(reserved[i] == name){
@@ -591,9 +599,52 @@ CV::DataFunction::DataFunction(){
 void CV::DataFunction::clear(const std::shared_ptr<CV::Program> &prog){
     this->body.reset();
     this->params.clear();
+    this->blambda = nullptr;
     this->params.shrink_to_fit(); // optional
     this->lambda = {};
 }
+
+
+//
+//  THREAD
+//
+CV::DataThread::DataThread(){
+    this->entrypointInsId = 0;
+    this->ctxId = 0;
+    this->state = CV::ThreadState::CREATED;
+    this->type = CV::DataType::THREAD;
+}
+
+void CV::DataThread::clear(const std::shared_ptr<CV::Program> &prog){
+    std::lock_guard<std::mutex> lock(this->accessMutex);
+
+    if(this->returnId >= 0){
+        auto subject = prog->getData(this->returnId);
+        if(subject != NULL){
+            subject->decRefCount();
+        }
+        this->returnId = -1;
+    }
+}
+
+void CV::DataThread::setPayload(const std::shared_ptr<CV::Program> &prog, int dataId){
+    auto data = prog->getData(dataId);
+    if(!data){
+        // This shouldn't happen regardless
+        return;
+    }
+    this->accessMutex.lock();
+    this->returnId = dataId;
+    data->incRefCount();
+    this->accessMutex.unlock();
+}
+
+void CV::DataThread::setState(int nstate){
+    this->accessMutex.lock();
+    this->state = nstate;
+    this->accessMutex.unlock();
+}
+
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -763,7 +814,9 @@ std::string CV::DataToText(const std::shared_ptr<CV::Program> &prog, CV::Data *t
                 auto &id = it.second;
                 auto q = prog->getData(id);
                 output +=   Tools::setTextColor(Tools::Color::YELLOW)+"["+Tools::setTextColor(Tools::Color::RESET)+
-                            "~"+it.first+" "+(q ? CV::DataToText(prog, q): "[NULL]")+
+                            "~"+it.first+" "+(q ? CV::DataToText(prog, q):
+                                Tools::setTextColor(Tools::Color::BLUE)+"nil"+Tools::setTextColor(Tools::Color::RESET)
+                            )+
                             Tools::setTextColor(Tools::Color::YELLOW)+"]"+Tools::setTextColor(Tools::Color::RESET);
                 if(i < store->value.size()-1){
                     output += " ";
@@ -778,17 +831,30 @@ std::string CV::DataToText(const std::shared_ptr<CV::Program> &prog, CV::Data *t
             return output + Tools::setTextColor(Tools::Color::MAGENTA)+"]"+Tools::setTextColor(Tools::Color::RESET);
         };        
 
-        // case CV::DataType::THREAD: {
-        //     auto thread = std::static_pointer_cast<CV::TypeThread>(t);
+        case CV::DataType::THREAD: {
+            auto thread = static_cast<CV::DataThread*>(t);
 
-        //     return Tools::setTextColor(Tools::Color::YELLOW)
-        //                         +"[THREAD "+std::to_string(thread->id)+" "
-        //                         +Tools::setTextColor(Tools::Color::GREEN)
-        //                         +"'"+CV::ThreadState::name(thread->state)
-        //                         +"'"
-        //                         +Tools::setTextColor(Tools::Color::YELLOW)+"]"
-        //                         +Tools::setTextColor(Tools::Color::RESET);
-        // };
+            std::string payload = "";
+
+            thread->accessMutex.lock();
+            if(thread->returnId == 0){
+                payload = Tools::setTextColor(Tools::Color::BLUE)+"nil"+Tools::setTextColor(Tools::Color::RESET);
+            }else{
+                auto target = prog->getData(thread->returnId);
+                if(target){
+                    payload += CV::DataToText(prog, target);
+                }                
+            }
+            thread->accessMutex.unlock();
+
+            return Tools::setTextColor(Tools::Color::YELLOW)
+                                +"[THREAD "+std::to_string(thread->id)+" "
+                                +Tools::setTextColor(Tools::Color::GREEN)
+                                +CV::ThreadState::name(thread->state)
+                                +Tools::setTextColor(Tools::Color::RESET)+" -> '"+payload+"'"
+                                +Tools::setTextColor(Tools::Color::YELLOW)+"]"
+                                +Tools::setTextColor(Tools::Color::RESET);
+        };
 
     }
 }
@@ -1025,6 +1091,62 @@ static std::vector<CV::TokenType> rebuildTokenHierarchy(const std::vector<CV::To
 //  JIT
 // 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+struct InvokeThread {
+    int threadDataId;
+    std::shared_ptr<CV::Program> prog;
+    std::shared_ptr<CV::Cursor> upcursor;
+    std::shared_ptr<CV::Token> root;
+};
+
+static void RUN_THREAD(const std::shared_ptr<InvokeThread> &handle){
+
+    auto &prog = handle->prog;
+    auto &upcursor = handle->upcursor;
+    auto &root = handle->root;
+
+    auto coreBase = prog->getData(handle->threadDataId);
+    if(coreBase == NULL || coreBase->type != CV::DataType::THREAD){
+        upcursor->setError(
+            CV_ERROR_MSG_INVALID_SYNTAX,
+            "Crash in Thread: missing or invalid thread handle",
+            root
+        );
+        return;
+    }
+
+    auto core = static_cast<CV::DataThread*>(coreBase);
+
+    auto entrypoint = prog->getIns(core->entrypointInsId);
+    auto ctx = prog->getContext(core->ctxId);
+
+    auto st = std::make_shared<CV::ControlFlow>();
+    st->state = CV::ControlFlowState::CONTINUE;
+
+    auto cursor = std::make_shared<CV::Cursor>();
+
+    auto r = CV::Execute(entrypoint, prog, cursor, ctx, st);
+    if(cursor->error){
+        st->state = CV::ControlFlowState::CRASH;
+
+        upcursor->setError(
+            cursor->title,
+            "Crash in Thread "+std::to_string(core->id)+": "+cursor->message,
+            root
+        );
+
+        core->setState(CV::ThreadState::FINISHED);
+        return;
+    }
+
+    if(r != NULL){
+        core->setPayload(handle->prog, r->id);
+    }else{
+        core->returnId = 0;
+    }
+
+    core->setState(CV::ThreadState::FINISHED);
+}
 
 CV::InsType CV::Compile(const CV::TokenType &input, const CV::ProgramType &prog, const CV::CursorType &cursor, const CV::ContextType &ctx){
 
@@ -1318,146 +1440,207 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
             } 
         }else
         /*
-            BRING
+            IMPORT
         */
-        // if(token->first== "bring"){
-        //     if(token->inner.size() != 1){
-        //         cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "'"+token->first+"' expects exactly 2 tokens ("+token->first+" NAME)", token);
-        //         return prog->createInstruction(CV::InstructionType::NOOP, token);
-        //     }
+        if(token->first == "import"){
+            if(token->inner.size() != 1){
+                cursor->setError(
+                    CV_ERROR_MSG_MISUSED_IMPERATIVE,
+                    "'"+token->first+"' expects exactly 2 tokens ("+token->first+" NAME)",
+                    token
+                );
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
 
-        //     auto target = CV::Translate(token->inner[0], prog, ctx, cursor);
-        //     if(cursor->error){
-        //         cursor->subject = token;
-        //         return prog->createInstruction(CV::InstructionType::NOOP, token);
-        //     }
-            
-        //     if(!CV::ErrorCheck::ExpectNoPrefixer(token->first, {target}, token, cursor)){
-        //         return prog->createInstruction(CV::InstructionType::NOOP, token);
-        //     }
-        //     auto st = std::make_shared<CV::ControlFlow>();
-        //     auto fnamev = CV::Execute(target, ctx, prog, cursor, st);
-        //     if(cursor->error){
-        //         return prog->createInstruction(CV::InstructionType::NOOP, token);
-        //     }
+            auto target = CV::Translate(token->inner[0], prog, ctx, cursor);
+            if(cursor->error){
+                cursor->subject = token;
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
 
-        //     if(!CV::ErrorCheck::ExpectsTypeAt(fnamev->type, CV::QuantType::STRING, 0, token->first, token, cursor)){
-        //         return prog->createInstruction(CV::InstructionType::NOOP, token);
-        //     }
+            // Preserve old "no prefixer" behavior: bring expects a plain value expression
+            if(CV::Test::IsItPrefixInstruction(target)){
+                cursor->setError(
+                    CV_ERROR_MSG_MISUSED_IMPERATIVE,
+                    "'"+token->first+"' does not accept prefixed arguments",
+                    token
+                );
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
 
-        //     // Get symbolic or literal
-        //     auto fname = std::static_pointer_cast<CV::TypeString>(fnamev)->v;
+            auto st = std::make_shared<CV::ControlFlow>();
+            st->state = CV::ControlFlowState::CONTINUE;
 
-        //     // Does it include .cv?
-        //     if(CV::Tools::fileExtension(fname) == ""){
-        //         fname += ".cv";
-        //     }
+            auto fnamev = CV::Execute(target, prog, cursor, ctx, st);
+            if(cursor->error){
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
 
-        //     // Is it a local file?
-        //     if(CV::Tools::fileExists("./"+fname)){
-        //         fname = "./"+fname;
-        //     }else{
-        //     // Then it must be a 'lib/' library
-        //         fname = CV_LIB_HOME+"/"+fname;
-        //     }
+            if(fnamev == NULL || fnamev->type != CV::DataType::STRING){
+                cursor->setError(
+                    CV_ERROR_MSG_WRONG_OPERANDS,
+                    "'"+token->first+"' expects operand 0 to evaluate to STRING",
+                    token
+                );
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
 
-        //     // Does it exist at all?
-        //     if(!CV::Tools::fileExists(fname)){
-        //         cursor->setError(CV_ERROR_MSG_LIBRARY_NOT_VALID, "No canvas library '"+fname+"' was found", token);
-        //         return prog->createInstruction(CV::InstructionType::NOOP, token);
-        //     }
+            // Get symbolic or literal
+            auto fname = static_cast<CV::DataString*>(fnamev)->value;
 
-        //     // Load it
-        //     int id = CV::Import(fname, prog, ctx, cursor);
-        //     if(cursor->error){
-        //         return prog->createInstruction(CV::InstructionType::NOOP, token);
-        //     }
+            // Does it include .cv?
+            if(CV::Tools::fileExtension(fname) == ""){
+                fname += ".cv";
+            }
 
-        //     auto ins = prog->createInstruction(CV::InstructionType::LIBRAY_IMPORT, token);
-        //     ins->data.push_back(ctx->id);
-        //     ins->data.push_back(id);
-        //     ins->data.push_back(true);
-        //     ins->literal.push_back(fname);
-        //     return ins;
-        // }else
+            // Is it a local file?
+            if(CV::Tools::fileExists("./" + fname)){
+                fname = "./" + fname;
+            }else{
+                // Then it must be a 'lib/' library
+                fname = CV_LIB_HOME + "/" + fname;
+            }
+
+            // Does it exist at all?
+            if(!CV::Tools::fileExists(fname)){
+                cursor->setError(
+                    CV_ERROR_MSG_LIBRARY_NOT_VALID,
+                    "No canvas library '"+fname+"' was found",
+                    token
+                );
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
+
+            // Load it now, same as old behavior
+            int id = CV::Import(fname, prog, ctx, cursor);
+            if(cursor->error){
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
+
+            auto ins = prog->createInstruction(CV::InstructionType::LIBRAY_IMPORT, token);
+
+            // Keep same metadata layout as the old design unless you have already changed Import semantics:
+            // data[0] = caller context id
+            // data[1] = imported result id / import handle returned by CV::Import
+            // data[2] = eager-import marker
+            ins->data.push_back(ctx->id);
+            ins->data.push_back(id);
+            ins->data.push_back(true);
+
+            ins->literal.push_back(fname);
+
+            return ins;
+        }else
         /*
-            BRING "dynamic-library"
+            IMPORT "dynamic-library"
         */
-        // if(token->first == "bring:dynamic-library"){
-        //     if(token->inner.size() != 1){
-        //         cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "'"+token->first+"' expects exactly 2 tokens ("+token->first+" NAME)", token);
-        //         return prog->createInstruction(CV::InstructionType::NOOP, token);
-        //     }
+        if(token->first == "import:dynamic-library"){
+            if(token->inner.size() != 1){
+                cursor->setError(
+                    CV_ERROR_MSG_MISUSED_IMPERATIVE,
+                    "'"+token->first+"' expects exactly 2 tokens ("+token->first+" NAME)",
+                    token
+                );
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
 
-        //     auto target = CV::Translate(token->inner[0], prog, ctx, cursor);
-        //     if(cursor->error){
-        //         cursor->subject = token;
-        //         return prog->createInstruction(CV::InstructionType::NOOP, token);
-        //     }
-            
-        //     if(!CV::ErrorCheck::ExpectNoPrefixer(token->first, {target}, token, cursor)){
-        //         return prog->createInstruction(CV::InstructionType::NOOP, token);
-        //     }
-        //     auto st = std::make_shared<CV::ControlFlow>();
-        //     auto fnamev = CV::Execute(target, ctx, prog, cursor, st);
-        //     if(cursor->error){
-        //         return prog->createInstruction(CV::InstructionType::NOOP, token);
-        //     }
+            auto target = CV::Translate(token->inner[0], prog, ctx, cursor);
+            if(cursor->error){
+                cursor->subject = token;
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
 
-        //     if(!CV::ErrorCheck::ExpectsTypeAt(fnamev->type, CV::QuantType::STRING, 0, token->first, token, cursor)){
-        //         return prog->createInstruction(CV::InstructionType::NOOP, token);
-        //     }
+            if(CV::Test::IsItPrefixInstruction(target)){
+                cursor->setError(
+                    CV_ERROR_MSG_MISUSED_IMPERATIVE,
+                    "'"+token->first+"' does not accept prefixed arguments",
+                    token
+                );
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
 
-        //     // Get symbolic or literal
-        //     auto fname = std::static_pointer_cast<CV::TypeString>(fnamev)->v;
+            auto st = std::make_shared<CV::ControlFlow>();
+            st->state = CV::ControlFlowState::CONTINUE;
 
-        //     // Does it include .cv?
-        //     if(CV::Tools::fileExtension(fname) == ""){
-        //         switch(CV::PLATFORM){
-        //             case CV::SupportedPlatform::LINUX: {
-        //                 fname += ".so";
-        //             } break; 
-        //             case CV::SupportedPlatform::WINDOWS: {
-        //                 fname += ".dll";
-        //             } break;
-        //             case CV::SupportedPlatform::OSX: {
-        //                 // TODO
-        //             } break;                
-        //             default:
-        //             case CV::SupportedPlatform::UNKNOWN: {
-        //                 fprintf(stderr, "Failed to infere dynamic library platform in '%s'", token->first.c_str());
-        //                 std::exit(1);
-        //             } break;                        
-        //         }
-        //     }
+            auto fnamev = CV::Execute(target, prog, cursor, ctx, st);
+            if(cursor->error){
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
 
-        //     // Is it a local file?
-        //     if(CV::Tools::fileExists("./"+fname)){
-        //         fname = "./"+fname;
-        //     }else{
-        //     // Then it must be a 'lib/' library
-        //         fname = CV_LIB_HOME+"/"+fname;
-        //     }
+            if(fnamev == NULL || fnamev->type != CV::DataType::STRING){
+                cursor->setError(
+                    CV_ERROR_MSG_WRONG_OPERANDS,
+                    "'"+token->first+"' expects operand 0 to evaluate to STRING",
+                    token
+                );
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
 
-        //     // Does it exist at all?
-        //     if(!CV::Tools::fileExists(fname)){
-        //         cursor->setError(CV_ERROR_MSG_LIBRARY_NOT_VALID, "No dynamic library '"+fname+"' was found", token);
-        //         return prog->createInstruction(CV::InstructionType::NOOP, token);
-        //     }
+            // Get symbolic or literal
+            auto fname = static_cast<CV::DataString*>(fnamev)->value;
 
-        //     // Load it
-        //     int id = CV::ImportDynamicLibrary(fname, fname, prog, ctx, cursor);
-        //     if(cursor->error){
-        //         return prog->createInstruction(CV::InstructionType::NOOP, token);
-        //     }
+            // Add platform extension if missing
+            if(CV::Tools::fileExtension(fname) == ""){
+                switch(CV::PLATFORM){
+                    case CV::SupportedPlatform::LINUX: {
+                        fname += ".so";
+                    } break;
 
-        //     auto ins = prog->createInstruction(CV::InstructionType::LIBRAY_IMPORT, token);
-        //     ins->data.push_back(ctx->id);
-        //     ins->data.push_back(id); 
-        //     ins->data.push_back(false);
-        //     ins->literal.push_back(fname);
-        //     return ins;
-        // }else
+                    case CV::SupportedPlatform::WINDOWS: {
+                        fname += ".dll";
+                    } break;
+
+                    case CV::SupportedPlatform::OSX: {
+                        fname += ".dylib";
+                    } break;
+
+                    default:
+                    case CV::SupportedPlatform::UNKNOWN: {
+                        cursor->setError(
+                            CV_ERROR_MSG_LIBRARY_NOT_VALID,
+                            "Failed to infer dynamic library extension for platform in '"+token->first+"'",
+                            token
+                        );
+                        return prog->createInstruction(CV::InstructionType::NOOP, token);
+                    } break;
+                }
+            }
+
+            // Local file first, otherwise library home
+            if(CV::Tools::fileExists("./" + fname)){
+                fname = "./" + fname;
+            }else{
+                fname = CV_LIB_HOME + "/" + fname;
+            }
+
+            if(!CV::Tools::fileExists(fname)){
+                cursor->setError(
+                    CV_ERROR_MSG_LIBRARY_NOT_VALID,
+                    "No dynamic library '"+fname+"' was found",
+                    token
+                );
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
+
+            // Load it eagerly, same style as bring/import
+            int id = CV::ImportDynamicLibrary(fname, fname, prog, ctx, cursor);
+            if(cursor->error){
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
+
+            auto ins = prog->createInstruction(CV::InstructionType::LIBRAY_IMPORT, token);
+
+            // Keep old metadata layout if LIBRAY_IMPORT execution still expects it:
+            // data[0] = caller context id
+            // data[1] = import result / handle id
+            // data[2] = false => dynamic library import
+            ins->data.push_back(ctx->id);
+            ins->data.push_back(id);
+            ins->data.push_back(false);
+
+            ins->literal.push_back(fname);
+            return ins;
+        }else
         /*
             FN
         */
@@ -1523,30 +1706,32 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
         /*
             CC
         */
-        // if(token->first == "cc"){
-        //     if(token->inner.size() != 1){
-        //         cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "'"+token->first+"' expects exactly 2 tokens (cc VALUE)", token);
-        //         return prog->createInstruction(CV::InstructionType::NOOP, token);
-        //     }         
-        //     auto target = CV::Translate(token->inner[0], prog, ctx, cursor);
-        //     if(cursor->error){
-        //         cursor->subject = token;
-        //         return prog->createInstruction(CV::InstructionType::NOOP, token);
-        //     }
-        //     auto ins = prog->createInstruction(CV::InstructionType::CARBON_COPY, token);
-        //     auto nv = CV::Build::Nil();
-        //     ctx->set(nv->id, nv);
-        //     ins->data.push_back(ctx->id);
-        //     ins->data.push_back(nv->id);
-        //     ins->params.push_back(target->id);
-        //     return ins;
-        // }else
+        if(token->first == "cc"){
+            if(token->inner.size() != 1){
+                cursor->setError(
+                    CV_ERROR_MSG_MISUSED_IMPERATIVE,
+                    "'"+token->first+"' expects exactly 2 tokens ("+token->first+" VALUE)",
+                    token
+                );
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
+
+            auto target = CV::Translate(token->inner[0], prog, ctx, cursor);
+            if(cursor->error){
+                cursor->subject = token;
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
+
+            auto ins = prog->createInstruction(CV::InstructionType::CARBON_COPY, token);
+            ins->params.push_back(target->id);
+            return ins;
+        }else
         /*
             MUT
         */
         if(token->first == "mut"){
             if(token->inner.size() != 2){
-                cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "'"+token->first+"' expects exactly 3 tokens (mut NAME VALUE)", token);
+                cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "'"+token->first+"' expects exactly 3 tokens ("+token->first+" NAME VALUE)", token);
                 return prog->createInstruction(CV::InstructionType::NOOP, token);
             }
             auto nameRef = ctx->getNamed(prog, token->inner[0]->first);
@@ -1570,7 +1755,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
         */
         if(token->first == "let"){
             if(token->inner.size() != 2){
-                cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "'"+token->first+"' expects exactly 3 tokens (let NAME VALUE)", token);
+                cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "'"+token->first+"' expects exactly 3 tokens ("+token->first+" NAME VALUE)", token);
                 return prog->createInstruction(CV::InstructionType::NOOP, token);
             }
 
@@ -1597,18 +1782,16 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                 return prog->createInstruction(CV::InstructionType::NOOP, token);
             }         
             
-            // if(target->type == CV::InstructionType::PROXY_PARALELER){
-
-            //     auto &targetData = prog->getCtx(target->data[2])->get(target->data[3]);
-            //     ctx->set(targetData->id, targetData);
-            //     ctx->setName(name, targetData);  
-            //     return target;
-
-            // }else
 
             auto ins = prog->createInstruction(CV::InstructionType::LET, token);
             ins->literal.push_back(name);
 
+            if(target->type == CV::InstructionType::PROXY_PARALELER){
+                ctx->setName(name, target->data[3]);                  
+                ctx->setData(prog, target->data[3]);
+                ins->data.push_back(target->data[3]);
+                ins->params.push_back(target->id);                
+            }else            
             if(target->type == CV::InstructionType::PROXY_STATIC){
                 ctx->setName(name, target->data[0]);                  
                 ctx->setData(prog, target->data[0]);
@@ -1623,7 +1806,31 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
 
             return ins;
 
-        }else        
+        }else   
+        if(token->first == "await"){
+            if(token->inner.size() < 1){
+                cursor->setError(
+                    CV_ERROR_MSG_MISUSED_IMPERATIVE,
+                    "'"+token->first+"' expects at least 2 tokens (await THREAD ...)",
+                    token
+                );
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
+
+            auto ins = prog->createInstruction(CV::InstructionType::CF_AWAIT, token);
+
+            for(int i = 0; i < token->inner.size(); ++i){
+                auto target = CV::Translate(token->inner[i], prog, ctx, cursor);
+                if(cursor->error){
+                    cursor->subject = token;
+                    return prog->createInstruction(CV::InstructionType::NOOP, token);
+                }
+
+                ins->data.push_back(target->id);
+            }
+
+            return ins;
+        }else
         /*
             NUMBER
         */
@@ -1653,46 +1860,60 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
             }
         }else
         // PARALLELER
-        // if(token->first[0] == '|'){
+        if(token->first[0] == '|'){
+            if(token->inner.size() != 0){
+                cursor->setError(
+                    CV_ERROR_MSG_MISUSED_PREFIX,
+                    "Paralleler Prefix '"+token->first+"' expects no values",
+                    token
+                );
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
 
-        //     if(token->inner.size() != 0){
-        //         cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "Paralleler Prefix '"+token->first+"' expects no values", token);
-        //         return prog->createInstruction(CV::InstructionType::NOOP, token);                                            
-        //     }
+            if(token->first.size() == 1){
+                cursor->setError(
+                    CV_ERROR_MSG_MISUSED_PREFIX,
+                    "Paralleler Prefix '"+token->first+"' expects an appended body",
+                    token
+                );
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
 
-        //     if(token->first.size() == 1){
-        //         cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "Paralleler Prefix '"+token->first+"' expects an apppended body", token);
-        //         return prog->createInstruction(CV::InstructionType::NOOP, token);                
-        //     }
+            std::string statement(token->first.begin() + 1, token->first.end());
 
-        //     std::string statement = std::string(token->first.begin()+1, token->first.end());
+            // Keep the compile-time context lineage for the thread body
+            auto tctx = prog->createContext(ctx->id);
 
-        //     auto ins = prog->createInstruction(CV::InstructionType::PROXY_PARALELER, token);
-        //     ins->data.push_back(CV_INS_PREFIXER_IDENTIFIER_INSTRUCTION);
-        //     ins->data.push_back(CV::Prefixer::PARALELLER);
-        //     std::shared_ptr<CV::Quant> ghostData;
+            auto entrypoint = CV::Compile(statement, prog, cursor, tctx);
+            if(cursor->error){
+                cursor->subject = token;
+                prog->deleteContext(tctx->id);
+                return prog->createInstruction(CV::InstructionType::NOOP, token);
+            }
 
-        //     auto tctx = prog->createContext(ctx);
+            auto ins = prog->createInstruction(CV::InstructionType::PROXY_PARALELER, token);
+            ins->data.push_back(CV_INS_PREFIXER_IDENTIFIER_INSTRUCTION);
+            ins->data.push_back(CV::Prefixer::PARALELLER);
 
-        //     auto entrypoint = CV::Compile(statement, prog, cursor, tctx);
-        //     if(cursor->error){
-        //         cursor->subject = token;
-        //         return prog->createInstruction(CV::InstructionType::NOOP, token);
-        //     }
+            // data[2] = thread compile-time context id
+            ins->data.push_back(tctx->id);
 
-        //     auto data = CV::Build::Thread();
-        //     tctx->set(data->id, data);
+            // params[0] = compiled body entrypoint
+            ins->params.push_back(entrypoint->id);
 
-        //     data->ctxId = tctx->id;
-        //     data->entrypoint = entrypoint->id;
+            auto thread = new CV::DataThread();
+            prog->allocateData(thread);
 
-        //     ins->data.push_back(tctx->id);
-        //     ins->data.push_back(data->id);
-        //     ins->params.push_back(entrypoint->id);
+            thread->ctxId = tctx->id;
+            thread->entrypointInsId = entrypoint->id;
+            thread->returnId = 0;
+            thread->setState(CV::ThreadState::CREATED);            
 
-        //     return ins;
+            ins->data.push_back(thread->id);
 
-        // }else
+            return ins;
+
+        }else
         // EXPANDER
         if(token->first[0] == '^'){
             if(token->inner.size() != 0){
@@ -1754,23 +1975,33 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
             ins->data.push_back(CV_INS_PREFIXER_IDENTIFIER_INSTRUCTION);
             ins->data.push_back(CV::Prefixer::NAMER);
             
-            auto ghostData = prog->buildNil();
-            ins->data.push_back(ghostData->id);
-
-            // Namer as a definitor is passive as avoid violating immutability
-            if(!ctx->isName(name)){
-                ctx->setName(ins->literal[0], ghostData->id);         
-            }
 
             // Build referred instruction
             if(token->inner.size() > 0){
                 auto &inc = token->inner[0];
-                auto fetched = CV::Translate(inc, prog, ctx, cursor);
+                auto target = CV::Translate(inc, prog, ctx, cursor);
                 if(cursor->error){
                     cursor->subject = token;
                     return prog->createInstruction(CV::InstructionType::NOOP, token);
-                }                        
-                ins->params.push_back(fetched->id);
+                }  
+
+                if(target->type == CV::InstructionType::PROXY_PARALELER){
+                    ctx->setName(name, target->data[3]);                  
+                    ctx->setData(prog, target->data[3]);
+                    ins->data.push_back(target->data[3]);
+                    ins->params.push_back(target->id);                
+                }else            
+                if(target->type == CV::InstructionType::PROXY_STATIC){
+                    ctx->setName(name, target->data[0]);                  
+                    ctx->setData(prog, target->data[0]);
+                    ins->data.push_back(target->data[0]);
+                }else{
+                    auto ghostData = prog->buildNil();
+                    ctx->setData(prog, ghostData->id);
+                    ctx->setName(name, ghostData->id);                
+                    ins->data.push_back(ghostData->id);
+                    ins->params.push_back(target->id);                
+                }
             }
             
             return ins;
@@ -1993,29 +2224,79 @@ static CV::Data *__flow(  const CV::InsType &ins,
         //     // TODO: Perhaps some error checking?
         //     return store->v[mname];
         // };
-        // case CV::InstructionType::PROXY_PARALELER: {
-        //     auto tctxId = ins->data[2];
-        //     auto dataId = ins->data[3];
-        //     auto entrypoint = ins->params[0];
+        case CV::InstructionType::PROXY_PARALELER: {
+            // If this paralleler already created its thread handle, return it
+            if(prog->isPrefetched(ins->id)){
+                auto prefetchedId = prog->getPrefetch(ins->id);
+                auto prefetched = prog->getData(prefetchedId);
+                if(prefetched != NULL){
+                    return prefetched;
+                }
 
-        //     auto tctxt = prog->getCtx(tctxId);
-        //     auto quant = tctxt->get(dataId);
-        //     auto thread = std::static_pointer_cast<CV::TypeThread>(quant);
-            
-        //     if(thread->state == CV::ThreadState::CREATED){
-        //         thread->setState(CV::ThreadState::STARTED);
-        //         auto handle = std::make_shared<InvokeThread>();
-        //         handle->core = thread.get();
-        //         handle->prog = prog;
-        //         handle->upcursor = cursor;
-        //         handle->root = ins->token;
-        //         prog->threadMutex.lock();
-        //         prog->threads[thread->id] = std::thread(&RUN_THREAD, handle);
-        //         prog->threadMutex.unlock();
-        //     }
-            
-        //     return thread;
-        // };
+                cursor->setError(
+                    CV_ERROR_MSG_INVALID_SYNTAX,
+                    "Paralleler instruction points to dead prefetched thread handle",
+                    ins->token
+                );
+                st->state = CV::ControlFlowState::CRASH;
+                return prog->buildNil();
+            }
+
+            auto tctxId = ins->data[2];
+            auto entrypointId = ins->params[0];
+
+            auto tctx = prog->getContext(tctxId);
+            auto entrypoint = prog->getIns(entrypointId);
+
+            if(!tctx || !entrypoint){
+                cursor->setError(
+                    CV_ERROR_MSG_INVALID_SYNTAX,
+                    "Paralleler instruction is missing thread context or entrypoint",
+                    ins->token
+                );
+                st->state = CV::ControlFlowState::CRASH;
+                return prog->buildNil();
+            }
+
+            auto threadId = ins->data[3];
+            auto threadf = prog->getData(ins->data[3]);
+
+            if(!threadf || threadf->type != CV::DataType::THREAD){
+                cursor->setError(
+                    CV_ERROR_MSG_INVALID_SYNTAX,
+                    "Paralleler instruction is pointing to unallocated data %i",
+                    ins->data[3]
+                );
+                st->state = CV::ControlFlowState::CRASH;
+                return prog->buildNil();                
+            }
+
+            auto thread = static_cast<CV::DataThread*>(threadf);
+
+            // Root the thread handle in the thread context so GC keeps it alive
+            if(!tctx->isDataIn(thread->id)){
+                tctx->setData(prog, thread->id);
+            }
+
+            // Cache the handle so this instruction always returns the same thread object
+            prog->setPrefetch(ins->id, thread->id);
+
+            // Start native thread now
+            thread->setState(CV::ThreadState::STARTED);
+
+            auto handle = std::make_shared<InvokeThread>();
+            handle->threadDataId = thread->id;
+            handle->prog = prog;
+            handle->upcursor = cursor;
+            handle->root = ins->token;
+
+            {
+                std::lock_guard<std::mutex> lock(prog->mutexThreads);
+                prog->threads[threadId] = std::thread(&RUN_THREAD, handle);
+            }
+
+            return static_cast<CV::Data*>(thread);
+        } break;
         case CV::InstructionType::PROXY_EXPANDER: {
             
             if(prog->isPrefetched(ins->id)){
@@ -2032,7 +2313,7 @@ static CV::Data *__flow(  const CV::InsType &ins,
             prog->setPrefetch(ins->id, data->id);
 
             return data;            
-        };
+        };        
         case CV::InstructionType::PROXY_NAMER: {
             
             if(prog->isPrefetched(ins->id)){
@@ -2041,17 +2322,33 @@ static CV::Data *__flow(  const CV::InsType &ins,
 
             CV::Data *data = prog->getData(ins->data[2]);
             
-            if(ins->params.size() > 0){
+            if(ins->params.size() == 0){
+                auto dataId = ins->data[2];
+                data = prog->getData(dataId);
+                if(!data){
+                    cursor->setError(
+                        CV_ERROR_MSG_ILLEGAL_PREFIXER,
+                        "Named instruction points to NULL DATA",
+                        ins->token
+                    );
+                    st->state = CV::ControlFlowState::CRASH;
+                    return prog->buildNil();                    
+                }
+                data->incRefCount();
+            }else            
+            if(ins->params.size() > 0){ 
+                auto &name = ins->literal[0];
                 auto &entrypoint = prog->getIns(ins->params[0]);
+                auto dataId = ins->data[2];
+
                 data = CV::Execute(entrypoint, prog, cursor, ctx, st);
                 if(cursor->error){
                     st->state = CV::ControlFlowState::CRASH;
-                    return prog->buildNil();
+                    return data;
                 }
-                if(!ctx->isDataIn(data->id)){
-                    data->incRefCount();
-                    prog->swapId(data->id, ins->data[2]);
-                }
+                data->incRefCount();
+                ctx->setData(prog, data->id);
+                prog->swapId(dataId, data->id);
             }
 
             prog->setPrefetch(ins->id, data->id);
@@ -2196,31 +2493,24 @@ static CV::Data *__flow(  const CV::InsType &ins,
 
             return v;
         };
+        case CV::InstructionType::CARBON_COPY: {
+            if(prog->isPrefetched(ins->id)){
+                return prog->getData(prog->getPrefetch(ins->id));
+            }
 
-        // case CV::InstructionType::CARBON_COPY: {
-        //     if(ctx->isPrefetched(ins->id)){
-        //         auto dir = ctx->getPrefetch(ins->id);
-        //         return prog->getCtx(dir[0])->get(dir[1]);
-        //     }
+            auto &entrypoint = prog->getIns(ins->params[0]);
 
-        //     auto &cctx = prog->getCtx(ins->data[0]);
-        //     auto &nv = cctx->get(ins->data[1]);
+            auto data = CV::Execute(entrypoint, prog, cursor, ctx, st);
+            if(cursor->error){
+                st->state = CV::ControlFlowState::CRASH;
+                return prog->buildNil();
+            }
 
-        //     auto &entrypoint = prog->getIns(ins->params[0]);
+            auto copied = CV::Copy(prog, data);
+            prog->setPrefetch(ins->id, copied->id);
 
-        //     auto v = CV::Execute(entrypoint, cctx, prog, cursor, st);
-        //     if(cursor->error){
-        //         st->state = CV::ControlFlowState::CRASH;
-        //         return v;
-        //     }
-        //     auto copied = CV::Build::Copy(v);
-        //     cctx->set(ins->data[1], copied);
-
-        //     ctx->setPrefetch(ins->id, {(unsigned)cctx->id, (unsigned)copied->id});
-        
-        //     return copied;
-        // };
-        
+            return copied;
+        } break;
         /*
             CONTROL FLOW        
         */
@@ -2250,6 +2540,67 @@ static CV::Data *__flow(  const CV::InsType &ins,
             }
             return prog->buildNil();
         };
+        case CV::InstructionType::CF_AWAIT: {
+            CV::Data *result = prog->buildNil();
+
+            for(int i = 0; i < ins->data.size(); ++i){
+                auto entrypoint = prog->getIns(ins->data[i]);
+                if(!entrypoint){
+                    cursor->setError(
+                        CV_ERROR_MSG_INVALID_SYNTAX,
+                        "Await instruction references missing entrypoint",
+                        ins->token
+                    );
+                    st->state = CV::ControlFlowState::CRASH;
+                    return prog->buildNil();
+                }
+
+                auto data = CV::Execute(entrypoint, prog, cursor, ctx, st);
+                if(cursor->error){
+                    st->state = CV::ControlFlowState::CRASH;
+                    return prog->buildNil();
+                }
+
+                if(data == NULL){
+                    cursor->setError(
+                        CV_ERROR_MSG_WRONG_OPERANDS,
+                        "Imperative 'await' was provided a NULL operand (not-nil)",
+                        ins->token
+                    );
+                    st->state = CV::ControlFlowState::CRASH;
+                    return prog->buildNil();
+                }
+
+                if(data->type != CV::DataType::THREAD){
+                    continue;
+                }                
+
+                auto thread = static_cast<CV::DataThread*>(data);
+
+                while(true){
+                    int state;
+                    {
+                        std::lock_guard<std::mutex> lock(thread->accessMutex);
+                        state = thread->state;
+                    }
+
+                    if(state == CV::ThreadState::FINISHED){
+                        break;
+                    }
+
+                    CV::Tools::sleep(30);
+                }
+
+                if(thread->returnId > 0){
+                    auto payload = prog->getData(thread->returnId);
+                    if(payload != NULL){
+                        result = payload;
+                    }
+                }
+            }
+
+            return result;
+        } break;
         case CV::InstructionType::CF_INVOKE_FUNCTION: {
 
             auto fn = static_cast<CV::DataFunction*>(prog->getData( ins->data[0] ));
@@ -2304,16 +2655,28 @@ static CV::Data *__flow(  const CV::InsType &ins,
 
             // Execute
             if(fn->isBinary){
-                // a binary function is in charge of compiling the instructions
-                auto v = fn->lambda(
-                    prog,
-                    ins->literal[0],
-                    allParams,
-                    ins->token,
-                    cursor,
-                    paramCtx,
-                    st
-                );
+                CV::Data *v;
+                if(fn->blambda != nullptr){
+                    v = fn->blambda(
+                        prog,
+                        ins->literal[0],
+                        allParams,
+                        ins->token,
+                        cursor,
+                        paramCtx,
+                        st
+                    );
+                }else{
+                    v = fn->lambda(
+                        prog,
+                        ins->literal[0],
+                        allParams,
+                        ins->token,
+                        cursor,
+                        paramCtx,
+                        st
+                    );
+                }
                 if(cursor->error){
                     st->state = CV::ControlFlowState::CRASH;
                     cleanupCtx();
@@ -2373,12 +2736,12 @@ static CV::Data *__flow(  const CV::InsType &ins,
         
             return result;
         } break;
-        // /*
-        //     LIBRARY IMPORT
-        // */
-        // case CV::InstructionType::LIBRAY_IMPORT: {
-        //     return CV::Build::Number(ins->data[1]); // returns library id handle            
-        // } break;
+        /*
+            LIBRARY IMPORT
+        */
+        case CV::InstructionType::LIBRAY_IMPORT: {
+            return prog->buildNumber(ins->data[1]); // returns library id handle            
+        } break;
         /*
             NOOP
         */
@@ -2581,25 +2944,6 @@ bool CV::Context::removeDependant(int id){
     this->mutexDependants.unlock();
     return true;
 }
-
-void CV::Context::registerFunction(
-    const std::shared_ptr<CV::Program> &prog,
-    const std::string &name,
-    const std::vector<std::string> &params,
-    const std::vector<std::string> &mandatory,
-    const CV::Lambda &lambda
-){
-    auto fn = new CV::DataFunction();
-    prog->allocateData(fn);
-    fn->params = params;
-    fn->mandatory = mandatory;
-    fn->isBinary = true;
-    fn->lambda = lambda;
-    fn->isVariadic = false;
-    this->setData(prog, fn->id);
-    this->setName(name, fn->id);
-}
-
 void CV::Context::registerFunction(
     const std::shared_ptr<CV::Program> &prog,
     const std::string &name,
@@ -2609,7 +2953,6 @@ void CV::Context::registerFunction(
     auto fn = new CV::DataFunction();
     prog->allocateData(fn);
     fn->params = params;
-    fn->mandatory = params;
     fn->isBinary = true;
     fn->lambda = lambda;
     fn->isVariadic = false;
@@ -2628,6 +2971,40 @@ void CV::Context::registerFunction(
     fn->isVariadic = true;
     fn->isBinary = true;
     fn->lambda = lambda;
+    this->setData(prog, fn->id);
+    this->setName(name, fn->id);
+}
+
+void CV::Context::registerFunctionPtr(
+    const std::shared_ptr<CV::Program> &prog,
+    const std::string &name,
+    const std::vector<std::string> &params,
+    const CV::LambdaPtr lambda
+){
+    auto fn = new CV::DataFunction();
+    prog->allocateData(fn);
+
+    fn->params = params;
+    fn->isBinary = true;
+    fn->isVariadic = false;
+    fn->blambda = lambda;
+
+    this->setData(prog, fn->id);
+    this->setName(name, fn->id);
+}
+
+void CV::Context::registerFunctionPtr(
+    const std::shared_ptr<CV::Program> &prog,
+    const std::string &name,
+    const CV::LambdaPtr lambda
+){
+    auto fn = new CV::DataFunction();
+    prog->allocateData(fn);
+
+    fn->isVariadic = true;
+    fn->isBinary = true;
+    fn->blambda = lambda;
+
     this->setData(prog, fn->id);
     this->setName(name, fn->id);
 }
@@ -2783,6 +3160,7 @@ bool CV::Program::deallocateData(int id){
 
 CV::Program::Program(){
     this->root = this->createContext();
+    this->shuttingDown = false;
 }
 
 bool CV::Program::removePrefetch(int insId){
@@ -2823,12 +3201,30 @@ void CV::Program::clearPrefetch(){
 }
 
 
+void CV::Program::deleteThread(unsigned id){
+    this->mutexThreads.lock();
+    if(this->threads.count(id) > 0){
+        auto &thread = this->threads[id];
+        thread.join();
+        this->threads.erase(id);
+    }
+    this->mutexThreads.unlock();
+}
+
 void CV::Program::end(){
+    this->shuttingDown = true;
     // Clear root
     if(this->root){
         this->root->clear(shared_from_this());
         this->root = NULL;
     }
+    // Clear threads
+    this->mutexThreads.lock();
+    for(auto &it : this->threads){
+        it.second.join();
+    }
+    this->threads.clear();
+    this->mutexThreads.unlock();     
     std::vector<int> trailing;
     // Clear other contexts
     this->mutexContext.lock();
@@ -2860,9 +3256,24 @@ CV::Data* CV::Program::buildNil(){
     return nil;
 }
 
+CV::DataNumber* CV::Program::buildNumber(CV_NUMBER n){
+    auto number = new CV::DataNumber(n);
+    this->allocateData(number);
+    return number;
+}
+
 void CV::Program::quickGC(){
+    
+    this->mutexThreads.lock();
+    for(auto &it : this->threads){
+        it.second.join();
+    }
+    this->threads.clear();
+    this->mutexThreads.unlock();   
+
     std::vector<int> trailing;
-    this->mutexStack.lock();
+    // Clear Stack
+    this->mutexStack.lock();    
     for(auto &it : this->stack){
         if(it.second->getRefCount() == 0){
             trailing.push_back(it.first);
@@ -2980,6 +3391,27 @@ CV::Data *CV::Copy(
 
             return static_cast<CV::Data*>(copy);
         }
+
+        case CV::DataType::THREAD: {
+            auto copy = new CV::DataThread();
+            prog->allocateData(copy);
+
+            auto orig = static_cast<CV::DataThread*>(subject);
+
+            copy->entrypointInsId = orig->entrypointInsId;
+            copy->ctxId = orig->ctxId;
+            copy->state = orig->state;
+            copy->returnId = 0;
+            if(orig->returnId != 0){
+                auto data = prog->getData(copy->returnId);
+                if(data){
+                    copy->returnId = orig->returnId;
+                    data->incRefCount();
+                }
+            }
+
+            return static_cast<CV::Data*>(copy);
+        }        
 
         default:
         case CV::DataType::NIL: {
@@ -4197,4 +4629,144 @@ std::string CV::GetPrompt(){
     std::string cv = CV::Tools::setTextColor(Tools::Color::CYAN) + "~" + CV::Tools::setTextColor(Tools::Color::RESET);
     std::string end = CV::Tools::setTextColor(Tools::Color::MAGENTA) + "]" + CV::Tools::setTextColor(Tools::Color::RESET);
     return start+cv+end;
+}
+
+int CV::Import(
+    const std::string &fname,
+    const std::shared_ptr<CV::Program> &prog,
+    const std::shared_ptr<CV::Context> &ctx,
+    const std::shared_ptr<CV::Cursor> &cursor
+){
+    if(!CV::Tools::fileExists(fname)){
+        cursor->setError(
+            CV_ERROR_MSG_LIBRARY_NOT_VALID,
+            "'"+fname+"' does not exist"
+        );
+        return 0;
+    }
+
+    auto literal = CV::Tools::readFile(fname);
+
+    auto entrypoint = CV::Compile(literal, prog, cursor, ctx);
+    if(cursor->error){
+        return 0;
+    }
+
+    auto st = std::make_shared<CV::ControlFlow>();
+    st->state = CV::ControlFlowState::CONTINUE;
+
+    auto result = CV::Execute(entrypoint, prog, cursor, ctx, st);
+    if(cursor->error){
+        return 0;
+    }
+
+    if(result == NULL){
+        return 0;
+    }
+
+    return result->id;
+}
+
+#define CV_IMPORT_LIBRARY_ENTRY_POINT_ARGS \
+    const std::shared_ptr<CV::Program> &prog, \
+    const std::shared_ptr<CV::Context> &ctx, \
+    const std::shared_ptr<CV::Cursor> &cursor
+
+int CV::ImportDynamicLibrary(
+    const std::string &path,
+    const std::string &fname,
+    const std::shared_ptr<CV::Program> &prog,
+    const std::shared_ptr<CV::Context> &ctx,
+    const std::shared_ptr<CV::Cursor> &cursor
+){
+    using rlib = void (*)(CV_IMPORT_LIBRARY_ENTRY_POINT_ARGS);
+
+#if (_CV_PLATFORM == _CV_PLATFORM_TYPE_LINUX) || (_CV_PLATFORM == _CV_PLATFORM_TYPE_OSX)
+
+    void *handle = dlopen(path.c_str(), RTLD_LAZY);
+    if(!handle){
+        cursor->setError(
+            CV_ERROR_MSG_LIBRARY_NOT_VALID,
+            "Failed to load dynamic library '"+fname+"': "+std::string(dlerror()),
+            nullptr
+        );
+        return 0;
+    }
+
+    dlerror(); // clear previous error
+
+    auto registerlibrary = reinterpret_cast<rlib>(dlsym(handle, "_CV_REGISTER_LIBRARY"));
+    const char *error = dlerror();
+    if(error){
+        cursor->setError(
+            CV_ERROR_MSG_LIBRARY_NOT_VALID,
+            "Failed to find '_CV_REGISTER_LIBRARY' in '"+fname+"': "+std::string(error),
+            nullptr
+        );
+        dlclose(handle);
+        return 0;
+    }
+
+    // Register the library into the current runtime
+    (*registerlibrary)(prog, ctx, cursor);
+    if(cursor->error){
+        dlclose(handle);
+        return 0;
+    }
+
+    auto id = GEN_ID();
+
+    prog->loadedDynamicLibsMutex.lock();
+    prog->loadedDynamicLibs[id] = {handle, path};
+    prog->loadedDynamicLibsMutex.unlock();
+
+    return id;
+
+#elif (_CV_PLATFORM == _CV_PLATFORM_TYPE_WINDOWS)
+
+    HMODULE hdll = LoadLibraryA(path.c_str());
+    if(hdll == NULL){
+        cursor->setError(
+            CV_ERROR_MSG_LIBRARY_NOT_VALID,
+            "Failed to load dynamic library '"+fname+"'",
+            nullptr
+        );
+        return 0;
+    }
+
+    auto entry = reinterpret_cast<rlib>(GetProcAddress(hdll, "_CV_REGISTER_LIBRARY"));
+    if(entry == NULL){
+        cursor->setError(
+            CV_ERROR_MSG_LIBRARY_NOT_VALID,
+            "Failed to find '_CV_REGISTER_LIBRARY' in '"+fname+"'",
+            nullptr
+        );
+        FreeLibrary(hdll);
+        return 0;
+    }
+
+    entry(prog, ctx, cursor);
+    if(cursor->error){
+        FreeLibrary(hdll);
+        return 0;
+    }
+
+    auto id = GEN_ID();
+
+    prog->loadedDynamicLibsMutex.lock();
+    prog->loadedDynamicLibs[id] = {hdll, path};
+    prog->loadedDynamicLibsMutex.unlock();
+
+    return id;
+
+#else
+
+    cursor->setError(
+        CV_ERROR_MSG_LIBRARY_NOT_VALID,
+        "Dynamic libraries are not supported on this platform",
+        nullptr
+    );
+    return 0;
+
+#endif
 }

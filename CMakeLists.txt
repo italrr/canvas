@@ -22,7 +22,7 @@ endmacro()
 
 set (cv_src 
             src/CV.cpp
-            # src/Core.cpp
+
             )
 
 if(UNIX AND NOT APPLE)
@@ -44,15 +44,17 @@ target_compile_options(cv_bin PRIVATE -fno-sized-deallocation)
 add_executable(cv src/CLI.cpp)
 target_link_libraries(cv cv_bin)
 
+set_target_properties(cv PROPERTIES ENABLE_EXPORTS ON)
+target_link_options(cv PRIVATE -Wl,--export-dynamic)
 # LIBRARIES
 # -------------------------------------------------------------------------- #
 
 # # io
 # add_library(io SHARED src/libs/io.cpp src/CV.cpp src/Core.cpp)
 # mvLib(io)
-# # json
-# add_library(json SHARED src/libs/json.cpp src/libs/thirdparty/json11.cpp src/CV.cpp src/Core.cpp)
-# mvLib(json)
+# json
+add_library(json SHARED src/libs/json.cpp src/Thirdparty/json11.cpp)
+mvLib(json)
 # # bmp
 # add_library(bmp SHARED src/libs/bmp.cpp src/CV.cpp src/Core.cpp)
 # mvLib(bmp)
