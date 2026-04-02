@@ -120,7 +120,8 @@
             LIST,
             STORE,
             FUNCTION,
-            THREAD
+            THREAD,
+            ANY // not a valid type, just a handy option
         };
 
         static std::string DataTypeName(int v){
@@ -566,6 +567,8 @@
 
             CV::Data* buildNil();
             CV::DataNumber* buildNumber(CV_NUMBER n);
+            CV::DataString* buildString(const std::string &s);
+            CV::DataList* buildList();
 
             void quickGC();
         };
@@ -674,7 +677,14 @@
         CV::InsType Compile(const std::string &input, const CV::ProgramType &prog, const CV::CursorType &cursor, const CV::ContextType &ctx = NULL);
         CV::InsType Compile(const CV::TokenType &input, const CV::ProgramType &prog, const CV::CursorType &cursor, const CV::ContextType &ctx);
         CV::InsType Translate(const CV::TokenType &token, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor);
-        CV::Data *Execute(const CV::InsType &entry, const CV::ProgramType &prog, const CV::CursorType &cursor, const CV::ContextType &ctx, CFType cf);
+        CV::Data *Execute(
+            const CV::InsType &entry,
+            const CV::ProgramType &prog,
+            const CV::CursorType &cursor,
+            const CV::ContextType &ctx,
+            CFType cf,
+            bool followNext = true
+        );
         void SetupCore(const CV::ProgramType &prog);
         void SetUseColor(bool v);
         std::string GetPrompt();

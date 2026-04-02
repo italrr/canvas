@@ -2,59 +2,98 @@ cmake_minimum_required(VERSION 3.10)
 
 project(cv CXX C)
 
-set(CMAKE_C_FLAGS "-g")
-set(CMAKE_CXX_FLAGS "-std=c++17 -g")
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/builds/cmake)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib/)
 
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+option(CV_ENABLE_SANITIZERS "Enable ASan/UBSan" ON)
 
 # TODO: Install script should move the libraries to its respective directory in the system. Perhaps /usr/lib/canvasv/?
 
-macro (mvLib t) 
+macro(mvLib t)
     # Seems we only need to do this on Windows, GCC on Linux moves .sos to the lib directory
-    IF(WIN32)
+    if(WIN32)
         add_custom_command(TARGET ${t} POST_BUILD COMMAND mv ./lib${t}.dll ./lib/)
-    # ELSE()    
-    #     add_custom_command(TARGET ${t} POST_BUILD COMMAND mv ./lib${t}.so ./lib/)
-    ENDIF(WIN32)
-
+    endif()
 endmacro()
 
-set (cv_src 
-            src/CV.cpp
-
-            )
+set(cv_src
+    src/CV.cpp
+)
 
 if(UNIX AND NOT APPLE)
     set(LINUX TRUE)
 endif()
 
+# Core runtime library
 add_library(cv_bin ${cv_src})
 
-IF(LINUX)
-	target_link_libraries(cv_bin -pthread -m64)
-ENDIF(LINUX)
+if(LINUX)
+    target_link_libraries(cv_bin PRIVATE pthread -m64)
+endif()
 
-IF(MINGW)
-	target_link_libraries(cv_bin -m64)
-ENDIF(MINGW)
+if(MINGW)
+    target_link_libraries(cv_bin PRIVATE -m64)
+endif()
 
-target_compile_options(cv_bin PRIVATE -fno-sized-deallocation)
+# Sanitizers
+if(CV_ENABLE_SANITIZERS AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    set(CV_SANITIZER_COMPILE_FLAGS
+        -fsanitize=address,undefined
+        -fno-omit-frame-pointer
+        -fno-sized-deallocation
+        -g3
+    )
 
+    set(CV_SANITIZER_LINK_FLAGS
+        -fsanitize=address,undefined
+    )
+
+    target_compile_options(cv_bin PRIVATE ${CV_SANITIZER_COMPILE_FLAGS})
+    target_link_options(cv_bin PRIVATE ${CV_SANITIZER_LINK_FLAGS})
+endif()
+
+# Main executable
 add_executable(cv src/CLI.cpp)
-target_link_libraries(cv cv_bin)
+target_link_libraries(cv PRIVATE cv_bin)
 
 set_target_properties(cv PROPERTIES ENABLE_EXPORTS ON)
-target_link_options(cv PRIVATE -Wl,--export-dynamic)
+
+if(CV_ENABLE_SANITIZERS AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_options(cv PRIVATE ${CV_SANITIZER_COMPILE_FLAGS})
+    target_link_options(cv PRIVATE
+        ${CV_SANITIZER_LINK_FLAGS}
+        -Wl,--export-dynamic
+    )
+else()
+    target_link_options(cv PRIVATE -Wl,--export-dynamic)
+endif()
+
 # LIBRARIES
 # -------------------------------------------------------------------------- #
 
-# # io
-# add_library(io SHARED src/libs/io.cpp src/CV.cpp src/Core.cpp)
-# mvLib(io)
 # json
-add_library(json SHARED src/libs/json.cpp src/Thirdparty/json11.cpp)
+add_library(json SHARED
+    src/libs/json.cpp
+    src/Thirdparty/json11.cpp
+)
 mvLib(json)
-# # bmp
-# add_library(bmp SHARED src/libs/bmp.cpp src/CV.cpp src/Core.cpp)
-# mvLib(bmp)
+
+# json
+add_library(bmp SHARED
+    src/libs/bmp.cpp
+)
+mvLib(bmp)
+
+if(CV_ENABLE_SANITIZERS AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_options(json PRIVATE ${CV_SANITIZER_COMPILE_FLAGS})
+    target_link_options(json PRIVATE ${CV_SANITIZER_LINK_FLAGS})
+    target_compile_options(bmp PRIVATE ${CV_SANITIZER_COMPILE_FLAGS})
+    target_link_options(bmp PRIVATE ${CV_SANITIZER_LINK_FLAGS})    
+endif()

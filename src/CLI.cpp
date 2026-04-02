@@ -87,7 +87,7 @@ int main(int argc, char* argv[]){
 
 
     // Run File
-	if(useFile.size() > 0){
+    if(useFile.size() > 0){
 
         if(!CV::Tools::fileExists(useFile)){
             std::cout << "Failed to read file '" << useFile << "': It doesn't exist or cannot be read" << std::endl;
@@ -110,18 +110,40 @@ int main(int argc, char* argv[]){
             return 1;
         }
 
-        auto result = CV::Execute(entrypoint, program, cursor, program->root, st);
-        if(cursor->error){
-            std::cout << cursor->getRaised() << std::endl;
-            program->end();
-            return 1;
+        CV::Data *result = nullptr;
+        CV::InsType current = entrypoint;
+
+        while(current){
+            auto st = std::make_shared<CV::ControlFlow>();
+            st->state = CV::ControlFlowState::CONTINUE;
+
+            result = CV::Execute(current, program, cursor, program->root, st, false);
+            if(cursor->error){
+                std::cout << cursor->getRaised() << std::endl;
+                program->end();
+                return 1;
+            }
+
+            program->mutexThreads.lock();
+            bool empty = program->threads.empty();
+            program->mutexThreads.unlock();
+
+            if(empty){
+                program->quickGC();
+            }
+
+            if(current->next == 0){
+                break;
+            }
+
+            current = program->getIns(current->next);
         }
 
         (void)result;
 
         program->end();
         return 0;
-	}else
+    }else
 	// REPL
 	if(useREPL){
         auto cursor = std::make_shared<CV::Cursor>();
@@ -229,41 +251,47 @@ int main(int argc, char* argv[]){
         return cursor->error && !useRelaxed ? 1 : 0;
 	}else{
 	// Inline
-		// std::string cmd = "";
-		// for(int i = 1; i < params.size(); ++i){
-		// 	cmd += params[i];
-		// 	if(i < params.size()-1) cmd += " ";
-		// }
-		// if(cmd.size() == 0){
-		// 	printVersion();
-		// 	return 0;
-		// }
+        std::string cmd = "";
+        for(int i = 1; i < params.size(); ++i){
+            cmd += params[i];
+            if(i < params.size() - 1){
+                cmd += " ";
+            }
+        }
 
-		// auto cursor = std::make_shared<CV::Cursor>();
-		// auto program = std::make_shared<CV::Program>();
-		// auto st = std::make_shared<CV::ControlFlow>();
-		// program->rootContext = program->createContext();
-		
-		// CV::InitializeCore(program);
+        if(cmd.empty()){
+            printVersion();
+            return 0;
+        }
 
-		// auto entrypoint = CV::Compile(cmd, program, cursor);
-		// if(cursor->error){
-		// 	std::cout << cursor->getRaised() << std:: endl;
-		// 	program->end();
-		// 	return 1;
-		// }
-		// program->entrypointIns = entrypoint->id;
-		// auto result = CV::Execute(entrypoint, program->rootContext, program, cursor, st);
-		// if(cursor->error){
-		// 	std::cout << cursor->getRaised() << std:: endl;
-		// 	program->end();
-		// 	return 1;
-		// }
-		// if(!useNoReturn){
-		// 	std::cout << CV::QuantToText(result) << std::endl;
-		// }
-		// program->end();
-		// return 0;
+        auto cursor = std::make_shared<CV::Cursor>();
+        auto program = std::make_shared<CV::Program>();
+        auto st = std::make_shared<CV::ControlFlow>();
+
+        program->root = program->createContext();
+
+        CV::SetupCore(program);
+
+        auto entrypoint = CV::Compile(cmd, program, cursor, program->root);
+        if(cursor->error){
+            std::cout << cursor->getRaised() << std::endl;
+            program->end();
+            return 1;
+        }
+
+        auto result = CV::Execute(entrypoint, program, cursor, program->root, st);
+        if(cursor->error){
+            std::cout << cursor->getRaised() << std::endl;
+            program->end();
+            return 1;
+        }
+
+        if(!useNoReturn){
+            std::cout << CV::DataToText(program, result) << std::endl;
+        }
+
+        program->end();
+        return 0;
 	}    
 
 
