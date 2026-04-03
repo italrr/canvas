@@ -247,22 +247,7 @@
                     default:                        return "UNDEFINED";
                 }
             }
-        }
-
-        struct DataThread : Data {
-            int entrypointInsId;
-            int ctxId;
-            int threadId;
-            int state;
-            int returnId;
-            std::mutex accessMutex;
-
-            DataThread();
-
-            void setState(int nstate);
-            void clear(const std::shared_ptr<CV::Program> &prog) override;
-            void setPayload(const std::shared_ptr<CV::Program> &prog, int dataId);
-        };        
+        }    
         
         ////////////////////////////
         //// PARSING
@@ -521,7 +506,6 @@
             std::mutex mutexContext;
             std::mutex mutexStack;
             std::mutex mutexIns;
-            std::mutex mutexThreads;
             std::mutex loadedDynamicLibsMutex;
 
             std::unordered_map<int, std::shared_ptr<CV::Context>> contexts;
@@ -532,8 +516,6 @@
             std::unordered_map<int, int> prefetched;
 
             CV::ContextType root;
-
-            std::unordered_map<unsigned, std::thread> threads;
 
             std::unordered_map<unsigned, std::pair<void*,std::string>> loadedDynamicLibs;
 
@@ -546,7 +528,6 @@
             bool isPrefetched(int id);
             void clearPrefetch();            
 
-            void deleteThread(unsigned id);
 
             void end();
             CV::InsType createInstruction(unsigned type, const std::shared_ptr<CV::Token> &token);

@@ -133,11 +133,6 @@ cases = [
         "[[~b 2] [~a 1]]",
     ])),
 
-    # --- threads / await ---
-    TestCase("thread:await-simple", "[[await |[+ 1 2]]]", exact("3")),
-    TestCase("thread:await-nested", "[[>> 3 [>> [await |[await |2]] 1]]]", exact("[1 2 3]")),
-    TestCase("thread:repeat-simple", "[[await |[+ 1 2]]]", exact("3"), repeat=20),
-
     # --- import / plugin regression ---
     TestCase("import:json-then-plus", "[[import 'json'][+ 2 3]]", exact("5"), repeat=25),
     TestCase("import:json-twice-then-plus", "[[import 'json'][import 'json'][+ 2 3]]", exact("5"), repeat=10),

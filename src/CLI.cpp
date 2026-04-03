@@ -123,14 +123,8 @@ int main(int argc, char* argv[]){
                 program->end();
                 return 1;
             }
-
-            program->mutexThreads.lock();
-            bool empty = program->threads.empty();
-            program->mutexThreads.unlock();
-
-            if(empty){
-                program->quickGC();
-            }
+            
+            program->quickGC();
 
             if(current->next == 0){
                 break;

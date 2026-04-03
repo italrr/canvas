@@ -605,48 +605,6 @@ void CV::DataFunction::clear(const std::shared_ptr<CV::Program> &prog){
     this->lambda = {};
 }
 
-
-//
-//  THREAD
-//
-CV::DataThread::DataThread(){
-    this->entrypointInsId = 0;
-    this->ctxId = 0;
-    this->state = CV::ThreadState::CREATED;
-    this->type = CV::DataType::THREAD;
-}
-
-void CV::DataThread::clear(const std::shared_ptr<CV::Program> &prog){
-    std::lock_guard<std::mutex> lock(this->accessMutex);
-
-    if(this->returnId >= 0){
-        auto subject = prog->getData(this->returnId);
-        if(subject != NULL){
-            subject->decRefCount();
-        }
-        this->returnId = -1;
-    }
-}
-
-void CV::DataThread::setPayload(const std::shared_ptr<CV::Program> &prog, int dataId){
-    auto data = prog->getData(dataId);
-    if(!data){
-        // This shouldn't happen regardless
-        return;
-    }
-    this->accessMutex.lock();
-    this->returnId = dataId;
-    data->incRefCount();
-    this->accessMutex.unlock();
-}
-
-void CV::DataThread::setState(int nstate){
-    this->accessMutex.lock();
-    this->state = nstate;
-    this->accessMutex.unlock();
-}
-
-
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //
 //  CURSOR
@@ -830,31 +788,6 @@ std::string CV::DataToText(const std::shared_ptr<CV::Program> &prog, CV::Data *t
             }
                         
             return output + Tools::setTextColor(Tools::Color::MAGENTA)+"]"+Tools::setTextColor(Tools::Color::RESET);
-        };        
-
-        case CV::DataType::THREAD: {
-            auto thread = static_cast<CV::DataThread*>(t);
-
-            std::string payload = "";
-
-            thread->accessMutex.lock();
-            if(thread->returnId == 0){
-                payload = Tools::setTextColor(Tools::Color::BLUE)+"nil"+Tools::setTextColor(Tools::Color::RESET);
-            }else{
-                auto target = prog->getData(thread->returnId);
-                if(target){
-                    payload += CV::DataToText(prog, target);
-                }                
-            }
-            thread->accessMutex.unlock();
-
-            return Tools::setTextColor(Tools::Color::YELLOW)
-                                +"[THREAD "+std::to_string(thread->id)+" "
-                                +Tools::setTextColor(Tools::Color::GREEN)
-                                +CV::ThreadState::name(thread->state)
-                                +Tools::setTextColor(Tools::Color::RESET)+" -> '"+payload+"'"
-                                +Tools::setTextColor(Tools::Color::YELLOW)+"]"
-                                +Tools::setTextColor(Tools::Color::RESET);
         };
 
     }
@@ -1093,62 +1026,6 @@ static std::vector<CV::TokenType> rebuildTokenHierarchy(const std::vector<CV::To
 //  JIT
 // 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-struct InvokeThread {
-    int threadDataId;
-    std::shared_ptr<CV::Program> prog;
-    std::shared_ptr<CV::Cursor> upcursor;
-    std::shared_ptr<CV::Token> root;
-};
-
-static void RUN_THREAD(const std::shared_ptr<InvokeThread> &handle){
-
-    auto &prog = handle->prog;
-    auto &upcursor = handle->upcursor;
-    auto &root = handle->root;
-
-    auto coreBase = prog->getData(handle->threadDataId);
-    if(coreBase == NULL || coreBase->type != CV::DataType::THREAD){
-        upcursor->setError(
-            CV_ERROR_MSG_INVALID_SYNTAX,
-            "Crash in Thread: missing or invalid thread handle",
-            root
-        );
-        return;
-    }
-
-    auto core = static_cast<CV::DataThread*>(coreBase);
-
-    auto entrypoint = prog->getIns(core->entrypointInsId);
-    auto ctx = prog->getContext(core->ctxId);
-
-    auto st = std::make_shared<CV::ControlFlow>();
-    st->state = CV::ControlFlowState::CONTINUE;
-
-    auto cursor = std::make_shared<CV::Cursor>();
-
-    auto r = CV::Execute(entrypoint, prog, cursor, ctx, st);
-    if(cursor->error){
-        st->state = CV::ControlFlowState::CRASH;
-
-        upcursor->setError(
-            cursor->title,
-            "Crash in Thread "+std::to_string(core->id)+": "+cursor->message,
-            root
-        );
-
-        core->setState(CV::ThreadState::FINISHED);
-        return;
-    }
-
-    if(r != NULL){
-        core->setPayload(handle->prog, r->id);
-    }else{
-        core->returnId = 0;
-    }
-
-    core->setState(CV::ThreadState::FINISHED);
-}
 
 static CV::InsType CompileEmbeddedBody(
     const CV::TokenType &body,
@@ -2033,62 +1910,6 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
                 return ins;
             }
         }else
-        // PARALLELER
-        if(token->first[0] == '|'){
-            if(token->inner.size() != 0){
-                cursor->setError(
-                    CV_ERROR_MSG_MISUSED_PREFIX,
-                    "Paralleler Prefix '"+token->first+"' expects no values",
-                    token
-                );
-                return prog->createInstruction(CV::InstructionType::NOOP, token);
-            }
-
-            if(token->first.size() == 1){
-                cursor->setError(
-                    CV_ERROR_MSG_MISUSED_PREFIX,
-                    "Paralleler Prefix '"+token->first+"' expects an appended body",
-                    token
-                );
-                return prog->createInstruction(CV::InstructionType::NOOP, token);
-            }
-
-            std::string statement(token->first.begin() + 1, token->first.end());
-
-            // Keep the compile-time context lineage for the thread body
-            auto tctx = prog->createContext(ctx->id);
-
-            auto entrypoint = CV::Compile(statement, prog, cursor, tctx);
-            if(cursor->error){
-                cursor->subject = token;
-                prog->deleteContext(tctx->id);
-                return prog->createInstruction(CV::InstructionType::NOOP, token);
-            }
-
-            auto ins = prog->createInstruction(CV::InstructionType::PROXY_PARALELER, token);
-            ins->data.push_back(CV_INS_PREFIXER_IDENTIFIER_INSTRUCTION);
-            ins->data.push_back(CV::Prefixer::PARALELLER);
-
-            // data[2] = thread compile-time context id
-            ins->data.push_back(tctx->id);
-
-            // params[0] = compiled body entrypoint
-            ins->params.push_back(entrypoint->id);
-
-            auto thread = new CV::DataThread();
-            thread->incRefCount();
-            prog->allocateData(thread);
-
-            thread->ctxId = tctx->id;
-            thread->entrypointInsId = entrypoint->id;
-            thread->returnId = 0;
-            thread->setState(CV::ThreadState::CREATED);            
-
-            ins->data.push_back(thread->id);
-
-            return ins;
-
-        }else
         // EXPANDER
         if(token->first[0] == '^'){
             if(token->inner.size() != 0){
@@ -2390,88 +2211,6 @@ static CV::Data *__flow(  const CV::InsType &ins,
         /*
             PROXIES
         */
-        // case CV::InstructionType::PROXY_ACCESS: {
-        //     auto ctxId = ins->data[0];
-        //     auto dataId = ins->data[1];
-        //     std::string mname = ins->literal[0];
-        //     auto &quant = prog->getCtx(ctxId)->get(dataId);
-        //     auto store = std::static_pointer_cast<CV::TypeStore>(quant);
-        //     // TODO: Perhaps some error checking?
-        //     return store->v[mname];
-        // };
-        case CV::InstructionType::PROXY_PARALELER: {
-            // If this paralleler already created its thread handle, return it
-            if(prog->isPrefetched(ins->id)){
-                auto prefetchedId = prog->getPrefetch(ins->id);
-                auto prefetched = prog->getData(prefetchedId);
-                if(prefetched != NULL){
-                    return prefetched;
-                }
-
-                cursor->setError(
-                    CV_ERROR_MSG_INVALID_SYNTAX,
-                    "Paralleler instruction points to dead prefetched thread handle",
-                    ins->token
-                );
-                st->state = CV::ControlFlowState::CRASH;
-                return prog->buildNil();
-            }
-
-            auto tctxId = ins->data[2];
-            auto entrypointId = ins->params[0];
-
-            auto tctx = prog->getContext(tctxId);
-            auto entrypoint = prog->getIns(entrypointId);
-
-            if(!tctx || !entrypoint){
-                cursor->setError(
-                    CV_ERROR_MSG_INVALID_SYNTAX,
-                    "Paralleler instruction is missing thread context or entrypoint",
-                    ins->token
-                );
-                st->state = CV::ControlFlowState::CRASH;
-                return prog->buildNil();
-            }
-
-            auto threadId = ins->data[3];
-            auto threadf = prog->getData(ins->data[3]);
-
-            if(!threadf || threadf->type != CV::DataType::THREAD){
-                cursor->setError(
-                    CV_ERROR_MSG_INVALID_SYNTAX,
-                    "Paralleler instruction is pointing to unallocated data %i",
-                    ins->data[3]
-                );
-                st->state = CV::ControlFlowState::CRASH;
-                return prog->buildNil();                
-            }
-
-            auto thread = static_cast<CV::DataThread*>(threadf);
-
-            // Root the thread handle in the thread context so GC keeps it alive
-            if(!tctx->isDataIn(thread->id)){
-                tctx->setData(prog, thread->id);
-            }
-
-            // Cache the handle so this instruction always returns the same thread object
-            prog->setPrefetch(ins->id, thread->id);
-
-            // Start native thread now
-            thread->setState(CV::ThreadState::STARTED);
-
-            auto handle = std::make_shared<InvokeThread>();
-            handle->threadDataId = thread->id;
-            handle->prog = prog;
-            handle->upcursor = cursor;
-            handle->root = ins->token;
-
-            {
-                std::lock_guard<std::mutex> lock(prog->mutexThreads);
-                prog->threads[threadId] = std::thread(&RUN_THREAD, handle);
-            }
-
-            return static_cast<CV::Data*>(thread);
-        } break;
         case CV::InstructionType::PROXY_EXPANDER: {
             
             if(prog->isPrefetched(ins->id)){
@@ -2736,67 +2475,6 @@ static CV::Data *__flow(  const CV::InsType &ins,
             }
             return prog->buildNil();
         };
-        case CV::InstructionType::CF_AWAIT: {
-            CV::Data *result = prog->buildNil();
-
-            for(int i = 0; i < ins->data.size(); ++i){
-                auto entrypoint = prog->getIns(ins->data[i]);
-                if(!entrypoint){
-                    cursor->setError(
-                        CV_ERROR_MSG_INVALID_SYNTAX,
-                        "Await instruction references missing entrypoint",
-                        ins->token
-                    );
-                    st->state = CV::ControlFlowState::CRASH;
-                    return prog->buildNil();
-                }
-
-                auto data = CV::Execute(entrypoint, prog, cursor, ctx, st);
-                if(cursor->error){
-                    st->state = CV::ControlFlowState::CRASH;
-                    return prog->buildNil();
-                }
-
-                if(data == NULL){
-                    cursor->setError(
-                        CV_ERROR_MSG_WRONG_OPERANDS,
-                        "Imperative 'await' was provided a NULL operand (not-nil)",
-                        ins->token
-                    );
-                    st->state = CV::ControlFlowState::CRASH;
-                    return prog->buildNil();
-                }
-
-                if(data->type != CV::DataType::THREAD){
-                    continue;
-                }                
-
-                auto thread = static_cast<CV::DataThread*>(data);
-
-                while(true){
-                    int state;
-                    {
-                        std::lock_guard<std::mutex> lock(thread->accessMutex);
-                        state = thread->state;
-                    }
-
-                    if(state == CV::ThreadState::FINISHED){
-                        break;
-                    }
-
-                    CV::Tools::sleep(30);
-                }
-
-                if(thread->returnId > 0){
-                    auto payload = prog->getData(thread->returnId);
-                    if(payload != NULL){
-                        result = payload;
-                    }
-                }
-            }
-
-            return result;
-        } break;
         case CV::InstructionType::CF_INVOKE_FUNCTION: {
 
             auto fn = static_cast<CV::DataFunction*>(prog->getData( ins->data[0] ));
@@ -3424,31 +3102,13 @@ void CV::Program::clearPrefetch(){
     prefetchMutex.unlock();
 }
 
-
-void CV::Program::deleteThread(unsigned id){
-    this->mutexThreads.lock();
-    if(this->threads.count(id) > 0){
-        auto &thread = this->threads[id];
-        thread.join();
-        this->threads.erase(id);
-    }
-    this->mutexThreads.unlock();
-}
-
 void CV::Program::end(){
     this->shuttingDown = true;
     // Clear root
     if(this->root){
         this->root->clear(shared_from_this());
         this->root = NULL;
-    }
-    // Clear threads
-    this->mutexThreads.lock();
-    for(auto &it : this->threads){
-        it.second.join();
-    }
-    this->threads.clear();
-    this->mutexThreads.unlock();     
+    }     
     std::vector<int> trailing;
     // Clear other contexts
     this->mutexContext.lock();
@@ -3499,14 +3159,6 @@ CV::DataList* CV::Program::buildList(){
 }
 
 void CV::Program::quickGC(){
-    
-    this->mutexThreads.lock();
-    for(auto &it : this->threads){
-        it.second.join();
-    }
-    this->threads.clear();
-    this->mutexThreads.unlock();   
-
     std::vector<int> trailing;
     // Clear Stack
     this->mutexStack.lock();    
@@ -3627,27 +3279,6 @@ CV::Data *CV::Copy(
 
             return static_cast<CV::Data*>(copy);
         }
-
-        case CV::DataType::THREAD: {
-            auto copy = new CV::DataThread();
-            prog->allocateData(copy);
-
-            auto orig = static_cast<CV::DataThread*>(subject);
-
-            copy->entrypointInsId = orig->entrypointInsId;
-            copy->ctxId = orig->ctxId;
-            copy->state = orig->state;
-            copy->returnId = 0;
-            if(orig->returnId != 0){
-                auto data = prog->getData(copy->returnId);
-                if(data){
-                    copy->returnId = orig->returnId;
-                    data->incRefCount();
-                }
-            }
-
-            return static_cast<CV::Data*>(copy);
-        }        
 
         default:
         case CV::DataType::NIL: {
@@ -4852,14 +4483,7 @@ void CV::SetupCore(const CV::ProgramType &prog){
                     continue;
                 }
 
-                // Optional safe point
-                prog->mutexThreads.lock();
-                bool empty = prog->threads.empty();
-                prog->mutexThreads.unlock();
-
-                if(empty){
-                    prog->quickGC();
-                }
+                prog->quickGC();
             }
 
             prog->swapId(rangeData->id, iterData->id);
