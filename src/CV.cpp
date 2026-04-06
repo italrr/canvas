@@ -5,16 +5,15 @@
 #include <sys/stat.h>
 #include <fstream>
 
+#include "CV.hpp"
+
 // DYNAMIC LIBRARY STUFF
-#if (_CV_PLATFORM == _CV_PLATFORM_TYPE_LINUX)
+#if defined(CV_PLATFORM_TYPE_LINUX)
     #include <dlfcn.h> 
-#elif  (_CV_PLATFORM == _CV_PLATFORM_TYPE_WINDOWS)
+#elif defined(CV_PLATFORM_TYPE_WINDOWS)
     // should prob move the entire DLL loading routines to its own file
     #include <Libloaderapi.h>
 #endif
-
-#include "CV.hpp"
-
 
 static bool UseColorOnText = true;
 static std::string CV_LIB_HOME = "./";
@@ -3423,7 +3422,7 @@ std::shared_ptr<CV::Data> CV::ImportDynamicLibrary(
 ){
     using rlib = void (*)(CV_IMPORT_LIBRARY_ENTRY_POINT_ARGS);
 
-#if (_CV_PLATFORM == _CV_PLATFORM_TYPE_LINUX) || (_CV_PLATFORM == _CV_PLATFORM_TYPE_OSX)
+#if defined(CV_PLATFORM_TYPE_LINUX) || defined(CV_PLATFORM_TYPE_OSX)
 
     void *handle = dlopen(path.c_str(), RTLD_LAZY);
     if(!handle){
@@ -3464,7 +3463,7 @@ std::shared_ptr<CV::Data> CV::ImportDynamicLibrary(
 
     return std::static_pointer_cast<CV::Data>(ctx->buildNumber(id));
 
-#elif (_CV_PLATFORM == _CV_PLATFORM_TYPE_WINDOWS)
+#elif defined(CV_PLATFORM_TYPE_WINDOWS)
 
     HMODULE hdll = LoadLibraryA(path.c_str());
     if(hdll == NULL){

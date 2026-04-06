@@ -7,13 +7,14 @@
 #include <chrono>
 #include <system_error>
 
-#if defined(_WIN32)
+#include "../CV.hpp"
+
+#if defined(CV_PLATFORM_TYPE_WINDOWS)
     #include <windows.h>
-#elif defined(__APPLE__) || defined(__linux__)
+#elif defined(CV_PLATFORM_TYPE_LINUX)
     #include <sys/stat.h>
 #endif
 
-#include "../CV.hpp"
 
 namespace {
     static int GEN_ID(){

@@ -100,13 +100,13 @@
         
         #ifdef _WIN32
             const static int PLATFORM = SupportedPlatform::WINDOWS;
-            #define _CV_PLATFORM _CV_PLATFORM_TYPE_WINDOWS
+            #define CV_PLATFORM_TYPE_WINDOWS
         #elif __linux__
             const static int PLATFORM = CV::SupportedPlatform::LINUX;
-            #define _CV_PLATFORM _CV_PLATFORM_TYPE_LINUX
+            #define CV_PLATFORM_TYPE_LINUX
         #else
             const static int PLATFORM = SupportedPlatform::UNSUPPORTED;
-            #define _CV_PLATFORM _CV_PLATFORM_TYPE_UNDEFINED
+            #define CV_PLATFORM_TYPE_UNDEFINED
         #endif  
 
 
