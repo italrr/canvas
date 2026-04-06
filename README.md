@@ -110,7 +110,7 @@ The takeaway is simple: `canvas` is flexible, but explicit bracketing is always 
 ### `fn`
 ```canvas
 [[let add [fn [a b] [+ a b]]]
- [add 2 3]]
+[add 2 3]]
 ```
 
 ## Stores
@@ -130,7 +130,7 @@ If every member of an aggregate is named, `canvas` treats it as a store.
 ### Store access
 ```canvas
 [[let user [b:store [~name 'Italo'] [~role 'builder']]]
- [user ~name]]
+[user ~name]]
 ```
 
 ## Prefixers
