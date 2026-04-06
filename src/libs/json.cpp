@@ -1,207 +1,360 @@
-#include <cmath> 
+#include <cmath>
 #include <fstream>
 
-#include "thirdparty/json11.hpp"
+#include "../Thirdparty/json11.hpp"
 #include "../CV.hpp"
 
-static inline bool isNotFractional(number d, number epsilon = 1e-9){
-    number integral_part;
-    number fractional_part = std::modf(d, &integral_part);
+static inline bool __cv_json_is_not_fractional(CV_NUMBER d, CV_NUMBER epsilon = 1e-9){
+    CV_NUMBER integral_part;
+    CV_NUMBER fractional_part = std::modf(d, &integral_part);
     return std::fabs(fractional_part) < epsilon;
 }
 
-static json11::Json buildNode(const std::string &name, const std::shared_ptr<CV::Quant> &origin, const CV::TokenType &token, const CV::CursorType &cursor){
-    switch(origin->type){
-        case CV::QuantType::STORE: {
-            json11::Json::object obj;
-            auto store = std::static_pointer_cast<CV::TypeStore>(origin);
-            for(auto &it : store->v){
-                obj[it.first] =  buildNode(name, it.second, token, cursor);
-            }
-            return obj;
-        };
-        case CV::QuantType::LIST: {
-            json11::Json::array obj;
-            auto list = std::static_pointer_cast<CV::TypeList>(origin);
-            for(int i = 0; i < list->v.size(); ++i){
-                obj.push_back(buildNode(name, list->v[i], token, cursor));
-            }
-            return obj;
-        };
-        case CV::QuantType::NUMBER: {
-            auto v = std::static_pointer_cast<CV::TypeNumber>(origin)->v;
-            return isNotFractional(v) ?  json11::Json( static_cast<int>(v) ) : json11::Json( v );
-        };
-
-        case CV::QuantType::STRING: {
-            return json11::Json( std::static_pointer_cast<CV::TypeString>(origin)->v );
-        };
-
-        case CV::QuantType::NIL: {
-            return json11::Json();
-        };
-
-        default: {
-            cursor->setError("Unhandled Type For JSON", "Imperative '"+name+"' was provided type '"+std::to_string(origin->type)+"' is not handled by this JSON library");
-            return json11::Json();
-        };
-    };
+static std::shared_ptr<CV::Data> __cv_json_fail_num(const CV::ContextType &ctx){
+    return std::static_pointer_cast<CV::Data>(ctx->buildNumber(0));
 }
 
-static std::shared_ptr<CV::Quant> unwrapJson(const std::string &name, json11::Json obj, const CV::TokenType &token, const CV::ContextType &ctx, const CV::CursorType &cursor){
+static std::shared_ptr<CV::Data> __cv_json_ok_num(const CV::ContextType &ctx){
+    return std::static_pointer_cast<CV::Data>(ctx->buildNumber(1));
+}
 
+static std::shared_ptr<CV::Data> __cv_json_unwrap(const std::shared_ptr<CV::Data> &d){
+    return d ? d->unwrap() : std::shared_ptr<CV::Data>(nullptr);
+}
+
+static bool __cv_json_expect_exactly(
+    const std::string &name,
+    const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+    int n,
+    const CV::CursorType &cursor,
+    const CV::TokenType &token
+){
+    if(static_cast<int>(args.size()) != n){
+        cursor->setError(
+            CV_ERROR_MSG_MISUSED_FUNCTION,
+            "'"+name+"' expects exactly ("+std::to_string(n)+") argument(s)",
+            token
+        );
+        return false;
+    }
+    return true;
+}
+
+static bool __cv_json_expect_type(
+    const std::string &name,
+    const std::shared_ptr<CV::Data> &value,
+    CV::DataType expected,
+    const CV::CursorType &cursor,
+    const CV::TokenType &token
+){
+    auto v = __cv_json_unwrap(value);
+    if(!v || v->type != expected){
+        cursor->setError(
+            CV_ERROR_MSG_WRONG_OPERANDS,
+            "Imperative '"+name+"' expected "+CV::DataTypeName(expected)+
+            ", provided "+(v ? CV::DataTypeName(v->type) : std::string("NULL")),
+            token
+        );
+        return false;
+    }
+    return true;
+}
+
+static json11::Json __cv_json_build_node(
+    const std::string &name,
+    const std::shared_ptr<CV::Data> &origin,
+    const CV::TokenType &token,
+    const CV::CursorType &cursor
+){
+    auto value = __cv_json_unwrap(origin);
+
+    if(!value){
+        cursor->setError(
+            "Unhandled Type For JSON",
+            "Imperative '"+name+"' was provided a null value",
+            token
+        );
+        return json11::Json();
+    }
+
+    switch(value->type){
+        case CV::DataType::STORE: {
+            json11::Json::object obj;
+            auto store = std::static_pointer_cast<CV::DataStore>(value);
+
+            for(const auto &it : store->v){
+                obj[it.first] = __cv_json_build_node(name, it.second, token, cursor);
+                if(cursor->error){
+                    return json11::Json();
+                }
+            }
+
+            return obj;
+        }
+
+        case CV::DataType::LIST: {
+            json11::Json::array obj;
+            auto list = std::static_pointer_cast<CV::DataList>(value);
+
+            for(int i = 0; i < static_cast<int>(list->v.size()); ++i){
+                obj.push_back(__cv_json_build_node(name, list->v[i], token, cursor));
+                if(cursor->error){
+                    return json11::Json();
+                }
+            }
+
+            return obj;
+        }
+
+        case CV::DataType::NUMBER: {
+            auto v = std::static_pointer_cast<CV::DataNumber>(value)->v;
+            return __cv_json_is_not_fractional(v)
+                ? json11::Json(static_cast<int>(v))
+                : json11::Json(v);
+        }
+
+        case CV::DataType::STRING: {
+            return json11::Json(std::static_pointer_cast<CV::DataString>(value)->v);
+        }
+
+        case CV::DataType::NIL: {
+            return json11::Json();
+        }
+
+        default: {
+            cursor->setError(
+                "Unhandled Type For JSON",
+                "Imperative '"+name+"' was provided type '"+CV::DataTypeName(value->type)+"' which is not handled by this JSON library",
+                token
+            );
+            return json11::Json();
+        }
+    }
+}
+
+static std::shared_ptr<CV::Data> __cv_json_unwrap_json(
+    const std::string &name,
+    const json11::Json &obj,
+    const CV::ContextType &ctx,
+    const CV::TokenType &token,
+    const CV::CursorType &cursor
+){
     switch(obj.type()){
         case json11::Json::ARRAY: {
-            auto arr = obj.array_items();
             auto list = ctx->buildList();
-            for(int i = 0; i < arr.size(); ++i){
-                list->v.push_back(unwrapJson(name, arr.at(i), token, ctx, cursor));
+            auto arr = obj.array_items();
+
+            for(int i = 0; i < static_cast<int>(arr.size()); ++i){
+                auto child = __cv_json_unwrap_json(name, arr.at(i), ctx, token, cursor);
+                if(cursor->error){
+                    return ctx->buildNil();
+                }
+                list->v.push_back(child);
             }
-            return list;
-        };
+
+            return std::static_pointer_cast<CV::Data>(list);
+        }
+
         case json11::Json::OBJECT: {
-            json11::Json::object curr { obj.object_items() };
             auto store = ctx->buildStore();
-            for(auto &it : curr){
-                store->v[it.first] = unwrapJson(name, it.second, token, ctx, cursor);
+            auto curr = obj.object_items();
+
+            for(const auto &it : curr){
+                auto child = __cv_json_unwrap_json(name, it.second, ctx, token, cursor);
+                if(cursor->error){
+                    return ctx->buildNil();
+                }
+                store->v[it.first] = child;
             }
-            return store;
-        };
+
+            return std::static_pointer_cast<CV::Data>(store);
+        }
+
         case json11::Json::NUMBER: {
-            return ctx->buildNumber( obj.number_value() );
-        };
+            return std::static_pointer_cast<CV::Data>(ctx->buildNumber(obj.number_value()));
+        }
+
         case json11::Json::BOOL: {
-            return ctx->buildNumber( obj.bool_value() );
-        };
+            return std::static_pointer_cast<CV::Data>(ctx->buildNumber(obj.bool_value() ? 1 : 0));
+        }
+
         case json11::Json::STRING: {
-            return ctx->buildString( obj.string_value() );
-        };
+            return std::static_pointer_cast<CV::Data>(ctx->buildString(obj.string_value()));
+        }
+
         case json11::Json::NUL: {
             return ctx->buildNil();
-        };
+        }
+
         default: {
-            cursor->setError("Unhandled Type For JSON", "Imperative '"+name+"' was provided type '"+std::to_string(obj.type())+"' is not handled by this JSON library");
+            cursor->setError(
+                "Unhandled Type For JSON",
+                "Imperative '"+name+"' was provided JSON type '"+std::to_string(obj.type())+"' which is not handled by this JSON library",
+                token
+            );
             return ctx->buildNil();
-        };
+        }
     }
-
 }
 
-static void __CV_STD_JSON_WRITE(
-    const std::vector<std::shared_ptr<CV::Instruction>> &args,
-    const std::string &name,
-    const CV::TokenType &token,
+static std::shared_ptr<CV::Data> __CV_STD_JSON_WRITE(
+    const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+    const CV::ContextType &ctx,
     const CV::CursorType &cursor,
-    int execCtxId,
-    int ctxId,
-    int dataId,
-    const std::shared_ptr<CV::Program> &prog,
-    const CV::CFType &st
+    const CV::TokenType &token
 ){
-    // Fetch context & data target
-    auto &dataCtx = prog->getCtx(ctxId);
-    auto &execCtx = prog->getCtx(execCtxId);
+    const std::string name = "json:write";
 
-
-    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
-        !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 2, name, {"STORE/LIST", "FILENAME"}, token, cursor)){
-        dataCtx->set(dataId,  dataCtx->buildNumber(0));
-        return;
+    if(!__cv_json_expect_exactly(name, args, 2, cursor, token)){
+        return __cv_json_fail_num(ctx);
     }
-    
-    // Get store param
-    auto param0 = CV::Execute(args[0], execCtx, prog, cursor, st);
+
+    auto subject = __cv_json_unwrap(args[0].second);
+    if(!subject || (subject->type != CV::DataType::LIST && subject->type != CV::DataType::STORE)){
+        cursor->setError(
+            CV_ERROR_MSG_WRONG_OPERANDS,
+            "Imperative '"+name+"' expects operand 'subject' to be LIST or STORE",
+            token
+        );
+        return __cv_json_fail_num(ctx);
+    }
+
+    auto filenameData = __cv_json_unwrap(args[1].second);
+    if(!__cv_json_expect_type(name, filenameData, CV::DataType::STRING, cursor, token)){
+        return __cv_json_fail_num(ctx);
+    }
+
+    auto filename = std::static_pointer_cast<CV::DataString>(filenameData)->v;
+
+    auto obj = __cv_json_build_node(name, subject, token, cursor);
     if(cursor->error){
-        dataCtx->set(dataId,  dataCtx->buildNumber(0));
-        return;
-    }
-    if(param0->type != CV::QuantType::LIST && param0->type != CV::QuantType::STORE){
-        cursor->setError(CV_ERROR_MSG_WRONG_TYPE, "Imperative '"+name+"' expects LIST or STORE operand at first position", token);   
-        dataCtx->set(dataId,  dataCtx->buildNumber(0));
-        return;
+        return __cv_json_fail_num(ctx);
     }
 
-    // Get filename param
-    auto param1Filename = CV::Execute(args[1], execCtx, prog, cursor, st);
-    if(cursor->error){
-        dataCtx->set(dataId,  dataCtx->buildNumber(0));  
-        return;
-    }
-    if(!CV::ErrorCheck::ExpectsTypeAt(param1Filename->type, CV::QuantType::STRING, 1, name, token, cursor)){
-        dataCtx->set(dataId,  dataCtx->buildNumber(0));
-        return;
-    }    
-
-    auto &filename = std::static_pointer_cast<CV::TypeString>(param1Filename)->v;
-
-    // Build Json hierarchy
-    auto obj = buildNode(name, param0, token, cursor);
-    if(cursor->error){
-        dataCtx->set(dataId,  dataCtx->buildNumber(0));
-        return;
-    }
-
-    std::ofstream outFile;
-    outFile.open(filename);
+    std::ofstream outFile(filename);
     outFile << json11::Json(obj).dump();
-    outFile.close();   
+    outFile.close();
 
-    dataCtx->set(dataId,  dataCtx->buildNumber(1));
+    return __cv_json_ok_num(ctx);
 }
 
-static void __CV_STD_JSON_PARSE_FILE(
-    const std::vector<std::shared_ptr<CV::Instruction>> &args,
-    const std::string &name,
-    const CV::TokenType &token,
+static std::shared_ptr<CV::Data> __CV_STD_JSON_DUMP(
+    const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+    const CV::ContextType &ctx,
     const CV::CursorType &cursor,
-    int execCtxId,
-    int ctxId,
-    int dataId,
-    const std::shared_ptr<CV::Program> &prog,
-    const CV::CFType &st
+    const CV::TokenType &token
 ){
-    // Fetch context & data target
-    auto &dataCtx = prog->getCtx(ctxId);
-    auto &execCtx = prog->getCtx(execCtxId);
+    const std::string name = "json:dump";
 
-
-    if( !CV::ErrorCheck::ExpectNoPrefixer(name, args, token, cursor) ||
-        !CV::ErrorCheck::ExpectsExactlyOperands(args.size(), 1, name, {"FILENAME"}, token, cursor)){
-        dataCtx->set(dataId,  dataCtx->buildNumber(0));
-        return;
+    if(!__cv_json_expect_exactly(name, args, 1, cursor, token)){
+        return __cv_json_fail_num(ctx);
     }
 
-    // Get filename param
-    auto param0Filename = CV::Execute(args[0], execCtx, prog, cursor, st);
+    auto subject = __cv_json_unwrap(args[0].second);
+    if(!subject || (subject->type != CV::DataType::LIST && subject->type != CV::DataType::STORE)){
+        cursor->setError(
+            CV_ERROR_MSG_WRONG_OPERANDS,
+            "Imperative '"+name+"' expects operand 'subject' to be LIST or STORE",
+            token
+        );
+        return __cv_json_fail_num(ctx);
+    }
+
+    auto obj = __cv_json_build_node(name, subject, token, cursor);
     if(cursor->error){
-        dataCtx->set(dataId,  dataCtx->buildNumber(0));  
-        return;
+        return __cv_json_fail_num(ctx);
     }
-    if(!CV::ErrorCheck::ExpectsTypeAt(param0Filename->type, CV::QuantType::STRING, 0, name, token, cursor)){
-        dataCtx->set(dataId,  dataCtx->buildNumber(0));
-        return;
-    }    
 
-    auto &filename = std::static_pointer_cast<CV::TypeString>(param0Filename)->v;
+    return std::static_pointer_cast<CV::Data>(
+        ctx->buildString(json11::Json(obj).dump())
+    );
+}
+
+static std::shared_ptr<CV::Data> __CV_STD_JSON_PARSE_FILE(
+    const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+    const CV::ContextType &ctx,
+    const CV::CursorType &cursor,
+    const CV::TokenType &token
+){
+    const std::string name = "json:load";
+
+    if(!__cv_json_expect_exactly(name, args, 1, cursor, token)){
+        return __cv_json_fail_num(ctx);
+    }
+
+    auto filenameData = __cv_json_unwrap(args[0].second);
+    if(!__cv_json_expect_type(name, filenameData, CV::DataType::STRING, cursor, token)){
+        return __cv_json_fail_num(ctx);
+    }
+
+    auto filename = std::static_pointer_cast<CV::DataString>(filenameData)->v;
 
     if(!CV::Tools::fileExists(filename)){
-        cursor->setError("File Not Found", "File '"+filename+"' does not exist", token);
-        dataCtx->set(dataId,  dataCtx->buildNumber(0));
-        return;
+        cursor->setError(
+            "File Not Found",
+            "File '"+filename+"' does not exist",
+            token
+        );
+        return __cv_json_fail_num(ctx);
     }
+
     auto source = CV::Tools::readFile(filename);
+
     std::string err;
     auto json = json11::Json::parse(source, err);
-    if(err.size() > 0){
-        cursor->setError("Bad JSON Input", "Imperative '"+name+"' was provided an invalid JSON input: '"+err+"'", token);
-        dataCtx->set(dataId,  dataCtx->buildNumber(0));
-        return;
+    if(!err.empty()){
+        cursor->setError(
+            "Bad JSON Input",
+            "Imperative '"+name+"' was provided an invalid JSON input: '"+err+"'",
+            token
+        );
+        return __cv_json_fail_num(ctx);
     }
 
-    dataCtx->set(dataId,  unwrapJson(name, json, token, dataCtx, cursor));
+    return __cv_json_unwrap_json(name, json, ctx, token, cursor);
 }
 
-extern "C" void _CV_REGISTER_LIBRARY(const std::shared_ptr<CV::Program> &prog, const CV::ContextType &ctx, const CV::CursorType &cursor){
-    ctx->registerBinaryFuntion("json:write", (void*)__CV_STD_JSON_WRITE);
-    ctx->registerBinaryFuntion("json:load", (void*)__CV_STD_JSON_PARSE_FILE);
+static std::shared_ptr<CV::Data> __CV_STD_JSON_PARSE(
+    const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+    const CV::ContextType &ctx,
+    const CV::CursorType &cursor,
+    const CV::TokenType &token
+){
+    const std::string name = "json:parse";
+
+    if(!__cv_json_expect_exactly(name, args, 1, cursor, token)){
+        return __cv_json_fail_num(ctx);
+    }
+
+    auto bodyData = __cv_json_unwrap(args[0].second);
+    if(!__cv_json_expect_type(name, bodyData, CV::DataType::STRING, cursor, token)){
+        return __cv_json_fail_num(ctx);
+    }
+
+    auto body = std::static_pointer_cast<CV::DataString>(bodyData)->v;
+
+    std::string err;
+    auto json = json11::Json::parse(body, err);
+    if(!err.empty()){
+        cursor->setError(
+            "Bad JSON Input",
+            "Imperative '"+name+"' was provided an invalid JSON input: '"+err+"'",
+            token
+        );
+        return __cv_json_fail_num(ctx);
+    }
+
+    return __cv_json_unwrap_json(name, json, ctx, token, cursor);
+}
+
+extern "C" void _CV_REGISTER_LIBRARY(
+    const CV::ContextType &ctx,
+    const CV::CursorType &cursor
+){
+    (void)cursor;
+
+    ctx->registerFunction("json:write", {"subject", "filename"}, __CV_STD_JSON_WRITE);
+    ctx->registerFunction("json:dump",  {"subject"}, __CV_STD_JSON_DUMP);
+    ctx->registerFunction("json:load",  {"filename"}, __CV_STD_JSON_PARSE_FILE);
+    ctx->registerFunction("json:parse", {"body"}, __CV_STD_JSON_PARSE);
 }

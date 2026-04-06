@@ -1,0 +1,91 @@
+{
+  "$schema": "vscode://schemas/color-theme",
+  "name": "Canvas Dark",
+  "type": "dark",
+  "colors": {
+    "editor.background": "#0e1116",
+    "editor.foreground": "#d7dee9",
+    "editorBracketHighlight.foreground1": "#e06c75",
+    "editorBracketHighlight.foreground2": "#e5c07b",
+    "editorBracketHighlight.foreground3": "#98c379",
+    "editorBracketHighlight.foreground4": "#56b6c2",
+    "editorBracketHighlight.foreground5": "#61afef",
+    "editorBracketHighlight.foreground6": "#c678dd"
+  },
+  "tokenColors": [
+    {
+      "scope": ["comment.line.number-sign.canvas"],
+      "settings": {
+        "foreground": "#5c6370",
+        "fontStyle": "italic"
+      }
+    },
+    {
+      "scope": ["string.quoted.single.canvas"],
+      "settings": {
+        "foreground": "#98c379"
+      }
+    },
+    {
+      "scope": ["constant.character.escape.canvas"],
+      "settings": {
+        "foreground": "#56b6c2"
+      }
+    },
+    {
+      "scope": ["constant.numeric.canvas"],
+      "settings": {
+        "foreground": "#d19a66"
+      }
+    },
+    {
+      "scope": ["entity.name.tag.canvas"],
+      "settings": {
+        "foreground": "#e5c07b",
+        "fontStyle": "bold"
+      }
+    },
+    {
+      "scope": ["support.function.canvas"],
+      "settings": {
+        "foreground": "#61afef",
+        "fontStyle": "bold"
+      }
+    },
+    {
+      "scope": ["keyword.operator.canvas", "keyword.operator.special.canvas"],
+      "settings": {
+        "foreground": "#56b6c2"
+      }
+    },
+    {
+      "scope": ["keyword.control.canvas", "storage.type.canvas"],
+      "settings": {
+        "foreground": "#c678dd",
+        "fontStyle": "bold"
+      }
+    },
+    {
+      "scope": ["constant.language.canvas"],
+      "settings": {
+        "foreground": "#e06c75",
+        "fontStyle": "bold"
+      }
+    },
+    {
+      "scope": ["variable.other.canvas"],
+      "settings": {
+        "foreground": "#d7dee9"
+      }
+    },
+    {
+      "scope": [
+        "punctuation.section.brackets.begin.canvas",
+        "punctuation.section.brackets.end.canvas"
+      ],
+      "settings": {
+        "foreground": "#abb2bf"
+      }
+    }
+  ]
+}

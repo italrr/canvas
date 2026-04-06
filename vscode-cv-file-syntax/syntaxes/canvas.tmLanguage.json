@@ -1,0 +1,113 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Canvas",
+  "scopeName": "source.canvas",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#prefixers" },
+    { "include": "#builtins" },
+    { "include": "#keywords" },
+    { "include": "#constants" },
+    { "include": "#identifiers" },
+    { "include": "#brackets" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.number-sign.canvas",
+          "match": "#.*$"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.single.canvas",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            {
+              "name": "constant.character.escape.canvas",
+              "match": "\\\\(?:'|n|\\\\)"
+            }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.canvas",
+          "match": "(?<![A-Za-z0-9_:-])[+-]?(?:\\d*\\.\\d+|\\d+)(?![A-Za-z0-9_:-])"
+        }
+      ]
+    },
+    "prefixers": {
+      "patterns": [
+        {
+          "name": "entity.name.tag.canvas",
+          "match": "~[A-Za-z_][A-Za-z0-9_:-]*"
+        },
+        {
+          "name": "keyword.operator.special.canvas",
+          "match": "\\|(?=\\[)"
+        }
+      ]
+    },
+    "builtins": {
+      "patterns": [
+        {
+          "name": "support.function.canvas",
+          "match": "(?<![A-Za-z0-9_:-])(?:print|typeof|length|nth|bring|import|import:dynamic-library|cc|let|fn|if|for|iter|while|await|and|or|not|eq|neq|bmp:create|bmp:load|bmp:write|bmp:setp|json:parse|json:dump|json:load|json:write|io:out|io:err|io:in)(?![A-Za-z0-9_:-])"
+        },
+        {
+          "name": "keyword.operator.canvas",
+          "match": "(?<![A-Za-z0-9_:-])(?:\\+\\+|--|\\*\\*|//|>>|<<|\\+|\\-|\\*|/|<=|>=|<|>|=|!=)(?![A-Za-z0-9_:-])"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.canvas",
+          "match": "(?<![A-Za-z0-9_:-])(?:return|yield|skip|break|continue)(?![A-Za-z0-9_:-])"
+        },
+        {
+          "name": "storage.type.canvas",
+          "match": "(?<![A-Za-z0-9_:-])(?:b:list|b:store)(?![A-Za-z0-9_:-])"
+        }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        {
+          "name": "constant.language.canvas",
+          "match": "(?<![A-Za-z0-9_:-])(?:nil|true|false)(?![A-Za-z0-9_:-])"
+        }
+      ]
+    },
+    "identifiers": {
+      "patterns": [
+        {
+          "name": "variable.other.canvas",
+          "match": "(?<![A-Za-z0-9_:-])[A-Za-z_+*\\/<>!=:-][A-Za-z0-9_:+*\\/<>!=.-]*(?![A-Za-z0-9_:-])"
+        }
+      ]
+    },
+    "brackets": {
+      "patterns": [
+        {
+          "name": "punctuation.section.brackets.begin.canvas",
+          "match": "\\["
+        },
+        {
+          "name": "punctuation.section.brackets.end.canvas",
+          "match": "\\]"
+        }
+      ]
+    }
+  }
+}

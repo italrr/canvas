@@ -1,0 +1,38 @@
+{
+  "name": "canvas-language-support",
+  "displayName": "Canvas Language Support",
+  "description": "Syntax highlighting, brackets, comments, and a starter theme for Canvas (.cv) files.",
+  "version": "1.0.0",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Themes"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "canvas",
+        "aliases": ["Canvas", "canvas"],
+        "extensions": [".cv"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "canvas",
+        "scopeName": "source.canvas",
+        "path": "./syntaxes/canvas.tmLanguage.json"
+      }
+    ],
+    "themes": [
+      {
+        "label": "Canvas Dark",
+        "uiTheme": "vs-dark",
+        "path": "./themes/canvas-dark-color-theme.json"
+      }
+    ]
+  }
+}

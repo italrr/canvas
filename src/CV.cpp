@@ -1,13 +1,9 @@
-// SYSTEM INCLUDES
 #include <iostream>
 #include <stdio.h>
 #include <stdarg.h>
 #include <functional>
 #include <sys/stat.h>
 #include <fstream>
-
-// LOCAL INCLUDES
-#include "CV.hpp"
 
 // DYNAMIC LIBRARY STUFF
 #if (_CV_PLATFORM == _CV_PLATFORM_TYPE_LINUX)
@@ -17,36 +13,19 @@
     #include <Libloaderapi.h>
 #endif
 
-static bool UseColorOnText = false;
+#include "CV.hpp"
 
-struct InvokeThread {
-    CV::TypeThread *core;
-    CV::ProgramType prog;
-    CV::CursorType upcursor;
-    CV::TokenType root;
-};
 
-static void RUN_THREAD(std::shared_ptr<InvokeThread> handle){
+static bool UseColorOnText = true;
+static std::string CV_LIB_HOME = "./";
 
-    auto &prog = handle->prog;
-    auto core = handle->core;
-    auto &upcursor = handle->upcursor;
-    auto &root = handle->root;
-    auto &entrypoint = prog->getIns( core->entrypoint );
-
-    auto ctx = prog->getCtx( core->ctxId );
-    auto st = std::make_shared<CV::ControlFlow>();
-    st->state = CV::ControlFlowState::CONTINUE;
-    auto cursor = std::make_shared<CV::Cursor>();
-    auto r = CV::Execute(entrypoint, ctx, prog, cursor, st);
-    if(cursor->error){
-        st->state = CV::ControlFlowState::CRASH;
-        upcursor->setError(cursor->title, "Crash in Thread "+std::to_string(core->threadId)+": "+cursor->message, root);
-    }
-    ctx->set(r->id, r);
-    core->returnId = r->id;
-    core->setState(CV::ThreadState::FINISHED);
-    handle->prog->deleteThread(core->threadId);
+static int GEN_ID(){
+    static std::mutex access;
+    static int v = 0;
+    access.lock();
+    int r = ++v;
+    access.unlock();
+    return r;
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -54,20 +33,8 @@ static void RUN_THREAD(std::shared_ptr<InvokeThread> handle){
 //  TOOLS
 // 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 namespace CV {
-    namespace Test {
-        bool areAllNumbers(const std::vector<std::shared_ptr<CV::Quant>> &arguments){
-            for(int i = 0; i < arguments.size(); ++i){
-                if(arguments[i]->type != CV::QuantType::NUMBER){
-                    return false;
-                }
-            }
-            return true;
-        }
-        bool IsItPrefixInstruction(const std::shared_ptr<CV::Instruction> &ins){
-            return ins->data.size() >= 2 && ins->data[0] == CV_INS_PREFIXER_IDENTIFIER_INSTRUCTION;
-        }
-    }
     namespace Tools {
 
         namespace ColorTable {
@@ -186,8 +153,8 @@ namespace CV {
 
         bool isReservedWord(const std::string &name){
             static const std::vector<std::string> reserved {
-                "let", "bring", "bring:dynamic-library", "~", ".", "|", "`", "cc", "mut", "fn",
-                "return", "yield", "skip", "b:list", "b:store", "untether", "async"
+                "let", "import", "import:dynamic-library", "~", ".", "|", "`", "cc", "mut", "fn",
+                "return", "yield", "skip", "b:list", "b:store", "await"
             };
             for(int i = 0; i < reserved.size(); ++i){
                 if(reserved[i] == name){
@@ -292,7 +259,30 @@ namespace CV {
 			stat(path.c_str(), &tt);
 			return S_ISREG(tt.st_mode);	            
         }
+        
+		std::string fileExtension(const std::string &filename){
+			int k = filename.rfind(".");
+			return k != -1 ? filename.substr(k+1, filename.length()-1) : "";
+		}
 
+        bool isInList(const std::string &v, const std::vector<std::string> &list){
+            for(int i = 0; i < list.size(); ++i){
+                if(list[i] == v){
+                    return true;
+                }
+            }
+            return false;
+        }   
+        
+        bool isInList(const std::string &v, const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &list){
+            for(int i = 0; i < list.size(); ++i){
+                if(list[i].first == v){
+                    return true;
+                }
+            }
+            return false;
+        }         
+        
         std::string readFile(const std::string &path){
             std::string buffer;
             std::ifstream file(path);
@@ -304,185 +294,10 @@ namespace CV {
                 }
             }    
             return buffer;
-        } 
-
+        }         
     }
-}
 
-static int GEN_ID(){
-    static std::mutex access;
-    static int v = 0;
-    access.lock();
-    int r = ++v;
-    access.unlock();
-    return r;
 }
-
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//
-//  TYPES
-// 
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-// BASE
-CV::Quant::Quant(){
-    this->id = GEN_ID();
-    this->type = CV::QuantType::NIL;
-}
-
-std::shared_ptr<CV::Quant> CV::Quant::copy(){
-    return std::make_shared<CV::Quant>();
-}
-
-// NUMBER
-CV::TypeNumber::TypeNumber() : CV::Quant() {
-    this->type = CV::QuantType::NUMBER;
-}
-
-bool CV::TypeNumber::clear(){
-    v = 0;
-    return true;
-}
-
-std::shared_ptr<CV::Quant> CV::TypeNumber::copy(){
-    auto cpy = std::make_shared<CV::TypeNumber>();
-    cpy->v = this->v;
-    return cpy;
-}
-
-// STRING
-CV::TypeString::TypeString() : CV::Quant() {
-    this->type = CV::QuantType::STRING;
-}
-
-bool CV::TypeString::clear(){
-    v = "";
-    return true;
-}
-
-std::shared_ptr<CV::Quant> CV::TypeString::copy(){
-    auto cpy = std::make_shared<CV::TypeString>();
-    cpy->v = this->v;
-    return cpy;
-}
-
-// LIST
-CV::TypeList::TypeList() : CV::Quant() {
-    this->type = CV::QuantType::LIST;
-}
-bool CV::TypeList::clear(){
-    v.clear();
-    return true;
-}
-bool CV::TypeList::isInit(){
-    for(int i = 0; i < this->v.size(); ++i){
-        if(v[i].get() == NULL){
-            return false;
-        }
-    }
-    return true;
-}
-
-std::shared_ptr<CV::Quant> CV::TypeList::copy(){
-    auto cpy = std::make_shared<CV::TypeList>();
-    return cpy;
-}
-
-// STORE
-CV::TypeStore::TypeStore(){
-    this->type = CV::QuantType::STORE;
-}
-
-bool CV::TypeStore::clear(){
-    v.clear();
-    return true;
-}
-
-bool CV::TypeStore::isInit(){
-    for(auto &it : this->v){
-        if(it.second.get() == NULL){
-            return false;
-        }
-    }
-    return true;
-}
-
-std::shared_ptr<CV::Quant> CV::TypeStore::copy(){
-    auto cpy = std::make_shared<CV::TypeStore>();
-    return cpy;
-}
-
-// FUNCTION
-CV::TypeFunction::TypeFunction() : CV::Quant(){
-    this->type = CV::QuantType::FUNCTION;
-}
-
-bool CV::TypeFunction::clear(){
-    return true;
-}
-
-std::shared_ptr<CV::Quant> CV::TypeFunction::copy(){
-    auto cpy = std::make_shared<CV::TypeFunction>();
-    cpy->name = this->name;
-    cpy->entrypoint = this->entrypoint;
-    cpy->ctxId = this->ctxId;
-    cpy->body = this->body->copy();
-    return cpy;
-}
-
-// BINARY FUNCTION
-CV::TypeFunctionBinary::TypeFunctionBinary(){
-    this->type = CV::QuantType::BINARY_FUNCTION;
-}
-
-bool CV::TypeFunctionBinary::clear(){
-    return true;
-}
-
-std::shared_ptr<CV::Quant> CV::TypeFunctionBinary::copy(){
-    auto cpy = std::make_shared<CV::TypeFunctionBinary>();
-    cpy->name = this->name;
-    cpy->entrypoint = this->entrypoint;
-    cpy->ctxId = this->ctxId;
-    cpy->ref = this->ref;
-    cpy->body = this->body->copy();
-    return cpy;
-}
-
-// THREAD
-CV::TypeThread::TypeThread(){
-    this->entrypoint = 0;
-    this->ctxId = 0;
-    this->threadId = 0;
-    this->state = CV::ThreadState::CREATED;
-    this->type = CV::QuantType::THREAD;
-}
-
-bool CV::TypeThread::clear(){
-    return true;
-}
-
-void CV::TypeThread::setState(int nstate){
-    this->accessMutex.lock();
-    this->state = nstate;
-    this->accessMutex.unlock();
-}
-
-std::shared_ptr<CV::Quant> CV::TypeThread::copy(){
-    auto cpy = std::make_shared<CV::TypeThread>();
-    cpy->entrypoint = this->entrypoint;
-    cpy->ctxId = this->ctxId;
-    cpy->threadId = this->threadId;
-    cpy->state = this->state;
-    cpy->returnId = this->returnId;
-    return cpy;
-}
-
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//
-//  CURSOR
-// 
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 CV::Cursor::Cursor(){
     this->error = false;
@@ -571,106 +386,181 @@ void  CV::Cursor::reset(){
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //
-//  TYPE TO STRING
+//  TYPES
 // 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-std::string CV::QuantToText(const std::shared_ptr<CV::Quant> &t){
-    switch(t->type){
-        
-        default:
-        case CV::QuantType::NIL: {
-            return Tools::setTextColor(Tools::Color::BLUE)+"nil"+Tools::setTextColor(Tools::Color::RESET);
-        };
+//
+// DATA (NIL)
+//
+CV::Data::Data(){
+    this->type = CV::DataType::NIL;
+}
 
-        case CV::QuantType::NUMBER: {
-            return      CV::Tools::setTextColor(Tools::Color::CYAN)+
-                        CV::Tools::removeTrailingZeros(std::static_pointer_cast<CV::TypeNumber>(t)->v)+
-                        CV::Tools::setTextColor(Tools::Color::RESET);
-        };
+//
+// NUMBER
+//
+CV::DataNumber::DataNumber(){
+    this->type = CV::DataType::NUMBER;
+}
+std::shared_ptr<CV::Data> CV::DataNumber::unwrap(){
+    return shared_from_this();
+}
 
-        case CV::QuantType::STRING: {
-            auto out = std::static_pointer_cast<CV::TypeString>(t)->v;
+//
+// STRING
+//
+CV::DataString::DataString(){
+    this->type = CV::DataType::STRING;
+}
+std::shared_ptr<CV::Data> CV::DataString::unwrap(){
+    return shared_from_this();
+}
 
-            return  Tools::setTextColor(Tools::Color::GREEN)+
-                    "'"+out+
-                    "'"+Tools::setTextColor(Tools::Color::RESET);
-        };     
+//
+// LIST
+//
+CV::DataList::DataList(){
+    this->type = CV::DataType::LIST;
+}
+std::shared_ptr<CV::Data> CV::DataList::unwrap(){
+    return shared_from_this();
+}
 
-        case CV::QuantType::FUNCTION: {
-            auto fn = std::static_pointer_cast<CV::TypeFunction>(t);      
+//
+// STORE
+//
+CV::DataStore::DataStore(){
+    this->type = CV::DataType::STORE;
+}
+std::shared_ptr<CV::Data> CV::DataStore::unwrap(){
+    return shared_from_this();
+}
 
-            std::string start = Tools::setTextColor(Tools::Color::RED, true)+"["+Tools::setTextColor(Tools::Color::RESET);
-            std::string end = Tools::setTextColor(Tools::Color::RED, true)+"]"+Tools::setTextColor(Tools::Color::RESET);
-            std::string name = Tools::setTextColor(Tools::Color::RED, true)+"fn"+Tools::setTextColor(Tools::Color::RESET);
-            std::string binary = Tools::setTextColor(Tools::Color::BLUE, true)+"BINARY"+Tools::setTextColor(Tools::Color::RESET);
-            std::string body = Tools::setTextColor(Tools::Color::BLUE, true)+fn->body->str()+Tools::setTextColor(Tools::Color::RESET);
+//
+// FUNCTION
+//
+CV::DataFunction::DataFunction(){
+    this->type = CV::DataType::FUNCTION;
+    this->isVariadic = false;
+    this->isLambda = false;
+}
+std::shared_ptr<CV::Data> CV::DataFunction::unwrap(){
+    return shared_from_this();
+}
 
-            return start+name+" "+start+CV::Tools::compileList(fn->params)+end+" "+( body )+end;
-        };
+//
+// PROXY
+//
+CV::DataProxy::DataProxy(){
+    this->type = CV::DataType::PROXY;
+    this->ptype = CV::Prefixer::NAMER;
+}
 
-        case CV::QuantType::LIST: {
-            std::string output = Tools::setTextColor(Tools::Color::MAGENTA)+"["+Tools::setTextColor(Tools::Color::RESET);
+std::shared_ptr<CV::Data> CV::DataProxy::unwrap(){
+    return this->target ? this->target : shared_from_this();
+}
 
-            auto list = std::static_pointer_cast<CV::TypeList>(t);
+//
+// CONTEXT
+//
+CV::Context::Context(){
+    this->head = NULL;
+    this->type = CV::DataType::CONTEXT;
+}
 
-            int total = list->v.size();
-            int limit = total > 30 ? 10 : total;
-            for(int i = 0; i < limit; ++i){
-                auto &q = list->v[i];
-                output += CV::QuantToText(q);
-                if(i < list->v.size()-1){
-                    output += " ";
-                }
-            }
-            if(limit != total){
-                output += Tools::setTextColor(Tools::Color::YELLOW)+"...("+std::to_string(total-limit)+" hidden)"+Tools::setTextColor(Tools::Color::RESET);
-
-
-            }
-                        
-            return output + Tools::setTextColor(Tools::Color::MAGENTA)+"]"+Tools::setTextColor(Tools::Color::RESET);
-        };
-
-        case CV::QuantType::STORE: {
-            std::string output = Tools::setTextColor(Tools::Color::MAGENTA)+"["+Tools::setTextColor(Tools::Color::RESET);
-
-            auto store = std::static_pointer_cast<CV::TypeStore>(t);
-
-            int total = store->v.size();
-            int limit = total > 30 ? 10 : total;
-            int i = 0;
-            for(auto &it : store->v){
-                auto &q = it.second;
-                output +=   Tools::setTextColor(Tools::Color::YELLOW)+"["+Tools::setTextColor(Tools::Color::RESET)+
-                            "~"+it.first+" "+CV::QuantToText(q)+
-                            Tools::setTextColor(Tools::Color::YELLOW)+"]"+Tools::setTextColor(Tools::Color::RESET);
-                if(i < store->v.size()-1){
-                    output += " ";
-                }
-                ++i;
-            }
-            if(limit != total){
-                output += Tools::setTextColor(Tools::Color::YELLOW)+"...("+std::to_string(total-limit)+" hidden)"+Tools::setTextColor(Tools::Color::RESET);
-
-            }
-                        
-            return output + Tools::setTextColor(Tools::Color::MAGENTA)+"]"+Tools::setTextColor(Tools::Color::RESET);
-        };        
-
-        case CV::QuantType::THREAD: {
-            auto thread = std::static_pointer_cast<CV::TypeThread>(t);
-
-            return Tools::setTextColor(Tools::Color::YELLOW)
-                                +"[THREAD "+std::to_string(thread->id)+" "
-                                +Tools::setTextColor(Tools::Color::GREEN)
-                                +"'"+CV::ThreadState::name(thread->state)
-                                +"'"
-                                +Tools::setTextColor(Tools::Color::YELLOW)+"]"
-                                +Tools::setTextColor(Tools::Color::RESET);
-        };
-
+std::shared_ptr<CV::Context> CV::Context::buildContext(bool inherit){
+    auto nctx = std::make_shared<CV::Context>();
+    if(inherit){
+        nctx->head = shared_from_this(); 
     }
+    return nctx;
+}
+
+typedef std::pair<std::shared_ptr<CV::Context>, std::shared_ptr<CV::Data>> NamedV;
+std::pair<std::shared_ptr<CV::Context>, std::shared_ptr<CV::Data>> CV::Context::getNamed(const std::string &name){
+    auto lCount = this->data.count(name);
+    return lCount == 0 && head ? head->getNamed(name) : (lCount == 1 ? (NamedV{ shared_from_this(), this->data[name] }) : (NamedV{NULL, NULL}) );
+}
+
+std::shared_ptr<CV::Data> CV::Context::buildNil(){
+    return std::make_shared<CV::Data>();
+}
+
+std::shared_ptr<CV::DataNumber> CV::Context::buildNumber(CV_NUMBER v){
+    auto b = std::make_shared<CV::DataNumber>();
+    b->v = v;
+    return b;
+}
+
+std::shared_ptr<CV::DataString> CV::Context::buildString(const std::string &v){
+    auto b = std::make_shared<CV::DataString>();
+    b->v = v;
+    return b;
+}
+
+std::shared_ptr<CV::DataList> CV::Context:: buildList(){
+    return std::make_shared<CV::DataList>();
+}
+
+std::shared_ptr<CV::DataStore> CV::Context::buildStore(){
+    return std::make_shared<CV::DataStore>();
+}
+
+std::shared_ptr<CV::Data> CV::Context::unwrap(){
+    return shared_from_this();
+}
+
+void CV::Context::registerFunction(
+    const std::string &name,
+    const std::vector<std::string> &params,
+    const std::function<std::shared_ptr<CV::Data>(
+        const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+        const std::shared_ptr<CV::Context> &ctx,
+        const std::shared_ptr<CV::Cursor> &cursor,
+        const std::shared_ptr<CV::Token> &token
+    )> &lambda
+){
+    if(!CV::Tools::isValidVarName(name)){
+        return;
+    }
+
+    if(CV::Tools::isReservedWord(name)){
+        return;
+    }
+
+    auto fn = std::make_shared<CV::DataFunction>();
+    fn->isLambda = true;
+    fn->isVariadic = false;
+    fn->params = params;
+    fn->lambda = lambda;
+
+    this->data[name] = fn;
+}
+
+void CV::Context::registerFunction(
+    const std::string &name,
+    const std::function<std::shared_ptr<CV::Data>(
+        const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+        const std::shared_ptr<CV::Context> &ctx,
+        const std::shared_ptr<CV::Cursor> &cursor,
+        const std::shared_ptr<CV::Token> &token
+    )> &lambda
+){
+    if(!CV::Tools::isValidVarName(name)){
+        return;
+    }
+
+    if(CV::Tools::isReservedWord(name)){
+        return;
+    }
+
+    auto fn = std::make_shared<CV::DataFunction>();
+    fn->isLambda = true;
+    fn->isVariadic = true;
+    fn->lambda = lambda;
+
+    this->data[name] = fn;
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -679,7 +569,51 @@ std::string CV::QuantToText(const std::shared_ptr<CV::Quant> &t){
 // 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-static std::vector<CV::TokenType> parseTokens(std::string input, char sep, const std::shared_ptr<CV::Cursor> &cursor, int startLine){
+CV::Token::Token(){
+    solved = false;
+    complex = false;
+}
+
+CV::Token::Token(const std::string &first, unsigned line){
+    this->first = first;
+    this->line = line;
+    refresh();
+}    
+
+std::shared_ptr<CV::Token> CV::Token::emptyCopy(){
+    auto c = std::make_shared<CV::Token>();
+    c->first = this->first;
+    c->line = this->line;
+    c->refresh();
+    return c;
+}
+std::shared_ptr<CV::Token> CV::Token::copy(){
+    auto c = std::make_shared<CV::Token>();
+    c->first = this->first;
+    c->line = this->line;
+    c->inner = this->inner;
+    c->refresh();
+    return c;
+}
+
+std::string CV::Token::str() const {
+    auto f = this->first;
+    std::string out = f + (this->first.size() > 0 && this->inner.size() > 0  ? " " : "");
+    for(int i = 0; i < this->inner.size(); ++i){
+        out += inner[i]->inner.size() == 0 ? inner[i]->first : inner[i]->str();
+        if(i < this->inner.size()-1){
+            out += " ";
+        }
+    }
+    return this->inner.size() > 0 ? "[" + out + "]" : out;
+}
+
+void CV::Token::refresh(){
+    complex = this->inner.size() > 0;
+    solved = !(first.length() >= 3 && first[0] == '[' && first[first.size()-1] == ']');
+}
+
+static std::vector<CV::TokenType> ParseTokens(std::string input, char sep, const std::shared_ptr<CV::Cursor> &cursor, int startLine){
     std::vector<std::shared_ptr<CV::Token>> tokens; 
     std::string buffer;
     int open = 0;
@@ -749,7 +683,8 @@ static std::vector<CV::TokenType> parseTokens(std::string input, char sep, const
             buffer += c;
         }else        
         if(c == '#' && !onString){
-            onComment = !onComment;
+            onComment = true;
+            continue;
         }else
         if(i < input.size()-1 && c == '\\' && input[i+1] == 'n' && onString){
             buffer += '\n';
@@ -779,7 +714,6 @@ static std::vector<CV::TokenType> parseTokens(std::string input, char sep, const
             }            
             --open;
             if(open == 1 || i == input.size()-1 && buffer.length() > 0){
-                // std::cout << "[1] \"" << buffer << "\"" << std::endl;
                 if(buffer != ""){
                     tokens.push_back(std::make_shared<CV::Token>(buffer, cline));
                 }
@@ -787,14 +721,12 @@ static std::vector<CV::TokenType> parseTokens(std::string input, char sep, const
             }
         }else
         if(i == input.size()-1){
-            // std::cout << "[2] " << buffer+c << std::endl;
             if(buffer != ""){
                 tokens.push_back(std::make_shared<CV::Token>(buffer+c, cline));
             }
             buffer = "";
         }else
         if(c == sep && open == 1 && !onString){
-            // std::cout << "[3] \"" << buffer << "\"" << std::endl;
             if(buffer != ""){
                 tokens.push_back(std::make_shared<CV::Token>(buffer, cline));
             }
@@ -807,7 +739,7 @@ static std::vector<CV::TokenType> parseTokens(std::string input, char sep, const
     return tokens;
 };
 
-static std::vector<CV::TokenType> rebuildTokenHierarchy(const std::vector<CV::TokenType> &input, char sep, const CV::CursorType &cursor){
+static std::vector<CV::TokenType> RebuildTokenHierarchy(const std::vector<CV::TokenType> &input, char sep, const CV::CursorType &cursor){
     
     if(input.size() == 0){
         cursor->setError("NOOP", CV_ERROR_MSG_NOOP_NO_INSTRUCTIONS, 1);
@@ -815,7 +747,7 @@ static std::vector<CV::TokenType> rebuildTokenHierarchy(const std::vector<CV::To
     }
 
     std::function<CV::TokenType(const CV::TokenType &token)> unwrap = [&](const CV::TokenType &token){
-        auto innerTokens = parseTokens(token->first, sep, cursor, token->line);
+        auto innerTokens = ParseTokens(token->first, sep, cursor, token->line);
         if(cursor->error){
             return CV::TokenType(NULL);
         }
@@ -856,91 +788,347 @@ static std::vector<CV::TokenType> rebuildTokenHierarchy(const std::vector<CV::To
     return result;
 }
 
-
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//
-//  JIT
-// 
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-
-CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor){
-    
-    if(token->first.size() == 0 && token->inner.size() == 0){
-        cursor->setError("NOOP", CV_ERROR_MSG_NOOP_NO_INSTRUCTIONS, token);
-        return prog->createInstruction(CV::InstructionType::NOOP, token);
+std::vector<CV::TokenType> CV::BuildTree(
+    const std::string &input,
+    const CV::CursorType &cursor
+){
+    if(input.size() == 0){
+        cursor->setError("Syntax Error", "Empty input", 1);
+        return {};
     }
 
-    auto bListConstruct = [prog, cursor](const CV::TokenType &origin, std::vector<CV::TokenType> &tokens, const CV::ContextType &ctx){
-        auto ins = prog->createInstruction(CV::InstructionType::CONSTRUCT_LIST, origin);
-        auto list = ctx->buildList();
-        ins->data.push_back(ctx->id);
-        ins->data.push_back(list->id);
-        for(int i = 0; i < tokens.size(); ++i){
-            auto &inc = tokens[i];
-            auto fetched = CV::Translate(inc, prog, ctx, cursor);
-            if(cursor->error){
-                cursor->subject = origin;
-                return prog->createInstruction(CV::InstructionType::NOOP, origin);
-            }
-            if(fetched->type == CV::InstructionType::PROXY_EXPANDER){
-                auto targetIns = prog->getIns(fetched->params[0]);
-                if( targetIns->type == CV::InstructionType::CONSTRUCT_LIST ||
-                    targetIns->type == CV::InstructionType::CONSTRUCT_STORE){
-                    for(int j = 0; j < targetIns->params.size(); ++j){
-                        ins->params.push_back(targetIns->params[j]);
-                        list->v.push_back(std::shared_ptr<CV::Quant>(NULL));
-                    }
-                }else{
-                    ins->params.push_back(fetched->id);
-                    list->v.push_back(std::shared_ptr<CV::Quant>(NULL));                    
-                }
-            }else{
-                ins->params.push_back(fetched->id);
-                list->v.push_back(std::shared_ptr<CV::Quant>(NULL));
-            }
+    auto isBracketedToken = [](const CV::TokenType &token) -> bool {
+        if(!token){
+            return false;
         }
-        return ins;
+        auto s = CV::Tools::cleanTokenInput(token->first);
+        return s.size() >= 2 && s.front() == '[' && s.back() == ']';
     };
 
-    auto bStoreConstruct = [prog, cursor](const std::string &name, const CV::TokenType &origin, std::vector<CV::TokenType> &tokens, const CV::ContextType &ctx){
-        auto ins = prog->createInstruction(CV::InstructionType::CONSTRUCT_STORE, origin);
-        auto store = ctx->buildStore();
-        ins->data.push_back(ctx->id);
-        ins->data.push_back(store->id);
-        for(int i = 0; i < tokens.size(); ++i){
+    auto isNamerAssignmentToken = [](const CV::TokenType &token) -> bool {
+        if(!token){
+            return false;
+        }
+        return token->first.size() >= 2 &&
+               token->first[0] == '~' &&
+               token->inner.size() == 1;
+    };
+
+    auto needsProgramWrap = [&](const std::string &src) -> bool {
+        auto top = ParseTokens(src, ' ', cursor, 1);
+        if(cursor->error){
+            return false;
+        }
+
+        if(top.empty()){
+            return false;
+        }
+
+        bool allBracketed = true;
+        for(const auto &t : top){
+            if(!isBracketedToken(t)){
+                allBracketed = false;
+                break;
+            }
+        }
+
+        if(!allBracketed){
+            return true;
+        }
+
+        std::vector<CV::TokenType> rebuilt;
+        for(int i = 0; i < static_cast<int>(top.size()); ++i){
+            auto built = RebuildTokenHierarchy({top[i]}, ' ', cursor);
+            if(cursor->error){
+                return false;
+            }
+            for(int j = 0; j < static_cast<int>(built.size()); ++j){
+                rebuilt.push_back(built[j]);
+            }
+        }
+
+        bool allNamerAssignments = !rebuilt.empty();
+        for(const auto &t : rebuilt){
+            if(!isNamerAssignmentToken(t)){
+                allNamerAssignments = false;
+                break;
+            }
+        }
+
+        if(allNamerAssignments){
+            return true;
+        }
+
+        return false;
+    };
+
+    auto cleanInput = CV::Tools::cleanTokenInput(input);
+    if(cleanInput.empty()){
+        cursor->setError("Syntax Error", "Empty input", 1);
+        return {};
+    }
+
+    std::string fixedInput = input;
+
+    if(cleanInput.front() != '[' || cleanInput.back() != ']'){
+        fixedInput = "[" + fixedInput;
+        if(!fixedInput.empty() && fixedInput.back() == '\n'){
+            fixedInput.back() = ']';
+        }else{
+            fixedInput += "]";
+        }
+    }
+
+    cleanInput = CV::Tools::cleanTokenInput(fixedInput);
+    if(cleanInput.empty()){
+        cursor->setError("Syntax Error", "Empty input", 1);
+        return {};
+    }
+
+    if(needsProgramWrap(cleanInput)){
+        fixedInput = "[" + fixedInput + "]";
+    }
+
+    auto tokens = ParseTokens(fixedInput, ' ', cursor, 1);
+    if(cursor->error){
+        return {};
+    }
+
+    std::vector<CV::TokenType> root;
+
+    for(int i = 0; i < static_cast<int>(tokens.size()); ++i){
+        auto built = RebuildTokenHierarchy({tokens[i]}, ' ', cursor);
+        if(cursor->error){
+            return {};
+        }
+
+        for(int j = 0; j < static_cast<int>(built.size()); ++j){
+            root.push_back(built[j]);
+        }
+    }
+    if(root.size() > 1){
+        bool allTopLevelNamerAssignments = true;
+
+        for(const auto &t : root){
+            if(!isNamerAssignmentToken(t)){
+                allTopLevelNamerAssignments = false;
+                break;
+            }
+        }
+
+        if(allTopLevelNamerAssignments){
+            auto grouped = std::make_shared<CV::Token>("", root[0]->line);
+            grouped->first = "";
+            grouped->inner = root;
+            grouped->solved = true;
+            grouped->refresh();
+
+            root.clear();
+            root.push_back(grouped);
+        }
+    }    
+
+    if(root.empty()){
+        return {};
+    }
+
+    return root;
+}
+
+static std::shared_ptr<CV::Data> __cv_run_children(
+    const CV::TokenType &parent,
+    int from,
+    const CV::CursorType &cursor,
+    const CV::ControlFlowType &cf,
+    const CV::ContextType &ctx
+){
+    auto result = ctx->buildNil();
+
+    for(int i = from; i < static_cast<int>(parent->inner.size()); ++i){
+        result = CV::Interpret(parent->inner[i], cursor, cf, ctx);
+        if(cursor->error){
+            return ctx->buildNil();
+        }
+
+        if(cf->state == CV::ControlFlowState::RETURN ||
+           cf->state == CV::ControlFlowState::YIELD ||
+           cf->state == CV::ControlFlowState::SKIP){
+            return result;
+        }
+    }
+
+    return result;
+}
+
+static bool __cv_get_boolean_value(const std::shared_ptr<CV::Data> &target){
+    auto v = target ? target->unwrap() : std::shared_ptr<CV::Data>(nullptr);
+    if(!v){
+        return false;
+    }
+
+    switch(v->type){
+        case CV::DataType::NIL:
+            return false;
+        case CV::DataType::NUMBER:
+            return std::static_pointer_cast<CV::DataNumber>(v)->v != 0;
+        case CV::DataType::STRING:
+            return !std::static_pointer_cast<CV::DataString>(v)->v.empty();
+        case CV::DataType::LIST:
+            return !std::static_pointer_cast<CV::DataList>(v)->v.empty();
+        case CV::DataType::STORE:
+            return !std::static_pointer_cast<CV::DataStore>(v)->v.empty();
+        default:
+            return true;
+    }
+}
+
+static bool __cv_is_iterator_clause(const CV::TokenType &token){
+    return token &&
+           token->first.size() >= 2 &&
+           token->first[0] == '~' &&
+           token->inner.size() == 1;
+}
+
+#if (_CV_PLATFORM == _CV_PLATFORM_TYPE_LINUX) || (_CV_PLATFORM == _CV_PLATFORM_TYPE_OSX)
+    using __cv_dynlib_handle_t = void*;
+#elif (_CV_PLATFORM == _CV_PLATFORM_TYPE_WINDOWS)
+    using __cv_dynlib_handle_t = HMODULE;
+#endif
+
+static std::mutex __cv_loaded_dynamic_libs_mutex;
+static std::unordered_map<int, std::pair<__cv_dynlib_handle_t, std::string>> __cv_loaded_dynamic_libs;
+
+static std::string __cv_resolve_import_path(
+    const std::string &fname,
+    const std::string &defaultExt
+){
+    std::string resolved = fname;
+
+    if(CV::Tools::fileExtension(resolved) == ""){
+        resolved += defaultExt;
+    }
+
+    if(CV::Tools::fileExists("./" + resolved)){
+        resolved = "./" + resolved;
+    }else{
+        resolved = CV_LIB_HOME + "/" + resolved;
+    }
+
+    return resolved;
+}
+
+std::shared_ptr<CV::Data> CV::Interpret(
+    const CV::TokenType &token,
+    const CV::CursorType &cursor,
+    const CV::ControlFlowType &cf,
+    const CV::ContextType &ctx
+){
+    if(token->first.size() == 0 && token->inner.size() == 0){
+        cursor->setError("NOOP", CV_ERROR_MSG_NOOP_NO_INSTRUCTIONS, token);
+        return ctx->buildNil();
+    }
+
+    auto bListConstruct = [cursor, cf](const CV::TokenType &origin, std::vector<CV::TokenType> &tokens, const CV::ContextType &ctx){
+        auto list = ctx->buildList();
+
+        for(int i = 0; i < static_cast<int>(tokens.size()); ++i){
             auto &inc = tokens[i];
-            auto fetched = CV::Translate(inc, prog, ctx, cursor);
+
+            auto data = Interpret(inc, cursor, cf, ctx);
             if(cursor->error){
                 cursor->subject = origin;
-                return prog->createInstruction(CV::InstructionType::NOOP, origin);
+                return ctx->buildNil();
             }
-            if(fetched->type != CV::InstructionType::PROXY_NAMER){
+
+            if(cf->state == CV::ControlFlowState::YIELD){
+                return data;
+            }
+
+            if(cf->state == CV::ControlFlowState::RETURN ||
+            cf->state == CV::ControlFlowState::SKIP){
+                return data;
+            }
+
+            if(data && data->type == CV::DataType::PROXY){
+                auto proxy = std::static_pointer_cast<CV::DataProxy>(data);
+
+                if(proxy->ptype == CV::Prefixer::EXPANDER){
+                    if(!proxy->target){
+                        cursor->setError(
+                            CV_ERROR_MSG_MISUSED_PREFIX,
+                            "Expander Prefix '^' produced a proxy without target",
+                            inc
+                        );
+                        cursor->subject = origin;
+                        return ctx->buildNil();
+                    }
+
+                    auto expanded = proxy->target->unwrap();
+                    if(!expanded || expanded->type != CV::DataType::LIST){
+                        cursor->setError(
+                            CV_ERROR_MSG_MISUSED_PREFIX,
+                            "Expander Prefix '^' expects target to resolve into a LIST",
+                            inc
+                        );
+                        cursor->subject = origin;
+                        return ctx->buildNil();
+                    }
+
+                    auto expandedList = std::static_pointer_cast<CV::DataList>(expanded);
+
+                    for(int j = 0; j < static_cast<int>(expandedList->v.size()); ++j){
+                        list->v.push_back(expandedList->v[j]);
+                    }
+
+                    continue;
+                }
+            }
+
+            list->v.push_back(data ? data->unwrap() : ctx->buildNil());
+        }
+
+        return std::static_pointer_cast<CV::Data>(list);
+    };
+
+
+    auto bStoreConstruct = [cursor, cf](const std::string &name, const CV::TokenType &origin, std::vector<CV::TokenType> &tokens, const CV::ContextType &ctx){
+        auto store = ctx->buildStore();
+        for(int i = 0; i < tokens.size(); ++i){
+            auto &inc = tokens[i];
+            auto fetched = Interpret(inc, cursor, cf, ctx);
+            if(cursor->error){
+                cursor->subject = origin;
+                return ctx->buildNil();
+            }
+            if(cf->state == CV::ControlFlowState::YIELD){
+                return fetched;
+            }
+            if(fetched->type != CV::DataType::PROXY){
                 cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "'"+name+"' may only be able to construct named types using NAMER prefixer", origin);
-                return prog->createInstruction(CV::InstructionType::NOOP, origin);
+                return ctx->buildNil();
             }
-            // Deny expander usage in Stores
-            if(fetched->type == CV::InstructionType::PROXY_EXPANDER){
-                cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "Expander Prefixer cannot be used while constructing Stores", inc);
-                return prog->createInstruction(CV::InstructionType::NOOP, origin);
+            auto proxy = std::static_pointer_cast<CV::DataProxy>(fetched);
+            // We eat up the instruction itself as we don't really execute it for this situation
+            if(!proxy->target){
+                cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "'"+name+"' expects Namer prefixed tokens to have an appended body so it defines a value", origin);
+                return ctx->buildNil();
             }
-            ins->params.push_back(fetched->id);
-            auto vname = fetched->literal[0];
+            
+            auto vname = proxy->pname;
             if(!CV::Tools::isValidVarName(vname)){
                 cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "'"+name+"' is attempting to construct store with invalidly named type '"+vname+"'", origin);
-                return prog->createInstruction(CV::InstructionType::NOOP, origin);                   
+                return ctx->buildNil();
             }
             if(CV::Tools::isReservedWord(vname)){
                 cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "'"+name+"' is attempting to construct store with reserved name named type '"+vname+"'", origin);
-                return prog->createInstruction(CV::InstructionType::NOOP, origin);                
+                return ctx->buildNil();               
             }
-            ins->literal.push_back(vname);
-            store->v[vname] = std::shared_ptr<CV::Quant>(NULL);
+            store->v[vname] = proxy->target;
         }
-        return ins;
-    };
+        return std::static_pointer_cast<CV::Data>(store);
+    };    
 
-    auto bListConstructFromToken = [bListConstruct, prog, cursor](const CV::TokenType &origin, const CV::ContextType &ctx){
+    auto bListConstructFromToken = [bListConstruct, cursor](const CV::TokenType &origin, const CV::ContextType &ctx){
         auto cpy = origin->emptyCopy();
         std::vector<CV::TokenType> inners { cpy };
         for(int i = 0; i < origin->inner.size(); ++i){
@@ -949,26 +1137,45 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
         return bListConstruct(origin, inners, ctx);
     };
 
-    auto isName = [](const CV::TokenType &token, const CV::ContextType &ctx){
-        return ctx->getName(token->first).size() > 0;
-    };
-    
-    auto isNameFunction = [prog](const CV::TokenType &token, const CV::ContextType &ctx){
+    auto isNameFunction = [](const CV::TokenType &token, const CV::ContextType &ctx){
         if(!token->solved){
             return false;
         }
         if(CV::Tools::isReservedWord(token->first)){
             return true;
         }
-        auto nameRef = ctx->getName(token->first);
-        if(nameRef.size() == 0){
+        auto dataRef = ctx->getNamed(token->first);
+        if(!dataRef.first || !dataRef.second){
             return false;
         }
-        auto &cctx = prog->getCtx(nameRef[0]);
-        auto &quant = cctx->get(nameRef[1]);  
-        return  quant->type == CV::QuantType::FUNCTION ||
-                quant->type == CV::QuantType::BINARY_FUNCTION ||
-                quant->type == CV::QuantType::STORE;
+        auto data = dataRef.second;
+        if(data->type == CV::DataType::PROXY){
+            data = std::static_pointer_cast<CV::DataProxy>(data)->target;
+        }
+        return data && (data->type == CV::DataType::FUNCTION ||
+                data->type == CV::DataType::STORE);
+    };
+    
+    auto areAllNames = [](const CV::TokenType &token, const CV::ContextType &ctx){
+        (void)ctx;
+
+        if(token->inner.size() < 1){
+            return false;
+        }
+
+        for(int i = 0; i < token->inner.size(); ++i){
+            auto &child = token->inner[i];
+
+            if(child->first.size() < 2 || child->first[0] != '~'){
+                return false;
+            }
+
+            if(child->inner.size() == 0){
+                return false;
+            }
+        }
+
+        return true;
     };
     
     auto areAllFunctions = [isNameFunction](const CV::TokenType &token, const CV::ContextType &ctx){
@@ -984,23 +1191,10 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
         return true;
     };
 
-    auto areAllNames = [isNameFunction](const CV::TokenType &token, const CV::ContextType &ctx){
-        if(token->inner.size() < 1){
-            return false;
-        } 
-        
-        for(int i = 0; i < token->inner.size(); ++i){
-            if(token->inner[i]->first.size() < 2 || token->inner[i]->first[0] != '~'){
-                return false;
-            } 
-        }
-        return true;
-    };
-
     if(token->first.size() == 0){
         // Instruction list
         if(areAllFunctions(token, ctx) && token->inner.size() >= 2){
-            return CV::Compile(token, prog, ctx, cursor);
+            return Interpret(token, cursor, cf, ctx);
         }else
         if(areAllNames(token, ctx)){
             return bStoreConstruct(token->first, token, token->inner, ctx);
@@ -1008,15 +1202,15 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
         // Or list?
             return bListConstruct(token, token->inner, ctx);
         }
-    }else{
+    }else{    
         /*
-            s:store
+            b:store
         */
         if(token->first == "b:store"){
             return bStoreConstruct(token->first, token, token->inner, ctx);
         }else
         /*
-            l:list
+            b:list
         */
         if(token->first == "b:list"){
             return bListConstruct(token, token->inner, ctx);
@@ -1027,216 +1221,282 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
         if(token->first == "skip" || token->first == "return" || token->first == "yield"){
             if(token->inner.size() > 1){
                 cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "'"+token->first+"' expects no more than 1 operand ("+token->first+" VALUE)", token);
-                return prog->createInstruction(CV::InstructionType::NOOP, token);
+                return ctx->buildNil();
             }
-
-            auto ins = prog->createInstruction(CV::InstructionType::CF_INTERRUPT, token);
             
-            int type = CV::InterruptType::UNDEFINED;
+            int type = CV::ControlFlowState::CONTINUE;
             if(token->first == "skip"){
-                type = CV::InterruptType::SKIP;
+                type = CV::ControlFlowState::SKIP;
             }else
             if(token->first == "yield"){
-                type = CV::InterruptType::YIELD;
+                type = CV::ControlFlowState::YIELD;
             }else
             if(token->first == "return"){
-                type = CV::InterruptType::RETURN;
+                type = CV::ControlFlowState::RETURN;
             }
-            ins->data.push_back(type);
+
+            auto r = ctx->buildNil();
+            cf->state = type;
 
             if(token->inner.size() > 0){
-                ins->data.push_back(ctx->id);
-                auto target = CV::Translate(token->inner[0], prog, ctx, cursor);
+                r = Interpret(token->inner[0], cursor, cf, ctx);
                 if(cursor->error){
                     cursor->subject = token;
-                    return prog->createInstruction(CV::InstructionType::NOOP, token);
+                    return ctx->buildNil();
                 }
-                ins->params.push_back(target->id);
             }
 
-            return ins;
-        }else
-        /*
-            BRING
-        */
-        if(token->first== "bring" || token->first == "bring:dynamic-library"){
-            bool isdotcv = token->first == "bring";
-            if(token->inner.size() != 1){
-                cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "'"+token->first+"' expects exactly 2 tokens ("+token->first+" NAME)", token);
-                return prog->createInstruction(CV::InstructionType::NOOP, token);
-            }
-
-            auto target = CV::Translate(token->inner[0], prog, ctx, cursor);
-            if(cursor->error){
-                cursor->subject = token;
-                return prog->createInstruction(CV::InstructionType::NOOP, token);
-            }
-            
-            if(!CV::ErrorCheck::ExpectNoPrefixer(token->first, {target}, token, cursor)){
-                return prog->createInstruction(CV::InstructionType::NOOP, token);
-            }
-            auto st = std::make_shared<CV::ControlFlow>();
-            auto fnamev = CV::Execute(target, ctx, prog, cursor, st);
-            if(cursor->error){
-                return prog->createInstruction(CV::InstructionType::NOOP, token);
-            }
-
-            if(!CV::ErrorCheck::ExpectsTypeAt(fnamev->type, CV::QuantType::STRING, 0, token->first, token, cursor)){
-                return prog->createInstruction(CV::InstructionType::NOOP, token);
-            }
-
-            // Get symbolic or literal
-            auto fname = std::static_pointer_cast<CV::TypeString>(fnamev)->v;
-
-            // TODO: Solve name (Could be a local or system library, probably using CV_LIB)
-
-            // system path
-            // std::string usrLPath = "/usr/lib/canvas";
-            // std::string usrLPath = "/lib/canvas";
-            
-
-            // Load .cv
-            if(isdotcv){
-                if(!CV::Tools::fileExists(fname)){
-                    cursor->setError(CV_ERROR_MSG_LIBRARY_NOT_VALID, "No dynamic library '"+fname+"' was found", token);
-                    return prog->createInstruction(CV::InstructionType::NOOP, token);
-                }
-                int id = CV::Import(fname, prog, ctx, cursor);
-            }else{
-            // Load .so/.dll
-                std::string path = "./lib/" + fname;
-                switch(CV::PLATFORM){
-                    case CV::SupportedPlatform::LINUX: {
-                        path += ".so";
-                    } break; 
-                    case CV::SupportedPlatform::WINDOWS: {
-                        path += ".dll";
-                    } break;
-                    case CV::SupportedPlatform::OSX: {
-                        // TODO
-                    } break;                
-                    default:
-                    case CV::SupportedPlatform::UNKNOWN: {
-                        fprintf(stderr, "%s: Unable to load dyanmic library for this platform (UNKNOWN/UNDEFINED).", token->first.c_str());
-                        std::exit(1);
-                    } break;                        
-                }
-
-                if(!CV::Tools::fileExists(path)){
-                    cursor->setError(CV_ERROR_MSG_LIBRARY_NOT_VALID, "No dynamic library '"+fname+"' was found", token);
-                    return prog->createInstruction(CV::InstructionType::NOOP, token);
-                }
-
-                int id = CV::ImportDynamicLibrary(path, fname, prog, ctx, cursor);
-
-            }
-            if(cursor->error){
-                return prog->createInstruction(CV::InstructionType::NOOP, token);
-            }
-
-            auto ins = prog->createInstruction(CV::InstructionType::LIBRAY_IMPORT, token);
-            ins->data.push_back(ctx->id);
-            ins->data.push_back(0); // library id, TODO
-            ins->data.push_back(isdotcv);
-            ins->literal.push_back(fname);
-            return ins;
-        }else
+            return r;
+        }else   
         /*
             FN
         */
         if(token->first == "fn"){
             if(token->inner.size() != 2){
-                cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "'"+token->first+"' expects exactly 3 tokens (fn [arguments][code])", token);
-                return prog->createInstruction(CV::InstructionType::NOOP, token);
+                cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "'"+token->first+"' expects exactly 3 tokens ("+token->first+" [arguments][code])", token);
+                return ctx->buildNil();
             }
-            auto fn = std::make_shared<CV::TypeFunction>();
-            ctx->set(fn->id, fn);
-            auto fctx = prog->createContext(ctx);
-            fn->ctxId = fctx->id;
+            auto fn = std::make_shared<CV::DataFunction>();
+            fn->isLambda = false;
             fn->body = token->inner[1];
 
             auto paramNameList = token->inner[0]->inner;
             paramNameList.insert(paramNameList.begin(), token->inner[0]);
-            for(int i = 0; i < paramNameList.size(); ++i){
-                auto &name = paramNameList[i]->first;
-                if(!CV::Tools::isValidVarName(name)){
-                    cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "'"+token->first+"' parameter name  '"+name+"' is an invalid", token);
-                    return prog->createInstruction(CV::InstructionType::NOOP, token);                   
+
+            auto hasParam = [&](const std::string &name){
+                for(const auto &p : fn->params){
+                    if(p == name){
+                        return true;
+                    }
                 }
-                if(CV::Tools::isReservedWord(name)){
-                    cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "'"+token->first+"' parameter name '"+name+"' is a name of native constructor which cannot be overriden", token);
-                    return prog->createInstruction(CV::InstructionType::NOOP, token);                
-                }  
-                fn->params.push_back(name);
-                auto v = fctx->buildNil();
-                fctx->setName(name, v->id);
+                return false;
+            };
+
+            if(paramNameList.size() == 1 && paramNameList[0]->first == "@"){
+                fn->isVariadic = true;
+            }else{
+                for(int i = 0; i < paramNameList.size(); ++i){
+                    auto &name = paramNameList[i]->first;
+                    if(!CV::Tools::isValidVarName(name)){
+                        cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "'"+token->first+"' argument name '"+name+"' is an invalid", token);
+                        return ctx->buildNil();                 
+                    }
+                    if(CV::Tools::isReservedWord(name)){
+                        cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "'"+token->first+"' argument name '"+name+"' is a name of native constructor which cannot be overriden", token);
+                        return ctx->buildNil();
+                    }  
+                    if(hasParam(name)){
+                        cursor->setError(
+                            CV_ERROR_MSG_MISUSED_IMPERATIVE,
+                            "'"+token->first+"' argument name '"+name+"' is duplicated",
+                            token
+                        );
+                        return ctx->buildNil();
+                    }                    
+                    if(name == "@"){
+                        cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "'"+token->first+"' argument name '"+name+"' is illegal in definitions with more than one argument", token);
+                        return ctx->buildNil();                 
+                    }
+                    fn->params.push_back(name);
+                }
             }
 
-            auto target = CV::Translate(token->inner[1], prog, fctx, cursor);
-
-            if(cursor->error){
-                cursor->subject = token;
-                return prog->createInstruction(CV::InstructionType::NOOP, token);
-            }
-            fn->entrypoint = target->id;
-            auto ins = prog->createInstruction(CV::InstructionType::PROXY_STATIC, token);
-            ins->data.push_back(ctx->id); // Where function is stored
-            ins->data.push_back(fn->id);
-            return ins;
+            return fn;
             
-        }else
+        }else  
         /*
             CC
         */
         if(token->first == "cc"){
             if(token->inner.size() != 1){
-                cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "'"+token->first+"' expects exactly 2 tokens (cc VALUE)", token);
-                return prog->createInstruction(CV::InstructionType::NOOP, token);
-            }         
-            auto target = CV::Translate(token->inner[0], prog, ctx, cursor);
+                cursor->setError(
+                    CV_ERROR_MSG_MISUSED_IMPERATIVE,
+                    "'"+token->first+"' expects exactly 2 tokens ("+token->first+" VALUE)",
+                    token
+                );  
+                return ctx->buildNil();
+            }
+
+            auto target = Interpret(token->inner[0], cursor, cf, ctx);
             if(cursor->error){
                 cursor->subject = token;
-                return prog->createInstruction(CV::InstructionType::NOOP, token);
+                return ctx->buildNil();
             }
-            auto ins = prog->createInstruction(CV::InstructionType::CARBON_COPY, token);
-            auto nv = ctx->buildNil();
-            ins->data.push_back(ctx->id);
-            ins->data.push_back(nv->id);
-            ins->params.push_back(target->id);
-            return ins;
+            if(cf->state == CV::ControlFlowState::YIELD){
+                return target;
+            }            
+
+            return ctx->copy(target->unwrap());
         }else
         /*
             MUT
         */
         if(token->first == "mut"){
             if(token->inner.size() != 2){
-                cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "'"+token->first+"' expects exactly 3 tokens (mut NAME VALUE)", token);
-                return prog->createInstruction(CV::InstructionType::NOOP, token);
+                cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "'"+token->first+"' expects exactly 3 tokens ("+token->first+" NAME VALUE)", token);
+                return ctx->buildNil();
             }
-            auto nameRef = ctx->getName(token->inner[0]->first);
-            if(nameRef.size() == 0){
+            
+            auto nameRef = ctx->getNamed(token->inner[0]->first);
+            if(!nameRef.first || !nameRef.second){
                 cursor->setError(CV_ERROR_MSG_UNDEFINED_IMPERATIVE, "Name '"+token->first+"'", token);
-                return prog->createInstruction(CV::InstructionType::NOOP, token); 
+                return ctx->buildNil();
             }
-            auto target = CV::Translate(token->inner[1], prog, ctx, cursor);
+            auto subject = nameRef.second->unwrap();
+
+            auto target = Interpret(token->inner[1], cursor, cf, ctx);
             if(cursor->error){
                 cursor->subject = token;
-                return prog->createInstruction(CV::InstructionType::NOOP, token);
+                return ctx->buildNil();
             } 
-            auto ins = prog->createInstruction(CV::InstructionType::MUT, token);
-            ins->data.push_back(nameRef[0]);
-            ins->data.push_back(nameRef[1]);
-            ins->data.push_back(ctx->id);
-            ins->params.push_back(target->id);
-            return ins;
+            if(cf->state == CV::ControlFlowState::YIELD){
+                return target;
+            }     
+            target = target->unwrap();
+
+            if(subject->type != CV::DataType::NUMBER && subject->type != CV::DataType::STRING){
+                cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "'"+token->first+"' may only accept NUMBER or STRING types", token);
+                return ctx->buildNil();
+            }
+
+            if(target->type != subject->type){
+                cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "'"+token->first+"' may only mutate same types", token);
+                return ctx->buildNil();
+            }
+
+            switch(subject->type){
+                case CV::DataType::STRING: {
+                    std::static_pointer_cast<CV::DataString>(subject)->v = std::static_pointer_cast<CV::DataString>(target)->v;
+                };
+                case CV::DataType::NUMBER: {
+                    std::static_pointer_cast<CV::DataNumber>(subject)->v = std::static_pointer_cast<CV::DataNumber>(target)->v;
+                };                
+            }
+
+            return subject;
+        }else  
+        /*
+            IMPORT
+        */
+        if(token->first == "import"){
+            if(token->inner.size() != 1){
+                cursor->setError(
+                    CV_ERROR_MSG_MISUSED_IMPERATIVE,
+                    "'"+token->first+"' expects exactly 2 tokens ("+token->first+" NAME)",
+                    token
+                );
+                return ctx->buildNil();
+            }
+
+            auto fnamev = Interpret(token->inner[0], cursor, cf, ctx);
+            if(cursor->error){
+                cursor->subject = token;
+                return ctx->buildNil();
+            }
+            if(cf->state == CV::ControlFlowState::YIELD){
+                return fnamev;
+            }
+
+            fnamev = fnamev ? fnamev->unwrap() : nullptr;
+
+            if(!fnamev || fnamev->type != CV::DataType::STRING){
+                cursor->setError(
+                    CV_ERROR_MSG_LIBRARY_NOT_VALID,
+                    "'"+token->first+"' expects a STRING operand",
+                    token
+                );
+                return ctx->buildNil();
+            }
+
+            auto fname = std::static_pointer_cast<CV::DataString>(fnamev)->v;
+            auto resolved = __cv_resolve_import_path(fname, ".cv");
+
+            if(!CV::Tools::fileExists(resolved)){
+                cursor->setError(
+                    CV_ERROR_MSG_LIBRARY_NOT_VALID,
+                    "No canvas library '"+resolved+"' was found",
+                    token
+                );
+                return ctx->buildNil();
+            }
+
+            auto result = CV::Import(resolved, ctx, cursor);
+            if(cursor->error){
+                cursor->subject = token;
+                return ctx->buildNil();
+            }
+
+            return result ? result : ctx->buildNil();
         }else
+        /*
+            IMPORT:DYNAMIC-LIBRARY
+        */
+        if(token->first == "import:dynamic-library"){
+            if(token->inner.size() != 1){
+                cursor->setError(
+                    CV_ERROR_MSG_MISUSED_IMPERATIVE,
+                    "'"+token->first+"' expects exactly 2 tokens ("+token->first+" NAME)",
+                    token
+                );
+                return ctx->buildNil();
+            }
+
+            auto fnamev = Interpret(token->inner[0], cursor, cf, ctx);
+            if(cursor->error){
+                cursor->subject = token;
+                return ctx->buildNil();
+            }
+            if(cf->state == CV::ControlFlowState::YIELD){
+                return fnamev;
+            }
+
+            fnamev = fnamev ? fnamev->unwrap() : nullptr;
+
+            if(!fnamev || fnamev->type != CV::DataType::STRING){
+                cursor->setError(
+                    CV_ERROR_MSG_LIBRARY_NOT_VALID,
+                    "'"+token->first+"' expects a STRING operand",
+                    token
+                );
+                return ctx->buildNil();
+            }
+
+            auto fname = std::static_pointer_cast<CV::DataString>(fnamev)->v;
+
+            std::string ext = ".so";
+            if(CV::PLATFORM == CV::SupportedPlatform::WINDOWS){
+                ext = ".dll";
+            }else
+            if(CV::PLATFORM == CV::SupportedPlatform::OSX){
+                ext = ".dylib";
+            }
+
+            auto resolved = __cv_resolve_import_path(fname, ext);
+
+            if(!CV::Tools::fileExists(resolved)){
+                cursor->setError(
+                    CV_ERROR_MSG_LIBRARY_NOT_VALID,
+                    "No dynamic library '"+resolved+"' was found",
+                    token
+                );
+                return ctx->buildNil();
+            }
+
+            auto result = CV::ImportDynamicLibrary(resolved, fname, ctx, cursor);
+            if(cursor->error){
+                cursor->subject = token;
+                return ctx->buildNil();
+            }
+
+            return result ? result : ctx->buildNil();
+        }else                
         /*
             LET
         */
         if(token->first == "let"){
             if(token->inner.size() != 2){
-                cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "'"+token->first+"' expects exactly 3 tokens (let NAME VALUE)", token);
-                return prog->createInstruction(CV::InstructionType::NOOP, token);
+                cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "'"+token->first+"' expects exactly 3 tokens ("+token->first+" NAME VALUE)", token);
+                return ctx->buildNil();
             }
 
             auto &nameToken = token->inner[0];
@@ -1244,53 +1504,711 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
 
             if(nameToken->inner.size() != 0){
                 cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "'"+token->first+"' expects NAME as second operand", token);
-                return prog->createInstruction(CV::InstructionType::NOOP, token);                
+                return ctx->buildNil();             
             }
             auto &name = nameToken->first;
             if(!CV::Tools::isValidVarName(name)){
                 cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "'"+token->first+"' second operand '"+name+"' is an invalid name", token);
-                return prog->createInstruction(CV::InstructionType::NOOP, token);                   
+                return ctx->buildNil();
             }
             if(CV::Tools::isReservedWord(name)){
                 cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "'"+token->first+"' second operand '"+name+"' is a name of native constructor which cannot be overriden", token);
-                return prog->createInstruction(CV::InstructionType::NOOP, token);                
+                return ctx->buildNil();
             }            
 
-            auto target = CV::Translate(insToken, prog, ctx, cursor);
-            if(cursor->error){
-                cursor->subject = token;
-                return prog->createInstruction(CV::InstructionType::NOOP, token);
-            }         
-
-            
-            if(target->type == CV::InstructionType::PROXY_PARALELER){
-
-                auto &targetData = prog->getCtx(target->data[2])->get(target->data[3]);
-                ctx->set(targetData->id, targetData);
-                ctx->setName(name, targetData->id);  
-                return target;
-
-            }else
-            if(target->type == CV::InstructionType::PROXY_STATIC){
-                auto &targetData = prog->getCtx(target->data[0])->get(target->data[1]);
-                ctx->set(targetData->id, targetData);
-                ctx->setName(name, targetData->id);  
-                return target;
-            }else{
-                auto targetData = ctx->buildNil();
-
-                auto ins = prog->createInstruction(CV::InstructionType::LET, token);
-                ins->literal.push_back(name);
-                ins->data.push_back(ctx->id);
-                ins->data.push_back(targetData->id);
-                ins->params.push_back(target->id);
-
-                ctx->setName(name, targetData->id);  
-
-                return ins;
+            auto nameRef = ctx->getNamed(name);
+            if(nameRef.first && nameRef.second && ctx->namedNames.count(name) == 0){
+                cursor->setError(CV_ERROR_MSG_MISUSED_CONSTRUCTOR, "Name '"+name+"' is already defined", token);
+                return ctx->buildNil();
             }
 
+            auto target = Interpret(insToken, cursor, cf, ctx);
+            if(cursor->error){
+                cursor->subject = token;
+                return ctx->buildNil();
+            }
+            if(cf->state == CV::ControlFlowState::YIELD){
+                return target;
+            }                             
+
+            ctx->data[name] = target;
+            if(ctx->namedNames.count(name) == 1){
+                ctx->namedNames.erase(name);
+            }
+
+            return target;
+
+        }else   
+        /*
+            IF
+        */
+        if(token->first == "if"){
+            if(token->inner.size() != 2 && token->inner.size() != 3){
+                cursor->setError(
+                    CV_ERROR_MSG_MISUSED_IMPERATIVE,
+                    "'"+token->first+"' expects 3 or 4 tokens ("+token->first+" CONDITION TRUE-BRANCH [FALSE-BRANCH])",
+                    token
+                );
+                return ctx->buildNil();
+            }
+
+            auto condition = Interpret(token->inner[0], cursor, cf, ctx);
+            if(cursor->error){
+                cursor->subject = token;
+                return ctx->buildNil();
+            }
+
+            if(cf->state == CV::ControlFlowState::YIELD){
+                return condition;
+            }
+
+            if(cf->state == CV::ControlFlowState::RETURN ||
+               cf->state == CV::ControlFlowState::SKIP){
+                return condition;
+            }
+
+            if(__cv_get_boolean_value(condition)){
+                return Interpret(token->inner[1], cursor, cf, ctx);
+            }
+
+            if(token->inner.size() == 3){
+                return Interpret(token->inner[2], cursor, cf, ctx);
+            }
+
+            return ctx->buildNil();
+        }else            
+        /*
+            WHILE
+        */
+        if(token->first == "while"){
+            if(token->inner.size() < 2){
+                cursor->setError(
+                    CV_ERROR_MSG_MISUSED_IMPERATIVE,
+                    "'"+token->first+"' expects at least 3 tokens ("+token->first+" CONDITION BODY...)",
+                    token
+                );
+                return ctx->buildNil();
+            }
+
+            auto result = ctx->buildNil();
+
+            while(true){
+                auto iterCtx = ctx->buildContext(true);
+
+                auto condition = Interpret(token->inner[0], cursor, cf, iterCtx);
+                if(cursor->error){
+                    cursor->subject = token;
+                    return ctx->buildNil();
+                }
+
+                if(cf->state == CV::ControlFlowState::RETURN){
+                    return condition;
+                }
+
+                if(cf->state == CV::ControlFlowState::YIELD){
+                    return condition;
+                }
+
+                if(cf->state == CV::ControlFlowState::SKIP){
+                    cf->state = CV::ControlFlowState::CONTINUE;
+                    continue;
+                }
+
+                if(!__cv_get_boolean_value(condition)){
+                    break;
+                }
+
+                result = __cv_run_children(token, 1, cursor, cf, iterCtx);
+                if(cursor->error){
+                    cursor->subject = token;
+                    return ctx->buildNil();
+                }
+
+                if(cf->state == CV::ControlFlowState::RETURN){
+                    return result;
+                }
+
+                if(cf->state == CV::ControlFlowState::YIELD){
+                    return result;
+                }
+
+                if(cf->state == CV::ControlFlowState::SKIP){
+                    cf->state = CV::ControlFlowState::CONTINUE;
+                    continue;
+                }
+            }
+
+            return result;
         }else
+        /*
+            FOR
+        */
+        if(token->first == "for"){
+            if(token->inner.size() < 2){
+                cursor->setError(
+                    CV_ERROR_MSG_MISUSED_IMPERATIVE,
+                    "'"+token->first+"' expects at least 3 tokens ("+token->first+" [~name [from to [step]]] BODY...)",
+                    token
+                );
+                return ctx->buildNil();
+            }
+
+            auto clauseRaw = Interpret(token->inner[0], cursor, cf, ctx);
+            if(cursor->error){
+                cursor->subject = token;
+                return ctx->buildNil();
+            }
+            if(cf->state == CV::ControlFlowState::YIELD){
+                return clauseRaw;
+            }
+
+            if(!clauseRaw || clauseRaw->type != CV::DataType::PROXY){
+                cursor->setError(
+                    CV_ERROR_MSG_ILLEGAL_ITERATOR,
+                    "'"+token->first+"' expects first operand to evaluate into a named proxy like [~x [0 10]]",
+                    token
+                );
+                return ctx->buildNil();
+            }
+
+            auto clauseProxy = std::static_pointer_cast<CV::DataProxy>(clauseRaw);
+
+            if(clauseProxy->pname.size() == 0){
+                cursor->setError(
+                    CV_ERROR_MSG_ILLEGAL_ITERATOR,
+                    "'"+token->first+"' iterator is missing a name",
+                    token
+                );
+                return ctx->buildNil();
+            }
+
+            if(!clauseProxy->target){
+                cursor->setError(
+                    CV_ERROR_MSG_ILLEGAL_ITERATOR,
+                    "'"+token->first+"' iterator proxy is missing a range target",
+                    token
+                );
+                return ctx->buildNil();
+            }
+
+            auto iterName = clauseProxy->pname;
+            auto rangeData = clauseProxy->target->unwrap();
+
+            if(!rangeData || rangeData->type != CV::DataType::LIST){
+                cursor->setError(
+                    CV_ERROR_MSG_ILLEGAL_ITERATOR,
+                    "'"+token->first+"' iterator target must be a LIST like [from to] or [from to step]",
+                    token
+                );
+                return ctx->buildNil();
+            }
+
+            auto range = std::static_pointer_cast<CV::DataList>(rangeData);
+
+            if(range->v.size() != 2 && range->v.size() != 3){
+                cursor->setError(
+                    CV_ERROR_MSG_ILLEGAL_ITERATOR,
+                    "'"+token->first+"' iterator target expects [from to] or [from to step]",
+                    token
+                );
+                return ctx->buildNil();
+            }
+
+            auto fromData = range->v[0] ? range->v[0]->unwrap() : nullptr;
+            auto toData   = range->v[1] ? range->v[1]->unwrap() : nullptr;
+
+            if(!fromData || fromData->type != CV::DataType::NUMBER ||
+            !toData   || toData->type   != CV::DataType::NUMBER){
+                cursor->setError(
+                    CV_ERROR_MSG_ILLEGAL_ITERATOR,
+                    "'"+token->first+"' bounds must be NUMBER values",
+                    token
+                );
+                return ctx->buildNil();
+            }
+
+            CV_NUMBER current = std::static_pointer_cast<CV::DataNumber>(fromData)->v;
+            CV_NUMBER end     = std::static_pointer_cast<CV::DataNumber>(toData)->v;
+            CV_NUMBER step    = current <= end ? 1 : -1;
+
+            if(range->v.size() == 3){
+                auto stepData = range->v[2] ? range->v[2]->unwrap() : nullptr;
+                if(!stepData || stepData->type != CV::DataType::NUMBER){
+                    cursor->setError(
+                        CV_ERROR_MSG_ILLEGAL_ITERATOR,
+                        "'"+token->first+"' step must be NUMBER",
+                        token
+                    );
+                    return ctx->buildNil();
+                }
+                step = std::static_pointer_cast<CV::DataNumber>(stepData)->v;
+            }
+
+            if(step == 0){
+                cursor->setError(
+                    CV_ERROR_MSG_ILLEGAL_ITERATOR,
+                    "'"+token->first+"' step cannot be zero",
+                    token
+                );
+                return ctx->buildNil();
+            }
+
+            auto shouldRun = [&](CV_NUMBER n) -> bool {
+                return step > 0 ? (n < end) : (n > end);
+            };
+
+            auto loopCtx = ctx->buildContext(true);
+            auto iterValue = loopCtx->buildNumber(current);
+            loopCtx->data[iterName] = iterValue;
+
+            auto result = ctx->buildNil();
+
+            while(shouldRun(iterValue->v)){
+                auto iterCtx = loopCtx->buildContext(true);
+
+                for(int i = 1; i < static_cast<int>(token->inner.size()); ++i){
+                    result = Interpret(token->inner[i], cursor, cf, iterCtx);
+                    if(cursor->error){
+                        cursor->subject = token;
+                        return ctx->buildNil();
+                    }
+
+                    if(cf->state == CV::ControlFlowState::RETURN){
+                        return result;
+                    }
+
+                    if(cf->state == CV::ControlFlowState::YIELD){
+                        return result;
+                    }
+
+                    if(cf->state == CV::ControlFlowState::SKIP){
+                        cf->state = CV::ControlFlowState::CONTINUE;
+                        break;
+                    }
+                }
+
+                iterValue->v += step;
+            }
+
+            return result;
+        }else
+        /*
+            FOREACH
+        */
+        if(token->first == "foreach"){
+            if(token->inner.size() < 2){
+                cursor->setError(
+                    CV_ERROR_MSG_MISUSED_IMPERATIVE,
+                    "'"+token->first+"' expects at least 3 tokens ("+token->first+" [~item SUBJECT] BODY...)",
+                    token
+                );
+                return ctx->buildNil();
+            }
+
+            auto clauseRaw = Interpret(token->inner[0], cursor, cf, ctx);
+            if(cursor->error){
+                cursor->subject = token;
+                return ctx->buildNil();
+            }
+            if(cf->state == CV::ControlFlowState::YIELD){
+                return clauseRaw;
+            }
+
+            if(!clauseRaw || clauseRaw->type != CV::DataType::PROXY){
+                cursor->setError(
+                    CV_ERROR_MSG_ILLEGAL_ITERATOR,
+                    "'"+token->first+"' expects first operand to evaluate into a named proxy like [~item someList]",
+                    token
+                );
+                return ctx->buildNil();
+            }
+
+            auto clauseProxy = std::static_pointer_cast<CV::DataProxy>(clauseRaw);
+
+            if(clauseProxy->pname.size() == 0){
+                cursor->setError(
+                    CV_ERROR_MSG_ILLEGAL_ITERATOR,
+                    "'"+token->first+"' iterator is missing a name",
+                    token
+                );
+                return ctx->buildNil();
+            }
+
+            if(!clauseProxy->target){
+                cursor->setError(
+                    CV_ERROR_MSG_ILLEGAL_ITERATOR,
+                    "'"+token->first+"' iterator proxy is missing a subject target",
+                    token
+                );
+                return ctx->buildNil();
+            }
+
+            auto iterName = clauseProxy->pname;
+            auto subject = clauseProxy->target->unwrap();
+
+            std::vector<std::shared_ptr<CV::Data>> values;
+
+            if(!subject){
+                cursor->setError(
+                    CV_ERROR_MSG_ILLEGAL_ITERATOR,
+                    "'"+token->first+"' iterator target is null",
+                    token
+                );
+                return ctx->buildNil();
+            }
+
+            if(subject->type == CV::DataType::LIST){
+                auto list = std::static_pointer_cast<CV::DataList>(subject);
+                values = list->v;
+            }else
+            if(subject->type == CV::DataType::STORE){
+                auto store = std::static_pointer_cast<CV::DataStore>(subject);
+                for(auto &it : store->v){
+                    values.push_back(it.second);
+                }
+            }else{
+                cursor->setError(
+                    CV_ERROR_MSG_ILLEGAL_ITERATOR,
+                    "'"+token->first+"' expects subject to be LIST or STORE",
+                    token
+                );
+                return ctx->buildNil();
+            }
+
+            auto loopCtx = ctx->buildContext(true);
+            auto result = ctx->buildNil();
+
+            for(int i = 0; i < static_cast<int>(values.size()); ++i){
+                loopCtx->data[iterName] = values[i];
+
+                auto iterCtx = loopCtx->buildContext(true);
+
+                for(int j = 1; j < static_cast<int>(token->inner.size()); ++j){
+                    result = Interpret(token->inner[j], cursor, cf, iterCtx);
+                    if(cursor->error){
+                        cursor->subject = token;
+                        return ctx->buildNil();
+                    }
+
+                    if(cf->state == CV::ControlFlowState::RETURN){
+                        return result;
+                    }
+
+                    if(cf->state == CV::ControlFlowState::YIELD){
+                        return result;
+                    }
+
+                    if(cf->state == CV::ControlFlowState::SKIP){
+                        cf->state = CV::ControlFlowState::CONTINUE;
+                        break;
+                    }
+                }
+            }
+
+            return result;
+        }else
+        // TRY / IGNORE-ERROR PREFIXER
+        if(token->first[0] == '?'){
+            if(token->inner.size() != 0){
+                cursor->setError(
+                    CV_ERROR_MSG_MISUSED_PREFIX,
+                    "Try Prefix '"+token->first+"' expects no values",
+                    token
+                );
+                return ctx->buildNil();
+            }
+
+            if(token->first.size() == 1){
+                cursor->setError(
+                    CV_ERROR_MSG_MISUSED_PREFIX,
+                    "Try Prefix '"+token->first+"' expects an appended body",
+                    token
+                );
+                return ctx->buildNil();
+            }
+
+            std::string statement = std::string(token->first.begin() + 1, token->first.end());
+
+            // Shadow cursor so failures do not touch the outer/global cursor
+            auto shadowCursor = std::make_shared<CV::Cursor>();
+
+            auto root = CV::BuildTree(statement, shadowCursor);
+            if(shadowCursor->error){
+                return ctx->buildNil();
+            }
+
+            if(root.size() == 0){
+                return ctx->buildNil();
+            }
+
+            auto previousState = cf->state;
+            auto previousPayload = cf->payload;
+
+            std::shared_ptr<CV::Data> result = ctx->buildNil();
+
+            for(int i = 0; i < static_cast<int>(root.size()); ++i){
+                result = CV::Interpret(root[i], shadowCursor, cf, ctx);
+
+                if(shadowCursor->error){
+                    // Swallow the error and restore control-flow
+                    cf->state = previousState;
+                    cf->payload = previousPayload;
+                    return ctx->buildNil();
+                }
+
+                if(cf->state == CV::ControlFlowState::YIELD ||
+                   cf->state == CV::ControlFlowState::RETURN ||
+                   cf->state == CV::ControlFlowState::SKIP){
+                    return result;
+                }
+            }
+
+            return result ? result : ctx->buildNil();
+        }else        
+        // TEMPLATE FORMATTER
+        if(token->first[0] == '%'){
+            auto templateCtx = ctx->buildContext(true);
+            std::string output = "";
+
+            auto resolveTemplateName = [&](const std::string &name) -> std::string {
+                auto nameRef = templateCtx->getNamed(name);
+                if(nameRef.first && nameRef.second){
+                    auto value = nameRef.second->unwrap();
+                    if(!value){
+                        return "nil";
+                    }
+
+                    if(value->type == CV::DataType::STRING){
+                        return std::static_pointer_cast<CV::DataString>(value)->v;
+                    }
+
+                    return CV::DataToText(value);
+                }
+
+                // unresolved placeholders are left as-is
+                return "{" + name + "}";
+            };
+
+            auto expandTemplateString = [&](const std::string &src) -> std::string {
+                std::string out;
+                std::size_t i = 0;
+
+                while(i < src.size()){
+                    if(src[i] == '{'){
+                        auto end = src.find('}', i + 1);
+                        if(end != std::string::npos){
+                            auto key = src.substr(i + 1, end - i - 1);
+
+                            if(!key.empty()){
+                                out += resolveTemplateName(key);
+                                i = end + 1;
+                                continue;
+                            }
+                        }
+                    }
+
+                    out += src[i];
+                    ++i;
+                }
+
+                return out;
+            };
+
+            for(int i = 0; i < static_cast<int>(token->inner.size()); ++i){
+                auto &child = token->inner[i];
+
+                auto data = Interpret(child, cursor, cf, templateCtx);
+                if(cursor->error){
+                    cursor->subject = token;
+                    return ctx->buildNil();
+                }
+
+                if(cf->state == CV::ControlFlowState::YIELD){
+                    return data;
+                }
+
+                if(cf->state == CV::ControlFlowState::RETURN ||
+                   cf->state == CV::ControlFlowState::SKIP){
+                    return data;
+                }
+
+                if(!data){
+                    continue;
+                }
+
+                // Named values define template-local names
+                if(data->type == CV::DataType::PROXY){
+                    auto proxy = std::static_pointer_cast<CV::DataProxy>(data);
+
+                    if(proxy->ptype == CV::Prefixer::NAMER && !proxy->pname.empty()){
+                        if(proxy->target){
+                            templateCtx->data[proxy->pname] = proxy->target->unwrap();
+                        }
+                    }
+
+                    // proxies themselves do not directly contribute to output
+                    continue;
+                }
+
+                auto out = data->unwrap();
+                if(!out){
+                    continue;
+                }
+
+                // Only strings are appended directly
+                if(out->type == CV::DataType::STRING){
+                    auto raw = std::static_pointer_cast<CV::DataString>(out)->v;
+                    output += expandTemplateString(raw);
+                }
+            }
+
+            return std::static_pointer_cast<CV::Data>(
+                ctx->buildString(output)
+            );
+        }else        
+        // EXPANDER
+        if(token->first[0] == '^'){
+            if(token->inner.size() != 0){
+                cursor->setError(
+                    CV_ERROR_MSG_MISUSED_PREFIX,
+                    "Expander Prefix '"+token->first+"' expects no values",
+                    token
+                );
+                return ctx->buildNil();
+            }
+
+            if(token->first.size() == 1){
+                cursor->setError(
+                    CV_ERROR_MSG_MISUSED_PREFIX,
+                    "Expander Prefix '"+token->first+"' expects an appended body",
+                    token
+                );
+                return ctx->buildNil();
+            }
+
+            std::string statement = std::string(token->first.begin() + 1, token->first.end());
+
+            auto root = CV::BuildTree(statement, cursor);
+            if(cursor->error){
+                cursor->subject = token;
+                return ctx->buildNil();
+            }
+
+            if(root.size() != 1){
+                cursor->setError(
+                    CV_ERROR_MSG_MISUSED_PREFIX,
+                    "Expander Prefix '"+token->first+"' apppended body must a singular LIST",
+                    token
+                );
+                return ctx->buildNil();                
+            }
+
+            auto result = CV::Interpret(root[0], cursor, cf, ctx);
+            if(cursor->error){
+                cursor->subject = token;
+                return ctx->buildNil();
+            }
+            if(cf->state != CV::ControlFlowState::CONTINUE){
+                return result;
+            }
+            result = result->unwrap();
+            if(result->type != CV::DataType::LIST){
+                cursor->setError(
+                    CV_ERROR_MSG_MISUSED_PREFIX,
+                    "Expander Prefix '"+token->first+"' apppended body must a singular LIST",
+                    token
+                );
+                return ctx->buildNil();                   
+            }
+
+            auto proxy = std::make_shared<CV::DataProxy>();
+            proxy->ptype = CV::Prefixer::EXPANDER;
+            proxy->target = result;
+
+            return std::static_pointer_cast<CV::Data>(proxy);
+        }else        
+        /*
+            NAMER
+        */
+        if(token->first[0] == '~'){
+            auto name = std::string(token->first.begin() + 1, token->first.end());
+
+            // Test if the first field (name) is a complex token
+            auto testSplit = ParseTokens(name, ' ', cursor, token->line);
+            if(cursor->error){
+                return ctx->buildNil();
+            }
+
+            if(testSplit.size() > 1){
+                cursor->setError(
+                    CV_ERROR_MSG_MISUSED_PREFIX,
+                    "Namer Prefix '"+token->first+"' cannot take any complex token",
+                    token
+                );
+                return ctx->buildNil();
+            }
+
+            // Is it a valid name?
+            if(!CV::Tools::isValidVarName(name)){
+                cursor->setError(
+                    CV_ERROR_MSG_MISUSED_PREFIX,
+                    "'"+token->first+"' prefixer '"+name+"' is an invalid name",
+                    token
+                );
+                return ctx->buildNil();
+            }
+
+            // Is it a reserved word?
+            if(CV::Tools::isReservedWord(name)){
+                cursor->setError(
+                    CV_ERROR_MSG_MISUSED_PREFIX,
+                    "'"+token->first+"' prefixer '"+name+"' is a name of native constructor which cannot be overriden",
+                    token
+                );
+                return ctx->buildNil();
+            }
+
+            // Only expects a single value
+            if(token->inner.size() > 1){
+                cursor->setError(
+                    CV_ERROR_MSG_MISUSED_PREFIX,
+                    "Namer Prefix '"+token->first+"' no more than 1 value. Provided "+std::to_string(token->inner.size()),
+                    token
+                );
+                return ctx->buildNil();
+            }
+
+            auto proxy = std::make_shared<CV::DataProxy>();
+            proxy->ptype = CV::Prefixer::NAMER;
+            proxy->pname = name;
+
+
+            // Evaluate referred value if present
+            if(token->inner.size() == 1){
+                auto target = Interpret(token->inner[0], cursor, cf, ctx);
+                if(cursor->error){
+                    cursor->subject = token;
+                    return ctx->buildNil();
+                }
+
+                if(cf->state != CV::ControlFlowState::CONTINUE){
+                    return target;
+                }
+
+                proxy->target = target;
+            }
+
+            // Name into context if the name is not used
+            if(proxy->target){
+                auto exists = ctx->getNamed(name);
+                if(!exists.first && !exists.second){
+                    ctx->data[name] = proxy->target;
+                    ctx->namedNames.insert(name);
+                }
+            }
+
+            return std::static_pointer_cast<CV::Data>(proxy);
+        }else                                              
         /*
             NIL
         */
@@ -1298,11 +2216,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
             if(token->inner.size() > 0){
                 return bListConstructFromToken(token, ctx);
             }else{
-                auto ins = prog->createInstruction(CV::InstructionType::PROXY_STATIC, token);
-                auto data = ctx->buildNil();
-                ins->data.push_back(ctx->id);
-                ins->data.push_back(data->id);
-                return ins;
+                return ctx->buildNil();
             } 
         }else
         /*
@@ -1312,11 +2226,7 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
             if(token->inner.size() > 0){
                 return bListConstructFromToken(token, ctx);
             }else{
-                auto ins = prog->createInstruction(CV::InstructionType::PROXY_STATIC, token);
-                auto data = ctx->buildNumber(std::stod(token->first));
-                ins->data.push_back(ctx->id);
-                ins->data.push_back(data->id);
-                return ins;
+                return ctx->buildNumber(std::stod(token->first));
             }
         }else
         /*
@@ -1326,1264 +2236,1279 @@ CV::InsType CV::Translate(const CV::TokenType &token, const CV::ProgramType &pro
             if(token->inner.size() > 0){
                 return bListConstructFromToken(token, ctx);
             }else{            
-                auto ins = prog->createInstruction(CV::InstructionType::PROXY_STATIC, token);
-                auto string = ctx->buildString("");
-                string->v = token->first.substr(1, token->first.length() - 2);
-                ins->data.push_back(ctx->id);
-                ins->data.push_back(string->id);
-                return ins;
+                return ctx->buildString(token->first.substr(1, token->first.length() - 2));
             }
-        }else
-        // PARALLELER
-        if(token->first[0] == '|'){
-
-            if(token->inner.size() != 0){
-                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "Paralleler Prefix '"+token->first+"' expects no values", token);
-                return prog->createInstruction(CV::InstructionType::NOOP, token);                                            
-            }
-
-            if(token->first.size() == 1){
-                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "Paralleler Prefix '"+token->first+"' expects an apppended body", token);
-                return prog->createInstruction(CV::InstructionType::NOOP, token);                
-            }
-
-            std::string statement = std::string(token->first.begin()+1, token->first.end());
-
-            auto ins = prog->createInstruction(CV::InstructionType::PROXY_PARALELER, token);
-            ins->data.push_back(CV_INS_PREFIXER_IDENTIFIER_INSTRUCTION);
-            ins->data.push_back(CV::Prefixer::PARALELLER);
-            std::shared_ptr<CV::Quant> ghostData;
-
-            auto tctx = prog->createContext(ctx);
-
-            auto entrypoint = CV::Compile(statement, prog, cursor, tctx);
-            if(cursor->error){
-                cursor->subject = token;
-                return prog->createInstruction(CV::InstructionType::NOOP, token);
-            }
-
-            auto data = tctx->buildThread();
-            data->ctxId = tctx->id;
-            data->entrypoint = entrypoint->id;
-
-            ins->data.push_back(tctx->id);
-            ins->data.push_back(data->id);
-            ins->params.push_back(entrypoint->id);
-
-            return ins;
-
-        }else
-        // EXPANDER
-        if(token->first[0] == '^'){
-            if(token->inner.size() != 0){
-                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "Expander Prefix '"+token->first+"' expects no values", token);
-                return prog->createInstruction(CV::InstructionType::NOOP, token);                                            
-            }
-
-            if(token->first.size() == 1){
-                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "Expander Prefix '"+token->first+"' expects an apppended body", token);
-                return prog->createInstruction(CV::InstructionType::NOOP, token);                
-            }
-
-            std::string statement = std::string(token->first.begin()+1, token->first.end());
-
-
-            auto ins = prog->createInstruction(CV::InstructionType::PROXY_EXPANDER, token);
-            ins->data.push_back(CV_INS_PREFIXER_IDENTIFIER_INSTRUCTION);
-            ins->data.push_back(CV::Prefixer::EXPANDER);
-            std::shared_ptr<CV::Quant> ghostData;
-
-            auto entrypoint = CV::Compile(statement, prog, cursor, ctx);
-            if(cursor->error){
-                cursor->subject = token;
-                return prog->createInstruction(CV::InstructionType::NOOP, token);
-            }
-            ins->params.push_back(entrypoint->id);
-
-            return ins;
-        }else
-        // NAMER
-        if(token->first[0] == '~'){
-            auto name = std::string(token->first.begin()+1, token->first.end());
-
-            // Test if the first field (name) is a complex token
-            auto testSplit = parseTokens(name, ' ', cursor, token->line);
-            if(cursor->error){
-                return prog->createInstruction(CV::InstructionType::NOOP, token);                   
-            }
-            if(testSplit.size() > 1){
-                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "Namer Prefix '"+token->first+"' cannot take any complex token", token);
-                return prog->createInstruction(CV::InstructionType::NOOP, token);            
-            }
-            // Is it a valid name?
-            if(!CV::Tools::isValidVarName(name)){
-                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "'"+token->first+"' prefixer '"+name+"' is an invalid name", token);
-                return prog->createInstruction(CV::InstructionType::NOOP, token);                   
-            }
-            // Is it a reserved word?
-            if(CV::Tools::isReservedWord(name)){
-                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "'"+token->first+"' prefixer '"+name+"' is a name of native constructor which cannot be overriden", token);
-                return prog->createInstruction(CV::InstructionType::NOOP, token);                
-            }
-            // Only expects a single value
-            if(token->inner.size() > 1){
-                cursor->setError(CV_ERROR_MSG_MISUSED_PREFIX, "Namer Prefix '"+token->first+"' no more than 1 value. Provided "+std::to_string(token->inner.size()), token);
-                return prog->createInstruction(CV::InstructionType::NOOP, token);                
-            }
-            // Build position proxy instruction
-            auto ins = prog->createInstruction(CV::InstructionType::PROXY_NAMER, token);
-            ins->literal.push_back(name);
-            ins->data.push_back(CV_INS_PREFIXER_IDENTIFIER_INSTRUCTION);
-            ins->data.push_back(CV::Prefixer::NAMER);
-            std::shared_ptr<CV::Quant> ghostData;
-            // Build referred instruction
-            if(token->inner.size() > 0){
-                auto &inc = token->inner[0];
-                auto fetched = CV::Translate(inc, prog, ctx, cursor);
-                if(cursor->error){
-                    cursor->subject = token;
-                    return prog->createInstruction(CV::InstructionType::NOOP, token);
-                }                        
-                // Pre-set ghost name 
-                if(fetched->type == CV::InstructionType::PROXY_STATIC){
-                    ghostData = prog->getCtx(fetched->data[0])->get(fetched->data[1]);
-                }else{
-                    ghostData = ctx->buildNil();
-                }
-                if(ctx->getName(name, true).size() == 0){
-                    ctx->setName(name, ghostData->id);
-                }
-                ins->params.push_back(fetched->id);
-            }else{
-                ghostData = ctx->buildNil();
-                if(ctx->getName(name, true).size() == 0){
-                    ctx->setName(name, ghostData->id);
-                }
-            }
-            // Pass rest of data to ins
-            ins->data.push_back(ctx->id);
-            ins->data.push_back(ghostData->id);
-            return ins;
         }else{
             /*
                 IS NAME?        
             */   
             auto hctx = ctx;
             std::string qname = token->first;
-            auto nameRef = ctx->getName(token->first);
-            if(nameRef.size() > 0){
-                // TODO: Check for PROMISE names
-                auto fctx = prog->getCtx(nameRef[0]);
-                auto &dataId = nameRef[1];
-                auto &quant = fctx->get(dataId);     
+            auto nameRef = ctx->getNamed(qname);
+            if(nameRef.first && nameRef.second){
+                auto &data = nameRef.second;
 
-                switch(quant->type){
-                    case CV::QuantType::FUNCTION: {
-                        auto fn = std::static_pointer_cast<CV::TypeFunction>(quant);
-                        auto &fnCtx = prog->getCtx(fn->ctxId);
-                        if(fn->params.size() != token->inner.size()){
-                            cursor->setError(CV_ERROR_MSG_MISUSED_FUNCTION, "'"+token->first+"' expects exactly "+std::to_string(fn->params.size())+". Provided "+std::to_string(token->inner.size()), token);
-                            return prog->createInstruction(CV::InstructionType::NOOP, token);                
+                switch(data->type){
+                    case CV::DataType::FUNCTION: {
+                        auto fn = std::static_pointer_cast<CV::DataFunction>(data);
+
+                        auto fnCtx = ctx->buildContext(true);
+
+                        std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> allParams;
+
+
+                        std::vector<std::string> usedNames;
+                        int positionalCursor = 0;
+
+                        auto nextPositionalName = [&](int outerIndex, int innerIndex = -1) -> std::string {
+                            if(!fn->isVariadic){
+                                while(
+                                    positionalCursor < static_cast<int>(fn->params.size()) &&
+                                    CV::Tools::isInList(fn->params[positionalCursor], usedNames)
+                                ){
+                                    ++positionalCursor;
+                                }
+
+                                if(positionalCursor < static_cast<int>(fn->params.size())){
+                                    auto picked = fn->params[positionalCursor++];
+                                    usedNames.push_back(picked);
+                                    return picked;
+                                }
+                            }
+
+                            std::string fallback =
+                                innerIndex >= 0
+                                    ? CV::Tools::format("arg-%i-%i", outerIndex, innerIndex)
+                                    : CV::Tools::format("arg-%i", outerIndex);
+
+                            std::string picked = fallback;
+                            int suffix = 1;
+                            while(CV::Tools::isInList(picked, usedNames)){
+                                picked = fallback + "-" + std::to_string(suffix++);
+                            }
+
+                            usedNames.push_back(picked);
+                            return picked;
+                        };
+
+                        auto inferParamName = [&](const std::shared_ptr<CV::Data> &raw, int outerIndex, int innerIndex = -1) -> std::string {
+                            if(raw && raw->type == CV::DataType::PROXY){
+                                auto proxy = std::static_pointer_cast<CV::DataProxy>(raw);
+
+                                if(proxy->ptype != CV::Prefixer::EXPANDER && !proxy->pname.empty()){
+                                    std::string picked = proxy->pname;
+
+                                    if(!CV::Tools::isInList(picked, usedNames)){
+                                        usedNames.push_back(picked);
+                                        return picked;
+                                    }
+                                }
+                            }
+
+                            return nextPositionalName(outerIndex, innerIndex);
+                        };
+
+                        for(int i = 0; i < static_cast<int>(token->inner.size()); ++i){
+                            auto &c = token->inner[i];
+
+                            auto first = Interpret(c, cursor, cf, fnCtx);
+                            if(cursor->error){
+                                cursor->subject = c;
+                                return ctx->buildNil();
+                            }
+
+                            if(cf->state == CV::ControlFlowState::YIELD){
+                                return first;
+                            }
+
+                            if(cf->state == CV::ControlFlowState::RETURN ||
+                            cf->state == CV::ControlFlowState::SKIP){
+                                return first;
+                            }
+
+                            if(first && first->type == CV::DataType::PROXY){
+                                auto proxy = std::static_pointer_cast<CV::DataProxy>(first);
+
+                                if(proxy->ptype == CV::Prefixer::EXPANDER){
+                                    if(!proxy->target){
+                                        cursor->setError(
+                                            CV_ERROR_MSG_MISUSED_PREFIX,
+                                            "Expander Prefix '^' produced a proxy without target",
+                                            c
+                                        );
+                                        return ctx->buildNil();
+                                    }
+
+                                    auto expanded = proxy->target->unwrap();
+                                    if(!expanded || expanded->type != CV::DataType::LIST){
+                                        cursor->setError(
+                                            CV_ERROR_MSG_MISUSED_PREFIX,
+                                            "Expander Prefix '^' expects target to resolve into a LIST",
+                                            c
+                                        );
+                                        return ctx->buildNil();
+                                    }
+
+                                    auto list = std::static_pointer_cast<CV::DataList>(expanded);
+
+                                    for(int j = 0; j < static_cast<int>(list->v.size()); ++j){
+                                        auto &memberRaw = list->v[j];
+                                        auto memberOut = memberRaw ? memberRaw->unwrap() : fnCtx->buildNil();
+
+                                        std::string pickedName = inferParamName(memberRaw, i, j);
+
+                                        allParams.push_back({
+                                            pickedName,
+                                            memberOut
+                                        });
+                                    }
+
+                                    continue;
+                                }
+                            }
+
+                            auto out = first ? first->unwrap() : fnCtx->buildNil();
+                            std::string pickedName = inferParamName(first, i);
+
+                            allParams.push_back({
+                                pickedName,
+                                out
+                            });
                         }
-                        auto ins = prog->createInstruction(CV::InstructionType::CF_INVOKE_FUNCTION, token);
-                        ins->data.push_back(nameRef[0]); // Context where the function is contained
-                        ins->data.push_back(nameRef[1]); // Data ID to the function
-                        ins->data.push_back(ctx->id); // Current context where the function is being invoked on
-                        // Fetch params
-                        for(int i = 0; i < token->inner.size(); ++i){
-                            auto &inc = token->inner[i];
-                            auto fetched = CV::Translate(inc, prog, ctx, cursor);
+
+
+                        // Check for missing names
+                        if(!fn->isVariadic){
+                            for(int i = 0; i < fn->params.size(); ++i){
+                                if(!CV::Tools::isInList(fn->params[i], allParams)){
+                                    cursor->setError(
+                                        CV_ERROR_MSG_WRONG_OPERANDS,
+                                        CV::Tools::format(
+                                            "Function '%s' is expecting param '%s' which wasn't provided",
+                                            qname.c_str(),
+                                            fn->params[i].c_str()
+                                        ),
+                                        token
+                                    );
+                                    return ctx->buildNil();                                    
+                                }
+                            }
+                        }
+
+                        if(fn->isLambda){
+                            auto r = fn->lambda(allParams, fnCtx, cursor, token);
                             if(cursor->error){
                                 cursor->subject = token;
-                                return prog->createInstruction(CV::InstructionType::NOOP, token);
-                            }                        
-                            if(fetched->type == CV::InstructionType::PROXY_EXPANDER){
-                                auto targetIns = prog->getIns(fetched->params[0]);
-                                if( targetIns->type == CV::InstructionType::CONSTRUCT_LIST ||
-                                    targetIns->type == CV::InstructionType::CONSTRUCT_STORE){
-                                    for(int j = 0; j < targetIns->params.size(); ++j){
-                                        ins->params.push_back(targetIns->params[j]);
-                                    }
-                                }else{
-                                    ins->params.push_back(fetched->id);
+                                return ctx->buildNil();
+                            }
+                            return r;
+                        }else{
+                            auto paramCtx = fnCtx->buildContext(true);
+                            if(fn->isVariadic){
+                                auto list = paramCtx->buildList();
+                                paramCtx->data["@"] = list;
+                                for(int i = 0; i < allParams.size(); ++i){
+                                    list->v.push_back(allParams[i].second);
                                 }
+                                auto r = Interpret(fn->body, cursor, cf, paramCtx);
+                                if(cursor->error){
+                                    cursor->subject = token;
+                                    return ctx->buildNil();
+                                }  
+                                return r;                              
                             }else{
-                                ins->params.push_back(fetched->id);
+                                for(int i = 0; i < allParams.size(); ++i){
+                                    auto &a = allParams[i];
+                                    paramCtx->data[a.first] = a.second;
+                                }
+                                auto r = Interpret(fn->body, cursor, cf, paramCtx);
+                                if(cursor->error){
+                                    cursor->subject = token;
+                                    return ctx->buildNil();
+                                }  
+                                return r;                                
                             }
                         }
 
-                        auto childIns = prog->createInstruction(CV::InstructionType::PROXY_PROMISE, token);
-                        auto targetData = hctx->buildNil();
-                        childIns->data.push_back(hctx->id);
-                        childIns->data.push_back(targetData->id);
-                        childIns->params.push_back(ins->id);
-                        // Tell invoke binary function who they're going to fulfill
-                        ins->data.push_back(hctx->id);
-                        ins->data.push_back(targetData->id);
-
-                        return childIns;
+                        return ctx->buildNil();
                     };
-                    case CV::QuantType::BINARY_FUNCTION: {
-                        // Build invokation
-                        auto ins = prog->createInstruction(CV::InstructionType::CF_INVOKE_BINARY_FUNCTION, token);
-                        auto tempCtx = prog->createContext(hctx); // build context where we store temporary parameters
-                        // Where the function is stored
-                        ins->data.push_back(fctx->id); // where this function is stored
-                        ins->data.push_back(quant->id);
-                        // Where the params to the function are stored 
-                        ins->data.push_back(tempCtx->id); // With the store parameters to the function
-                        for(int i = 0; i < token->inner.size(); ++i){
-                            auto &inc = token->inner[i];
-                            auto fetched = CV::Translate(inc, prog, tempCtx, cursor);
-                            if(cursor->error){
-                                cursor->subject = token;
-                                return prog->createInstruction(CV::InstructionType::NOOP, token);
-                            }
-                            if(fetched->type == CV::InstructionType::PROXY_EXPANDER){
-                                auto targetIns = prog->getIns(fetched->params[0]);
-
-                                if( targetIns->type == CV::InstructionType::CONSTRUCT_LIST ||
-                                    targetIns->type == CV::InstructionType::CONSTRUCT_STORE){
-                                    for(int j = 0; j < targetIns->params.size(); ++j){
-                                        ins->params.push_back(targetIns->params[j]);
-                                    }
-                                }else{
-                                    ins->params.push_back(fetched->id);
-                                }
-                            }else{
-                                ins->params.push_back(fetched->id);
-                            }
-                        }
-                        ins->data.push_back(ins->params.size());
-                        // Build Promise Proxy to store result value 
-                        auto childIns = prog->createInstruction(CV::InstructionType::PROXY_PROMISE, token);
-                        auto targetData = hctx->buildNil();
-                        childIns->data.push_back(hctx->id);
-                        childIns->data.push_back(targetData->id);
-                        childIns->params.push_back(ins->id);
-                        // Tell invoke binary function who they're going to fulfill
-                        ins->data.push_back(hctx->id);
-                        ins->data.push_back(targetData->id);
-                        return childIns;
-                    };
-                    case CV::QuantType::STORE: {
-                        auto store = std::static_pointer_cast<CV::TypeStore>(quant);
+                    case CV::DataType::STORE: {
+                        auto store = std::static_pointer_cast<CV::DataStore>(data);
                         // Does this named proxy come with parameters?
                         if(token->inner.size() > 0){
-                            // Are they named?
-                            if(areAllNames(token, ctx)){
-                                std::vector<std::string> names;
-                                std::vector<int> ids;
-                                // Gather names
-                                for(int i = 0; i < token->inner.size(); ++i){                               
-                                    auto fetched = CV::Translate(token->inner[i], prog, ctx, cursor);
-                                    if(cursor->error){
-                                        cursor->subject = token;
-                                        return prog->createInstruction(CV::InstructionType::NOOP, token);
-                                    }          
-                                    names.push_back(fetched->literal[0]);
-                                }
-                                // Check if they're indeed part of this
-                                for(int i = 0; i < names.size(); ++i){
-                                    if(store->v.count(names[i]) == 0){
-                                        cursor->setError(CV_ERROR_MSG_STORE_UNDEFINED_MEMBER, "store '"+qname+"' has no member named '"+names[i]+"'", token);
-                                        return prog->createInstruction(CV::InstructionType::NOOP, token);                
-                                    }
-                                }
-                                // Build Access Proxy
-                                auto buildAccessProxy = [token](int ctxId, int dataId, const std::string &mname, const CV::ProgramType &prog){
-                                    auto ins = prog->createInstruction(CV::InstructionType::PROXY_ACCESS, token);
-                                    ins->data.push_back(ctxId);
-                                    ins->data.push_back(dataId);
-                                    ins->literal.push_back(mname);
-                                    return ins;                                     
-                                };
-                                // One name returns the value itself
-                                if(names.size() == 1){
-                                    return buildAccessProxy(nameRef[0], nameRef[1], names[0], prog);
+                            std::vector<std::string> names;
+                            // Gather names
+                            for(int i = 0; i < token->inner.size(); ++i){                               
+                                auto fetched = Interpret(token->inner[i], cursor, cf, ctx);
+                                if(cursor->error){
+                                    cursor->subject = token;
+                                    return ctx->buildNil();
+                                }          
+                                if(cf->state == CV::ControlFlowState::YIELD){
+                                    return fetched;
+                                }        
+                                std::string v = "";       
+                                if(fetched->type == CV::DataType::PROXY){
+                                    auto p = std::static_pointer_cast<CV::DataProxy>(fetched);
+                                    v = p->pname;
+                                }else
+                                if(fetched->type == CV::DataType::STRING){
+                                    auto s = std::static_pointer_cast<CV::DataString>(fetched);
+                                    v = s->v; 
                                 }else{
-                                // Several names returns a list of values
-                                    auto ins = prog->createInstruction(CV::InstructionType::CONSTRUCT_LIST, token);
-                                    auto list = hctx->buildList();
-                                    ins->data.push_back(hctx->id);
-                                    ins->data.push_back(list->id);
-                                    for(int i = 0; i < names.size(); ++i){
-                                        auto fetched = buildAccessProxy(nameRef[0], nameRef[1], names[i], prog);
-                                        ins->params.push_back(fetched->id);
-                                        list->v.push_back(std::shared_ptr<CV::Quant>(NULL));
-                                    }
-                                    return ins;
+                                    cursor->setError(CV_ERROR_MSG_INVALID_ACCESOR, "Store access expects named proxy or a string as key", token);
+                                    return ctx->buildNil();
                                 }
+                                names.push_back(v);
+                            }
+                            // Check if they're indeed part of this
+                            for(int i = 0; i < names.size(); ++i){
+                                if(store->v.count(names[i]) == 0){
+                                    cursor->setError(CV_ERROR_MSG_STORE_UNDEFINED_MEMBER, "Store '"+qname+"' has no member named '"+names[i]+"'", token);
+                                    return ctx->buildNil();             
+                                }
+                            }
+                            // One name returns the value itself
+                            if(names.size() == 1){
+                                return store->v[names[0]];
                             }else{
-                            // Otherwise this must be a list
-                                return bListConstructFromToken(token, ctx);
+                            // Several names returns a list of values
+                                auto list = ctx->buildList();
+                                for(int i = 0; i < names.size(); ++i){
+                                    list->v.push_back( store->v[names[i]] );
+                                }
+                                return list;
                             }
                         }else{
-                        // Return its static proxy
-                            auto ins = prog->createInstruction(CV::InstructionType::PROXY_STATIC, token);
-                            ins->data.push_back(nameRef[0]);
-                            ins->data.push_back(nameRef[1]);
-                            return ins;                            
+                        // Otherwise this must be a list
+                            return store;
                         }
                     };  
                     default: {
                         if(token->inner.size() > 0){
                             return bListConstructFromToken(token, ctx);
                         }else{  
-                            auto ins = prog->createInstruction(CV::InstructionType::PROXY_STATIC, token);
-                            ins->data.push_back(nameRef[0]);
-                            ins->data.push_back(nameRef[1]);
-                            return ins;
+                            return data;
                         }
                     };
                 }
             }else{
                 cursor->setError(CV_ERROR_MSG_UNDEFINED_IMPERATIVE, "Name '"+token->first+"'", token);
-                return prog->createInstruction(CV::InstructionType::NOOP, token);
-            }
-
-        }
-
-
-
-    }
-    
-
-    return prog->createInstruction(CV::InstructionType::NOOP, token);
-}
-
-CV::InsType CV::Compile(const CV::TokenType &input, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor){
-
-    std::vector<CV::TokenType> list = {};
-
-    for(int i = 0; i < input->inner.size(); ++i){
-        list.push_back(input->inner[i]);
-    }
-
-    std::vector<CV::InsType> instructions;
-    for(int i = 0 ; i < list.size(); ++i){
-        auto ins = CV::Translate(list[i], prog, ctx, cursor);
-        if(cursor->error){
-            return ins;
-        }
-        instructions.push_back(ins);
-    }
-    
-    for(int i = 1; i < instructions.size(); ++i){
-        auto &current = instructions[i];
-        auto &previous = instructions[i-1];
-        previous->next = current->id;
-        current->prev = previous->id;
-    }
-
-    return instructions[0];
-}
-
-CV::InsType CV::Compile(const std::string &input, const CV::ProgramType &prog, const CV::CursorType &cursor, const CV::ContextType &ctx){   
-
-    // Fix outter brackets (Input must always be accompained by brackets)
-    auto cleanInput = CV::Tools::cleanTokenInput(input);
-    auto fixedInput = input;
-    if(cleanInput[0] != '[' || cleanInput[cleanInput.size()-1] != ']'){
-        fixedInput = "["+fixedInput;
-        if(fixedInput[fixedInput.size()-1] == '\n'){
-            fixedInput[fixedInput.size()-1] = ']';
-        }else{
-            fixedInput = fixedInput+"]";
-        }
-    }
-    // Double brackets (Statement must respect the "[ [] -> STATEMENT ] -> PROGRAM" hierarchy)
-    cleanInput = CV::Tools::cleanTokenInput(fixedInput);
-    if( cleanInput[0] == '[' && cleanInput[1] != '[' &&
-        cleanInput[cleanInput.size()-1] == ']' && cleanInput[cleanInput.size()-2] != ']'){
-        fixedInput = "["+fixedInput+"]";
-    }
-
-    // Split basic tokens
-    auto tokens = parseTokens(fixedInput, ' ', cursor, 1);
-    if(cursor->error){
-        return prog->createInstruction(CV::InstructionType::NOOP, tokens[0]);
-    }
-
-    std::vector<CV::TokenType> root;
-    // Build Token hierarchy
-    for(int i = 0; i < tokens.size(); ++i){
-        auto built = rebuildTokenHierarchy({tokens[i]}, ' ', cursor);
-        if(cursor->error){
-            return prog->createInstruction(CV::InstructionType::NOOP, built[0]);
-        }
-        for(int j = 0; j < built.size(); ++j){
-            root.push_back(built[j]);
-        }
-    }
-    
-    
-    // std::cout << "total " << root.size() << std::endl;
-    // for(int i = 0; i < root.size(); ++i){
-    //     std::cout << "\"" << root[i]->str() << "\" " << root[i]->inner.size() << std::endl;
-    // }
-    // std::cout << root[0]->inner[0]->inner[0]->str() << std::endl;
-    // std::exit(1);
-
-    // Convert tokens into instructions
-    std::vector<CV::InsType> instructions;
-    for(int i = 0 ; i < root.size(); ++i){
-        auto ins = CV::Translate(root[i], prog, ctx.get() ? ctx : prog->rootContext, cursor);
-        if(cursor->error){
-            return prog->createInstruction(CV::InstructionType::NOOP, root[i]);
-        }
-        instructions.push_back(ins);
-    }
- 
-    // Order instructions
-    for(int i = 1; i < instructions.size(); ++i){
-        auto &current = instructions[i];
-        auto &previous = instructions[i-1];
-        previous->next = current->id;
-        current->prev = previous->id;
-    }
-
-    // Set entry point (should be first instruction in the list)
-    return instructions[0];
-
-}
-
-
-static std::shared_ptr<CV::Quant> __flow(  const CV::InsType &ins,
-                                            const CV::ContextType &ctx,
-                                            const CV::ProgramType &prog,
-                                            const CV::CursorType &cursor,
-                                            const CV::CFType &st
-                                        ){
-    // Update control flow cursor
-    
-    st->prev = ins->prev;
-    st->current = ins->id;
-    st->next = ins->next;
-
-    switch(ins->type){
-        /*
-            PROXIES
-        */
-        case CV::InstructionType::PROXY_ACCESS: {
-            auto ctxId = ins->data[0];
-            auto dataId = ins->data[1];
-            std::string mname = ins->literal[0];
-            auto &quant = prog->getCtx(ctxId)->get(dataId);
-            auto store = std::static_pointer_cast<CV::TypeStore>(quant);
-            // TODO: Perhaps some error checking?
-            return store->v[mname];
-        };
-        case CV::InstructionType::PROXY_PARALELER: {
-            auto tctxId = ins->data[2];
-            auto dataId = ins->data[3];
-            auto entrypoint = ins->params[0];
-
-            auto tctxt = prog->getCtx(tctxId);
-            auto quant = tctxt->get(dataId);
-            auto thread = std::static_pointer_cast<CV::TypeThread>(quant);
-            
-            if(thread->state == CV::ThreadState::CREATED){
-                thread->setState(CV::ThreadState::STARTED);
-                auto handle = std::make_shared<InvokeThread>();
-                handle->core = thread.get();
-                handle->prog = prog;
-                handle->upcursor = cursor;
-                handle->root = ins->token;
-                prog->threadMutex.lock();
-                prog->threads[thread->id] = std::thread(&RUN_THREAD, handle);
-                prog->threadMutex.unlock();
-            }
-            
-            return thread;
-        };
-        case CV::InstructionType::PROXY_EXPANDER: {
-            if(ctx->isPrefetched(ins->id)){
-                auto dir = ctx->getPrefetch(ins->id);
-                return prog->getCtx(dir[0])->get(dir[1]);
-            }
-            std::shared_ptr<CV::Quant> quant;
-            auto &entrypoint = prog->getIns(ins->params[0]);
-            quant = CV::Execute(entrypoint, ctx, prog, cursor, st);
-            if(cursor->error){
-                st->state = CV::ControlFlowState::CRASH;
                 return ctx->buildNil();
             }
-            ctx->setPrefetch(ins->id, {(unsigned)ctx->id, (unsigned)quant->id});
-            return quant;            
-        };
-        case CV::InstructionType::PROXY_NAMER: {
-            if(ctx->isPrefetched(ins->id)){
-                auto dir = ctx->getPrefetch(ins->id);
-                return prog->getCtx(dir[0])->get(dir[1]);
-            }
-            std::shared_ptr<CV::Quant> quant;
-            if(ins->params.size() > 0){
-                auto &entrypoint = prog->getIns(ins->params[0]);
-                quant = CV::Execute(entrypoint, ctx, prog, cursor, st);
-                if(cursor->error){
-                    st->state = CV::ControlFlowState::CRASH;
-                    return ctx->buildNil();
-                }
-                // Fulfill ghost name
-                if(ins->data.size() > 2){
-                    auto ghostDataId = ins->data[3];
-                    auto ghostDataCtxId = ins->data[2];
-                    auto &cctx = prog->getCtx(ghostDataCtxId);
-                    cctx->set(ghostDataId, quant); 
-                }  
-            }else{
-                quant = prog->getCtx(ins->data[2])->get(ins->data[3]);
-            }
-            ctx->setPrefetch(ins->id, {(unsigned)ctx->id, (unsigned)quant->id});
-            return quant;
-        };
-        case CV::InstructionType::PROXY_STATIC: {
-            auto ctxId = ins->data[0];
-            auto dataId = ins->data[1];
-            return prog->getCtx(ctxId)->get(dataId);
-        };
-        case CV::InstructionType::PROXY_PROMISE: {
-            // if(ctx->prefetched.count(ins->id) > 0){
-            //     auto dir = ctx->prefetched[ins->id];
-            //     return prog->ctx[dir[0]]->memory[dir[1]];
-            // }
-            auto cctx = prog->getCtx(ins->data[0]);
-            auto targetDataId = ins->data[1];
-            // Execute (The instruction needs to fulfill the promise on its side)
-            auto &entrypoint = prog->getIns(ins->params[0]);
-            auto quant = CV::Execute(entrypoint, cctx, prog, cursor, st);
-            if(cursor->error){
-                st->state = CV::ControlFlowState::CRASH;
-                return cctx->get(targetDataId);
-            }            
-            // ctx->prefetched[ins->id] = {(unsigned)cctx->id, (unsigned)targetDataId};
-            return cctx->get(targetDataId);
-        };                    
-
-
-        /*
-            CONSTRUCTORS        
-        */
-        case CV::InstructionType::CONSTRUCT_LIST: {
-            auto &cctx = prog->getCtx(ins->data[0]);
-            auto &qlist = cctx->get(ins->data[1]);
-            auto list = std::static_pointer_cast<CV::TypeList>(qlist);
-            for(int i = 0; i < ins->params.size(); ++i){
-                auto cins = prog->getIns(ins->params[i]);
-                bool isExpander = cins->type == CV::InstructionType::PROXY_EXPANDER;
-                auto quant = CV::Execute(cins, cctx, prog, cursor, st);
-                if(cursor->error){
-                    st->state = CV::ControlFlowState::CRASH;
-                    return ctx->buildNil();
-                }
-                if(isExpander && quant->type == CV::QuantType::LIST){
-                    auto subject = std::static_pointer_cast<CV::TypeList>(quant);
-                    for(int j = 0; j < subject->v.size(); ++j){
-                        list->v.push_back(subject->v[j]);
-                    }
-                }else{
-                    list->v[i] = quant;
-                }
-            }   
-            return std::static_pointer_cast<CV::Quant>(list);
-        };
-        case CV::InstructionType::CONSTRUCT_STORE: {
-            auto &cctx = prog->getCtx(ins->data[0]);
-            auto &qstore = cctx->get(ins->data[1]);
-            auto store = std::static_pointer_cast<CV::TypeStore>(qstore);
-            for(int i = 0; i < ins->params.size(); ++i){
-                auto quant = CV::Execute(prog->getIns(ins->params[i]), cctx, prog, cursor, st);
-                if(cursor->error){
-                    st->state = CV::ControlFlowState::CRASH;
-                    return ctx->buildNil();
-                }
-                store->v[ins->literal[i]] = quant;
-            }   
-            return std::static_pointer_cast<CV::Quant>(store);
-        };
-
-        case CV::InstructionType::MUT: {
-            
-            if(ctx->isPrefetched(ins->id)){
-                auto dir = ctx->getPrefetch(ins->id);
-                return prog->getCtx(dir[0])->get(dir[1]);
-            }
-            
-            auto &targetDataCtxId = ins->data[0];
-            auto &targetDataId = ins->data[1];
-            auto &execCtxId = ins->data[2];
-            auto &execCtx = prog->getCtx(execCtxId);
-            auto &data = prog->getCtx(targetDataCtxId)->get(targetDataId);
-            auto &entrypoint = prog->getIns(ins->params[0]);
-
-            auto v = CV::Execute(entrypoint, execCtx, prog, cursor, st);
-            if(cursor->error){
-                st->state = CV::ControlFlowState::CRASH;
-                return data;
-            }
-            
-            if(data->type != CV::QuantType::NUMBER && data->type != CV::QuantType::STRING){
-                cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "mut: Only numbers and string types might be mutated. Target is '"+CV::QuantType::name(data->type)+"'", ins->token);
-                st->state = CV::ControlFlowState::CRASH;
-                return data;
-            }
-            if(v->type != CV::QuantType::NUMBER && v->type != CV::QuantType::STRING){
-                cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "mut: Only numbers and string types might be mutated. New value is '"+CV::QuantType::name(v->type)+"'", ins->token);
-                st->state = CV::ControlFlowState::CRASH;
-                return data;
-            }
-
-            if(v->type != data->type){
-                cursor->setError(CV_ERROR_MSG_MISUSED_IMPERATIVE, "mut: both target and new value must match in type. Target is '"+CV::QuantType::name(data->type)+"' and new value is '"+CV::QuantType::name(v->type)+"'", ins->token);
-                st->state = CV::ControlFlowState::CRASH;
-                return data;
-            }
-
-            switch(data->type){
-                case CV::QuantType::STRING: {
-                    std::static_pointer_cast<CV::TypeString>(data)->v = std::static_pointer_cast<CV::TypeString>(v)->v;
-                } break;
-                case CV::QuantType::NUMBER: {
-                    std::static_pointer_cast<CV::TypeNumber>(data)->v = std::static_pointer_cast<CV::TypeNumber>(v)->v;
-                } break;
-            }
-
-            ctx->setPrefetch(ins->id, {(unsigned)targetDataCtxId, (unsigned)targetDataId});
-
-
-            return data;
-        };
-
-        case CV::InstructionType::LET: {
-
-            if(ctx->isPrefetched(ins->id)){
-                auto dir = ctx->getPrefetch(ins->id);
-                return prog->getCtx(dir[0])->get(dir[1]);
-            }
-
-            auto &cctx = prog->getCtx(ins->data[0]);
-            auto targetDataID = ins->data[1];
-            auto &name = ins->literal[0];
-            auto &entrypoint = prog->getIns(ins->params[0]);
-
-            auto v = CV::Execute(entrypoint, cctx, prog, cursor, st);
-            if(cursor->error){
-                st->state = CV::ControlFlowState::CRASH;
-                return v;
-            }
-            cctx->set(targetDataID, v);
-
-            ctx->setPrefetch(ins->id, {(unsigned)cctx->id, (unsigned)targetDataID});
-
-            return v;
-        };
-
-        case CV::InstructionType::CARBON_COPY: {
-            if(ctx->isPrefetched(ins->id)){
-                auto dir = ctx->getPrefetch(ins->id);
-                return prog->getCtx(dir[0])->get(dir[1]);
-            }
-
-            auto &cctx = prog->getCtx(ins->data[0]);
-            auto &nv = cctx->get(ins->data[1]);
-
-            auto &entrypoint = prog->getIns(ins->params[0]);
-
-            auto v = CV::Execute(entrypoint, cctx, prog, cursor, st);
-            if(cursor->error){
-                st->state = CV::ControlFlowState::CRASH;
-                return v;
-            }
-            auto copied = cctx->buildCopy(v);
-            cctx->set(ins->data[1], copied);
-
-            ctx->setPrefetch(ins->id, {(unsigned)cctx->id, (unsigned)copied->id});
-        
-            return copied;
-        };
-        
-        /*
-            CONTROL FLOW        
-        */
-        case CV::InstructionType::CF_INTERRUPT: {
-            switch(ins->data[0]){
-                case CV::InterruptType::YIELD: {
-                    st->state = CV::ControlFlowState::YIELD;
-                } break;
-                case CV::InterruptType::SKIP: {
-                    st->state = CV::ControlFlowState::SKIP;
-                } break;
-                case CV::InterruptType::RETURN: {
-                    st->state = CV::ControlFlowState::RETURN;
-                } break;
-                default: {
-                    st->state = CV::ControlFlowState::CRASH;
-                } break;
-            }
-            if(ins->params.size() > 0){
-                auto &payloadCtx = prog->getCtx(ins->data[1]);
-                auto v = CV::Execute(prog->getIns(ins->params[0]), payloadCtx, prog, cursor, st);
-                if(cursor->error){
-                    st->state = CV::ControlFlowState::CRASH;
-                    return v;
-                }   
-                st->payload = v;
-                return v;
-            }
-            return ctx->buildNil();
-        };
-        case CV::InstructionType::CF_INVOKE_FUNCTION: {
-            auto fnCtxId = ins->data[0];
-            auto fnId = ins->data[1];
-            auto paramCtxId = ins->data[2];
-
-            auto fn = std::static_pointer_cast<CV::TypeFunction>(prog->getCtx(fnCtxId)->get(fnId));
-            auto &topExecCtx = prog->getCtx(fn->ctxId);
-            auto &paramCtx = prog->getCtx(paramCtxId);
-
-            int targetCtxId = ins->data[3];
-            int targetDataId = ins->data[4];
-
-            // topExecCtx->memory.clear();
-            topExecCtx->clearPrefetch();
-
-            // Prepare Context
-            int namei = 0;
-            for(int i = 0; i < ins->params.size(); ++i){
-                auto &cins = prog->getIns(ins->params[i]);
-                auto v = CV::Execute(cins, paramCtx, prog, cursor, st);
-                if(cursor->error){
-                    st->state = CV::ControlFlowState::CRASH;
-                    return v;
-                }   
-                // Is it prefix?
-                if(CV::Test::IsItPrefixInstruction(cins) && cins->type == CV::InstructionType::PROXY_NAMER){
-                    topExecCtx->set(topExecCtx->getName(cins->literal[0], true)[1], v);
-                }else
-                if( CV::Test::IsItPrefixInstruction(cins) &&
-                    cins->type == CV::InstructionType::PROXY_EXPANDER &&
-                    v->type == CV::QuantType::LIST){
-                    auto inner = std::static_pointer_cast<CV::TypeList>(v);
-                    for(int j = 0; j < inner->v.size(); ++j){
-                        int fin = namei + j;
-                        if(fin >= fn->params.size()){
-                            cursor->setError(CV_ERROR_MSG_WRONG_OPERANDS, "Provided wrong number of parameters("+std::to_string(fin)+") through the Expander", ins->token);
-                            return ctx->buildNil();
-                        }
-                        topExecCtx->set(topExecCtx->getName(fn->params[fin], true)[1], inner->v[j]);
-                    }
-                    namei += inner->v.size();
-                }else{
-                    topExecCtx->set(topExecCtx->getName(fn->params[namei], true)[1], v);
-                    ++namei;
-                }
-            }
-            // Execute
-            auto execCtx = prog->createContext(topExecCtx);
-            auto v = CV::Execute(prog->getIns(fn->entrypoint), execCtx, prog, cursor, st);
-            if(cursor->error){
-                st->state = CV::ControlFlowState::CRASH;
-            }else  
-            if(st->state == CV::ControlFlowState::RETURN){
-                st->state = CV::ControlFlowState::CONTINUE;
-                v = st->payload;
-            }
-
-            // Fulfill target
-            prog->getCtx(targetCtxId)->set(targetDataId, v);
-
-            prog->deleteContext(execCtx->id);
-            
-            return std::shared_ptr<CV::Quant>(NULL);
-        } break;
-        case CV::InstructionType::CF_INVOKE_BINARY_FUNCTION: {
-            auto &fnData = prog->getCtx(ins->data[0])->get(ins->data[1]);
-            auto fn = std::static_pointer_cast<CV::TypeFunctionBinary>(fnData);
-
-            auto &paramCtx = prog->getCtx(ins->data[2]);
-
-            int targetCtxId = ins->data[4];
-            int targetDataId = ins->data[5];
-
-            // Compile operands
-            int nArgs = ins->data[3];
-            std::vector<std::shared_ptr<CV::Instruction>> arguments;
-            for(int i = 0; i < nArgs; ++i){
-                auto cins = prog->getIns(ins->params[i]);
-                if(cins->type == CV::InstructionType::PROXY_EXPANDER){
-                    auto innerIns = prog->getIns(cins->params[0]);
-                    if(innerIns->type == CV::InstructionType::CONSTRUCT_LIST){
-                        for(int j = 0; j < innerIns->params.size(); ++j){
-                            arguments.push_back( prog->getIns(innerIns->params[j]) );
-                        }
-                    }else{
-                        arguments.push_back(cins);
-                    }
-                }else{
-                    arguments.push_back(cins);
-                }
-            }
-
-
-            // Cast ref into pointer function
-            void (*ref)(CV_BINARY_FN_PARAMS) = (void (*)(CV_BINARY_FN_PARAMS))fn->ref;
-
-            // Invoke it in a temporary context
-            auto tempCtx = prog->createContext(paramCtx);
-            ref(arguments, fn->name, ins->token, cursor, tempCtx->id, targetCtxId, targetDataId, prog, st);
-            if(cursor->error){
-                st->state = CV::ControlFlowState::CRASH;
-            }             
-            // Delete context afterwards. The target value must be within the level above
-            prog->deleteContext(tempCtx->id);
-
-            return std::shared_ptr<CV::Quant>(NULL);
-        };
-        /*
-            LIBRARY IMPORT
-        */
-        case CV::InstructionType::LIBRAY_IMPORT: {
-            return ctx->buildNumber(ins->data[1]); // returns library id handle            
-        } break;
-        /*
-            NOOP
-        */
-        case CV::InstructionType::NOOP: {
-            st->state = CV::ControlFlowState::CRASH;
-            return ctx->buildNil();            
-        } break;
-        /*
-            INVALID
-        */
-        default: {
-            cursor->setError(CV_ERROR_MSG_INVALID_INSTRUCTION, "Instruction Type '"+std::to_string(ins->type)+"' is undefined/invalid", ins->token);
-            st->state = CV::ControlFlowState::CRASH;
-            return ctx->buildNil();
-        };
+        }                            
     }
 }
 
-std::shared_ptr<CV::Quant> CV::Execute(const CV::InsType &entry, const CV::ContextType &ctx, const CV::ProgramType &prog, const CV::CursorType &cursor, CFType cf){
 
-    CV::InsType ins = entry;
-    std::shared_ptr<CV::Quant> result;
-    auto st = cf.get() == NULL ? std::make_shared<CV::ControlFlow>() : cf;
-
-    if( 
-        cursor->error ||
-        st->state == CV::ControlFlowState::YIELD ||
-        st->state == CV::ControlFlowState::SKIP ||
-        st->state == CV::ControlFlowState::CRASH ||
-        st->state == CV::ControlFlowState::RETURN
-    ){
-        return ctx->buildNil();
+std::shared_ptr<CV::Data> CV::Context::copy(
+    const std::shared_ptr<CV::Data> &target
+){
+    if(!target){
+        return this->buildNil();
     }
 
-    while(true){
-        result = __flow(ins, ctx, prog, cursor, st);
-        if( 
-            cursor->error ||
-            st->state == CV::ControlFlowState::YIELD ||
-            st->state == CV::ControlFlowState::SKIP ||
-            st->state == CV::ControlFlowState::CRASH ||
-            st->state == CV::ControlFlowState::RETURN
-        ){
+    switch(target->type){
+        case CV::DataType::NUMBER: {
+            return this->buildNumber(
+                std::static_pointer_cast<CV::DataNumber>(target)->v
+            );
+        }
+
+        case CV::DataType::STRING: {
+            return this->buildString(
+                std::static_pointer_cast<CV::DataString>(target)->v
+            );
+        }
+
+        case CV::DataType::LIST: {
+            auto result = this->buildList();
+            auto from = std::static_pointer_cast<CV::DataList>(target);
+            for(int i = 0; i < from->v.size(); ++i){
+                result->v.push_back(
+                    this->copy(from->v[i])
+                );
+            }
             return result;
         }
-        if(ins->next != CV::InstructionType::INVALID){
-            ins = prog->getIns(ins->next);
-            continue;
+
+        case CV::DataType::STORE: {
+            auto result = this->buildStore();
+            auto from = std::static_pointer_cast<CV::DataStore>(target);
+            for(auto &it : from->v){
+                result->v[it.first] = this->copy(it.second);
+            }
+            return result;
         }
-        break;
-    }
 
-    return result;
-}
+        case CV::DataType::FUNCTION: {
+            auto result = std::make_shared<CV::DataFunction>();
+            auto from = std::static_pointer_cast<CV::DataFunction>(target);
+            result->params = from->params;
+            result->isLambda = from->isLambda;
+            result->isVariadic= from->isVariadic;
+            result->body = from->body;
+            result->lambda = from->lambda;
+            return result;
+        }
 
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//
-//  CONTEXT
-// 
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        case CV::DataType::PROXY: {
+            auto result = std::make_shared<CV::DataProxy>();
+            auto from = std::static_pointer_cast<CV::DataProxy>(target);
+            result->pname = from->pname;
+            result->ptype = from->ptype;
+            result->target = from->target;
+            return result;
+        }        
 
-CV::Context::Context(){
-    this->id = GEN_ID();
-}
-
-CV::Context::Context(const std::shared_ptr<CV::Context> &head) : Context(){
-    this->head = head;
-}
-
-std::shared_ptr<CV::Quant> CV::Context::buildCopy(const std::shared_ptr<CV::Quant> &subject){
-    std::shared_ptr<CV::Quant> c = subject->copy();
-    switch(subject->type){
-        case CV::QuantType::LIST: {
-            auto orig = std::static_pointer_cast<CV::TypeList>(subject);
-            auto target = std::static_pointer_cast<CV::TypeList>(c);
-            for(int i = 0; i < orig->v.size(); ++i){
-                target->v.push_back(this->buildCopy(orig->v[i]));
-            }
-        };
-        case CV::QuantType::STORE: {
-            auto orig = std::static_pointer_cast<CV::TypeStore>(subject);
-            auto target = std::static_pointer_cast<CV::TypeStore>(c);
-            for(auto &it : orig->v){
-                target->v[it.first] = this->buildCopy(it.second);
-            }
-        };
-    }
-    this->memoryMutex.lock();
-    this->memory[c->id] = c;
-    this->memoryMutex.unlock();
-    return c;
-}
-
-std::shared_ptr<CV::TypeNumber> CV::Context::buildNumber(number n){
-    auto t = std::make_shared<CV::TypeNumber>();
-    this->memoryMutex.lock();
-    this->memory[t->id] = t;
-    this->memoryMutex.unlock();
-    t->v = n;
-    return t;
-}
-
-std::shared_ptr<CV::TypeThread> CV::Context::buildThread(){
-    auto t = std::make_shared<CV::TypeThread>();
-    this->memoryMutex.lock();
-    this->memory[t->id] = t;
-    this->memoryMutex.unlock();
-    t->threadId = GEN_ID();
-    return t; 
-}
-
-std::shared_ptr<CV::Quant> CV::Context::buildNil(){
-    auto t = std::make_shared<CV::Quant>();
-    this->memoryMutex.lock();
-    this->memory[t->id] = t;
-    this->memoryMutex.unlock();
-    return t;
-}
-
-std::shared_ptr<CV::Quant> CV::Context::buildType(int type){
-    switch(type){
-        case CV::QuantType::NUMBER: {
-            return this->buildNumber();
-        };
-        case CV::QuantType::STRING: {
-            return this->buildString();
-        };
-        case CV::QuantType::LIST: {
-            return this->buildList();
-        };
-        case CV::QuantType::STORE: {
-            return this->buildStore();
-        };
-        case CV::QuantType::THREAD: {
-            return this->buildThread();
-        };
         default:
-        case CV::QuantType::NIL: {
+        case CV::DataType::NIL: {
             return this->buildNil();
-        };
+        }        
     }
-}
-
-std::shared_ptr<CV::TypeString> CV::Context::buildString(const std::string &s){
-    auto t = std::make_shared<CV::TypeString>();
-    this->memoryMutex.lock();
-    this->memory[t->id] = t;
-    this->memoryMutex.unlock();
-    t->v = s;
-    return t;
-}
-
-std::shared_ptr<CV::TypeList> CV::Context::buildList(const std::vector<std::shared_ptr<CV::Quant>> &list){
-    auto t = std::make_shared<TypeList>();
-    this->memoryMutex.lock();
-    this->memory[t->id] = t;
-    this->memoryMutex.unlock();
-    for(int i = 0; i < list.size(); ++i){
-        t->v.push_back(list[i]);
-    }
-    return t;
-}
-
-std::shared_ptr<CV::TypeStore> CV::Context::buildStore(const std::unordered_map<std::string, std::shared_ptr<CV::Quant>> &store){
-    auto t = std::make_shared<TypeStore>();
-    this->memoryMutex.lock();
-    this->memory[t->id] = t;
-    this->memoryMutex.unlock();
-    for(auto &it : store){
-        t->v[it.first] = it.second;
-    }
-    return t;
-}
-
-std::shared_ptr<CV::Quant> &CV::Context::get(int id){
-    memoryMutex.lock();
-    auto &v = this->memory[id];
-    memoryMutex.unlock();
-    return v;
-}
-
-void CV::Context::set(int id, const std::shared_ptr<CV::Quant> &q){
-    memoryMutex.lock();
-    this->memory[id] = q;
-    memoryMutex.unlock();
-}
-
-void CV::Context::setName(const std::string &name, unsigned id){
-    nameMutex.lock();
-    this->names[name] = id;
-    nameMutex.unlock();
-}
-
-void CV::Context::setPrefetch(unsigned id, const std::vector<unsigned> &v){
-    prefetchMutex.lock();
-    this->prefetched[id] = v;
-    prefetchMutex.unlock();
-}
-
-std::vector<unsigned> CV::Context::getPrefetch(unsigned id){
-    prefetchMutex.lock();
-    std::vector<unsigned> vs = this->prefetched[id];
-    prefetchMutex.unlock();
-    return vs;
-}  
-
-bool CV::Context::isPrefetched(unsigned id){
-    prefetchMutex.lock();
-    auto v = this->prefetched.count(id);
-    prefetchMutex.unlock();
-    return v > 0;
-}
-
-void CV::Context::clearPrefetch(){
-    prefetchMutex.lock();
-    this->prefetched.clear();
-    prefetchMutex.unlock();
-}
-
-std::shared_ptr<CV::TypeFunctionBinary> CV::Context::registerBinaryFuntion(const std::string &name, void *ref){
-    auto fn = std::make_shared<CV::TypeFunctionBinary>();
-    fn->ref = ref;
-    fn->ctxId = this->id;
-    fn->name = name;
-    this->memoryMutex.lock();
-    this->memory[fn->id] = fn;
-    this->memoryMutex.unlock();
-    this->names[name] = fn->id;
-    return fn;
-}
-
-// Name's context Id and data Id upwards
-std::vector<int> CV::Context::getName(const std::string &name, bool local){
-    this->nameMutex.lock();
-    if(this->names.count(name) > 0){
-        std::vector<int> ids;
-        ids.push_back(this->id);
-        ids.push_back(this->get(this->names[name])->id);
-        this->nameMutex.unlock();
-        return ids;
-    }
-    this->nameMutex.unlock();
-    return (this->head.get() && !local ? this->head->getName(name) : std::vector<int>({}));
-}
-
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//
-//  PROGRAM
-// 
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-
-CV::InsType CV::Program::createInstruction(unsigned type, const std::shared_ptr<CV::Token> &token){
-    auto ins = std::make_shared<CV::Instruction>();
-    ins->id = GEN_ID();
-    ins->type = type;
-    ins->token = token;
-    insMutex.lock();
-    this->instructions[ins->id] = ins;
-    insMutex.unlock();
-    return ins;
-}
-
-std::shared_ptr<CV::Context> CV::Program::createContext(const std::shared_ptr<CV::Context> &head){
-    auto nctx = std::make_shared<CV::Context>(head);
-    ctxMutex.lock();
-    this->ctx[nctx->id] = nctx;
-    ctxMutex.unlock();
-    return nctx;
-}
-
-bool CV::Program::deleteContext(int id){
-    ctxMutex.lock();
-    if(this->ctx.count(id) > 0){
-        this->ctx.erase(id); // Careful!! TODO: Check
-        ctxMutex.unlock();
-        return true;
-    }
-    ctxMutex.unlock();
-    return false;
-}
-
-std::shared_ptr<CV::Context> &CV::Program::getCtx(int id){
-    ctxMutex.lock();
-    auto &c = this->ctx[id];
-    ctxMutex.unlock();
-    return c;
-}
-
-std::shared_ptr<CV::Instruction> &CV::Program::getIns(int id){
-    this->insMutex.lock();
-    auto &i = this->instructions[id];
-    this->insMutex.unlock();
-    return i;
-}
-
-void CV::Program::deleteThread(unsigned id){
-    this->threadMutex.lock();
-    this->threads.erase(id);
-    this->threadMutex.unlock();
-}
-
-void CV::Program::end(){
-    for(auto &it : threads){
-        // We shall finish for threads to finish
-        it.second.join(); 
-    }
-}
-
-
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//
-//  API
-// 
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-bool CV::GetBooleanValue(const std::shared_ptr<CV::Quant> &data){
-    if(data.get() == NULL){
-        return false;
-    }
-    switch(data->type){
-        case CV::QuantType::NUMBER: {
-            auto v = std::static_pointer_cast<CV::TypeNumber>(data);
-            return v->v != 0;
-        };
-        default:
-        case CV::QuantType::NIL: {
-            return false;
-        };
-    }
-}
-
-
-int CV::Import(const std::string &fname, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor){
-    if(!CV::Tools::fileExists(fname)){
-        cursor->setError(CV_ERROR_MSG_LIBRARY_NOT_VALID, "'"+fname+"' does not exist");
-        return 0;
-    }
-    auto literal = CV::Tools::readFile(fname);
-    auto entrypoint = CV::Compile(literal, prog, cursor);
-    if(cursor->error){
-        std::cout << cursor->getRaised() << std::endl;
-        std::exit(1);
-    }
-    auto st = std::make_shared<CV::ControlFlow>();
-    auto result = CV::Execute(entrypoint, ctx, prog, cursor, st);
-    if(cursor->error){
-        std::cout << cursor->getRaised() << std::endl;
-        std::exit(1);
-    }
-    return 1;
-}
-
-bool CV::Unimport(int id){
-    return true;
-}
-
-int CV::ImportDynamicLibrary(const std::string &path, const std::string &fname, const std::shared_ptr<CV::Program> &prog, const CV::ContextType &ctx, const CV::CursorType &cursor){
-    #if (_CV_PLATFORM == _CV_PLATFORM_TYPE_LINUX)
-        void (*registerlibrary )(const std::shared_ptr<CV::Stack> &stack);
-        void* handle = NULL;
-        const char* error = NULL;
-        handle = dlopen(path.c_str(), RTLD_LAZY);
-        if(!handle){
-            fprintf( stderr, "Failed to load dynamic library %s: %s\n", fname.c_str(), dlerror());
-            std::exit(1);
-        }
-        dlerror();
-        registerlibrary = (void (*)(const std::shared_ptr<CV::Stack> &stack)) dlsym( handle, "_CV_REGISTER_LIBRARY" );
-        error = dlerror();
-        if(error){
-            fprintf( stderr, "Failed to load dynamic library '_CV_REGISTER_LIBRARY' from '%s': %s\n", fname.c_str(), error);
-            dlclose(handle);
-            std::exit(1);
-        }
-        // Try to load
-        (*registerlibrary)(stack);
-        loadedLibraries.push_back(handle);
-        return true;
-    #elif  (_CV_PLATFORM == _CV_PLATFORM_TYPE_WINDOWS)
-        typedef void (*rlib)(const std::shared_ptr<CV::Program> &prog, const CV::ContextType &ctx, const CV::CursorType &cursor);
-
-        rlib entry;
-        HMODULE hdll;
-        // Load lib
-        hdll = LoadLibraryA(path.c_str());
-        if(hdll == NULL){
-            fprintf( stderr, "Failed to load dynamic library %s\n", fname.c_str());
-            std::exit(1);                
-        }
-        // Fetch register's address
-        entry = (rlib)GetProcAddress(hdll, "_CV_REGISTER_LIBRARY");
-        if(entry == NULL){
-            fprintf( stderr, "Failed to load dynamic library '_CV_REGISTER_LIBRARY' from '%s'\n", fname.c_str());
-            std::exit(1);      
-        }
-        entry(prog, ctx, cursor);
-        auto id = GEN_ID();
-        prog->loadedDynamicLibs[id] = hdll;
-        return id;
-    #endif
 }
 
 void CV::SetUseColor(bool v){
-    UseColorOnText = v;
+    UseColorOnText = v;   
 }
-
-std::string CV::GetLogo(){
+std::string CV::GetPrompt(){
     std::string start = CV::Tools::setTextColor(Tools::Color::MAGENTA) + "[" + CV::Tools::setTextColor(Tools::Color::RESET);
     std::string cv = CV::Tools::setTextColor(Tools::Color::CYAN) + "~" + CV::Tools::setTextColor(Tools::Color::RESET);
     std::string end = CV::Tools::setTextColor(Tools::Color::MAGENTA) + "]" + CV::Tools::setTextColor(Tools::Color::RESET);
     return start+cv+end;
 }
 
-// int main(){
 
-//     auto cursor = std::make_shared<CV::Cursor>();
-//     auto program = std::make_shared<CV::Program>();
-//     program->rootContext = program->createContext();
-    
-//     CV::InitializeCore(program);
+std::string CV::DataToText(const std::shared_ptr<CV::Data> &t){
+    if(!t){
+        return  Tools::setTextColor(Tools::Color::BLUE) +
+                "nil" +
+                Tools::setTextColor(Tools::Color::RESET);
+    }
 
-//     auto entrypoint = CV::Compile("print 'hello world'", program, cursor);
-//     if(cursor->error){
-//         std::cout << cursor->getRaised() << std::endl;
-//         std::exit(1);
-//     }
-//     program->entrypointIns = entrypoint->id;
-//     auto result = CV::Execute(entrypoint, program->rootContext, program, cursor);
-//     if(cursor->error){
-//         std::cout << cursor->getRaised() << std::endl;
-//         std::exit(1);
-//     }
+    auto c_nil      = Tools::setTextColor(Tools::Color::BLUE);
+    auto c_num      = Tools::setTextColor(Tools::Color::CYAN);
+    auto c_str      = Tools::setTextColor(Tools::Color::GREEN);
+    auto c_kw       = Tools::setTextColor(Tools::Color::RED, true);
+    auto c_bracket  = Tools::setTextColor(Tools::Color::MAGENTA);
+    auto c_prefix   = Tools::setTextColor(Tools::Color::YELLOW, true);
+    auto c_meta     = Tools::setTextColor(Tools::Color::BLUE, true);
+    auto c_reset    = Tools::setTextColor(Tools::Color::RESET);
 
-//     std::cout << CV::QuantToText(result) << std::endl;
+    switch(t->type){
 
-//     std::cout << "exit" << std::endl;
+        default:
+        case CV::DataType::NIL: {
+            return c_nil + "nil" + c_reset;
+        };
 
-//     return 0;
+        case CV::DataType::NUMBER: {
+            return  c_num +
+                    CV::Tools::removeTrailingZeros(std::static_pointer_cast<CV::DataNumber>(t)->v) +
+                    c_reset;
+        };
 
-// }
+        case CV::DataType::STRING: {
+            auto out = std::static_pointer_cast<CV::DataString>(t)->v;
+
+            return  c_str +
+                    "'" + out + "'" +
+                    c_reset;
+        };
+
+        case CV::DataType::FUNCTION: {
+            auto fn = std::static_pointer_cast<CV::DataFunction>(t);
+
+            std::string start    = c_kw + "[" + c_reset;
+            std::string end      = c_kw + "]" + c_reset;
+            std::string name     = c_kw + "fn" + c_reset;
+            std::string binary   = c_meta + "BINARY" + c_reset;
+            std::string body     = fn->body.get() ? fn->body->str() : "";
+            std::string variadic = c_prefix + "@" + c_reset;
+
+            std::string params = fn->isVariadic
+                ? variadic
+                : CV::Tools::compileList(fn->params);
+
+            return  start +
+                    name + " " +
+                    start + params + end + " " +
+                    (fn->isLambda ? binary : body) +
+                    end;
+        };
+
+        case CV::DataType::LIST: {
+            std::string output = c_bracket + "[" + c_reset;
+
+            auto list = std::static_pointer_cast<CV::DataList>(t);
+
+            int total = static_cast<int>(list->v.size());
+            int limit = total > 30 ? 10 : total;
+
+            for(int i = 0; i < limit; ++i){
+                auto &q = list->v[i];
+                output += q ? CV::DataToText(q) : (c_nil + "nil" + c_reset);
+
+                if(i < limit - 1){
+                    output += " ";
+                }
+            }
+
+            if(limit != total){
+                if(limit > 0){
+                    output += " ";
+                }
+                output += c_prefix + "...(" + std::to_string(total - limit) + " hidden)" + c_reset;
+            }
+
+            return output + c_bracket + "]" + c_reset;
+        };
+
+        case CV::DataType::STORE: {
+            std::string output = c_bracket + "[" + c_reset;
+
+            auto store = std::static_pointer_cast<CV::DataStore>(t);
+
+            int total = static_cast<int>(store->v.size());
+            int limit = total > 30 ? 10 : total;
+            int i = 0;
+
+            for(auto it = store->v.begin(); it != store->v.end() && i < limit; ++it, ++i){
+                auto &q = it->second;
+
+                output +=   c_prefix + "[" + c_reset +
+                            c_prefix + "~" + it->first + c_reset + " " +
+                            (q ? CV::DataToText(q) : (c_nil + "nil" + c_reset)) +
+                            c_prefix + "]" + c_reset;
+
+                if(i < limit - 1){
+                    output += " ";
+                }
+            }
+
+            if(limit != total){
+                if(limit > 0){
+                    output += " ";
+                }
+                output += c_prefix + "...(" + std::to_string(total - limit) + " hidden)" + c_reset;
+            }
+
+            return output + c_bracket + "]" + c_reset;
+        };
+
+        case CV::DataType::PROXY: {
+            auto proxy = std::static_pointer_cast<CV::DataProxy>(t);
+
+            std::string out = c_prefix + "~" + proxy->pname + c_reset;
+
+            if(proxy->target){
+                out += " " + CV::DataToText(proxy->target);
+            }
+
+            return out;
+        };
+
+        case CV::DataType::CONTEXT: {
+            return c_meta + "<context>" + c_reset;
+        };
+    }
+}
+
+
+static std::shared_ptr<CV::Data> __cv_unwrap(const std::shared_ptr<CV::Data> &d){
+    return d ? d->unwrap() : std::shared_ptr<CV::Data>(nullptr);
+}
+
+static bool __cv_bool_value(const std::shared_ptr<CV::Data> &d){
+    auto v = __cv_unwrap(d);
+    if(!v){
+        return false;
+    }
+
+    switch(v->type){
+        case CV::DataType::NIL:
+            return false;
+        case CV::DataType::NUMBER:
+            return std::static_pointer_cast<CV::DataNumber>(v)->v != 0;
+        case CV::DataType::STRING:
+            return !std::static_pointer_cast<CV::DataString>(v)->v.empty();
+        case CV::DataType::LIST:
+            return !std::static_pointer_cast<CV::DataList>(v)->v.empty();
+        case CV::DataType::STORE:
+            return !std::static_pointer_cast<CV::DataStore>(v)->v.empty();
+        default:
+            return true;
+    }
+}
+
+static bool __cv_expect_type(
+    const std::string &fname,
+    const std::shared_ptr<CV::Data> &value,
+    CV::DataType expected,
+    const CV::CursorType &cursor,
+    const CV::TokenType &token
+){
+    auto v = __cv_unwrap(value);
+    if(!v || v->type != expected){
+        cursor->setError(
+            CV_ERROR_MSG_WRONG_OPERANDS,
+            "Function '"+fname+"' expected "+CV::DataTypeName(expected)+
+            ", provided "+(v ? CV::DataTypeName(v->type) : std::string("NULL")),
+            token
+        );
+        return false;
+    }
+    return true;
+}
+
+static bool __cv_expect_at_least(
+    const std::string &fname,
+    const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+    int n,
+    const CV::CursorType &cursor,
+    const CV::TokenType &token
+){
+    if(static_cast<int>(args.size()) < n){
+        cursor->setError(
+            CV_ERROR_MSG_MISUSED_FUNCTION,
+            "'"+fname+"' expects at least ("+std::to_string(n)+") argument(s)",
+            token
+        );
+        return false;
+    }
+    return true;
+}
+
+static bool __cv_expect_exactly(
+    const std::string &fname,
+    const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+    int n,
+    const CV::CursorType &cursor,
+    const CV::TokenType &token
+){
+    if(static_cast<int>(args.size()) != n){
+        cursor->setError(
+            CV_ERROR_MSG_MISUSED_FUNCTION,
+            "'"+fname+"' expects exactly ("+std::to_string(n)+") argument(s)",
+            token
+        );
+        return false;
+    }
+    return true;
+}
+
+static void __cv_register_numeric_conditional(
+    const std::shared_ptr<CV::Context> &ctx,
+    const std::string &fname,
+    const std::function<bool(CV_NUMBER, CV_NUMBER)> &comparator
+){
+    ctx->registerFunction(
+        fname,
+        {"a", "b"},
+        [fname, comparator](
+            const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+            const std::shared_ptr<CV::Context> &fctx,
+            const CV::CursorType &cursor,
+            const CV::TokenType &token
+        ) -> std::shared_ptr<CV::Data> {
+
+            if(!__cv_expect_exactly(fname, args, 2, cursor, token)){
+                return fctx->buildNil();
+            }
+
+            auto a = __cv_unwrap(args[0].second);
+            auto b = __cv_unwrap(args[1].second);
+
+            if(!__cv_expect_type(fname, a, CV::DataType::NUMBER, cursor, token) ||
+               !__cv_expect_type(fname, b, CV::DataType::NUMBER, cursor, token)){
+                return fctx->buildNil();
+            }
+
+            auto av = std::static_pointer_cast<CV::DataNumber>(a)->v;
+            auto bv = std::static_pointer_cast<CV::DataNumber>(b)->v;
+
+            return std::static_pointer_cast<CV::Data>(
+                fctx->buildNumber(comparator(av, bv) ? 1 : 0)
+            );
+        }
+    );
+}
+
+bool CV::CoreSetup(
+    const std::shared_ptr<CV::Context> &ctx
+){
+    char *cvLibPath = std::getenv("CANVAS_LIB_HOME");
+    CV_LIB_HOME = cvLibPath != nullptr ? std::string(cvLibPath) : "./lib";
+
+    ////////////////////////////
+    //// ARITHMETIC
+    ////////////////////////////
+
+    ctx->registerFunction("+",
+        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+           const std::shared_ptr<CV::Context> &fctx,
+           const CV::CursorType &cursor,
+           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+
+            auto result = fctx->buildNumber(0);
+
+            for(int i = 0; i < static_cast<int>(args.size()); ++i){
+                auto v = __cv_unwrap(args[i].second);
+                if(!__cv_expect_type("+", v, CV::DataType::NUMBER, cursor, token)){
+                    return fctx->buildNil();
+                }
+                result->v += std::static_pointer_cast<CV::DataNumber>(v)->v;
+            }
+
+            return std::static_pointer_cast<CV::Data>(result);
+        }
+    );
+
+    ctx->registerFunction("-",
+        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+           const std::shared_ptr<CV::Context> &fctx,
+           const CV::CursorType &cursor,
+           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+
+            if(!__cv_expect_at_least("-", args, 1, cursor, token)){
+                return fctx->buildNil();
+            }
+
+            auto first = __cv_unwrap(args[0].second);
+            if(!__cv_expect_type("-", first, CV::DataType::NUMBER, cursor, token)){
+                return fctx->buildNil();
+            }
+
+            auto result = fctx->buildNumber(std::static_pointer_cast<CV::DataNumber>(first)->v);
+
+            for(int i = 1; i < static_cast<int>(args.size()); ++i){
+                auto v = __cv_unwrap(args[i].second);
+                if(!__cv_expect_type("-", v, CV::DataType::NUMBER, cursor, token)){
+                    return fctx->buildNil();
+                }
+                result->v -= std::static_pointer_cast<CV::DataNumber>(v)->v;
+            }
+
+            return std::static_pointer_cast<CV::Data>(result);
+        }
+    );
+
+    ctx->registerFunction("*",
+        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+           const std::shared_ptr<CV::Context> &fctx,
+           const CV::CursorType &cursor,
+           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+
+            auto result = fctx->buildNumber(1);
+
+            for(int i = 0; i < static_cast<int>(args.size()); ++i){
+                auto v = __cv_unwrap(args[i].second);
+                if(!__cv_expect_type("*", v, CV::DataType::NUMBER, cursor, token)){
+                    return fctx->buildNil();
+                }
+                result->v *= std::static_pointer_cast<CV::DataNumber>(v)->v;
+            }
+
+            return std::static_pointer_cast<CV::Data>(result);
+        }
+    );
+
+    ctx->registerFunction("/",
+        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+           const std::shared_ptr<CV::Context> &fctx,
+           const CV::CursorType &cursor,
+           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+
+            if(!__cv_expect_at_least("/", args, 1, cursor, token)){
+                return fctx->buildNil();
+            }
+
+            auto first = __cv_unwrap(args[0].second);
+            if(!__cv_expect_type("/", first, CV::DataType::NUMBER, cursor, token)){
+                return fctx->buildNil();
+            }
+
+            auto result = fctx->buildNumber(std::static_pointer_cast<CV::DataNumber>(first)->v);
+
+            for(int i = 1; i < static_cast<int>(args.size()); ++i){
+                auto v = __cv_unwrap(args[i].second);
+                if(!__cv_expect_type("/", v, CV::DataType::NUMBER, cursor, token)){
+                    return fctx->buildNil();
+                }
+
+                auto tv = std::static_pointer_cast<CV::DataNumber>(v)->v;
+                if(tv == 0){
+                    cursor->setError(
+                        CV_ERROR_MSG_MISUSED_FUNCTION,
+                        "'/' Division by zero at argument ("+std::to_string(i)+")",
+                        token
+                    );
+                    return fctx->buildNil();
+                }
+
+                result->v /= tv;
+            }
+
+            return std::static_pointer_cast<CV::Data>(result);
+        }
+    );
+
+    ////////////////////////////
+    //// BOOLEAN
+    ////////////////////////////
+
+    ctx->registerFunction("and",
+        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+           const std::shared_ptr<CV::Context> &fctx,
+           const CV::CursorType &cursor,
+           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+            (void)cursor;
+            (void)token;
+
+            auto result = fctx->buildNumber(1);
+
+            for(int i = 0; i < static_cast<int>(args.size()); ++i){
+                if(!__cv_bool_value(args[i].second)){
+                    result->v = 0;
+                    break;
+                }
+            }
+
+            return std::static_pointer_cast<CV::Data>(result);
+        }
+    );
+
+    ctx->registerFunction("not", {"value"},
+        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+           const std::shared_ptr<CV::Context> &fctx,
+           const CV::CursorType &cursor,
+           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+
+            if(!__cv_expect_exactly("not", args, 1, cursor, token)){
+                return fctx->buildNil();
+            }
+
+            return std::static_pointer_cast<CV::Data>(
+                fctx->buildNumber(__cv_bool_value(args[0].second) ? 0 : 1)
+            );
+        }
+    );
+
+    ////////////////////////////
+    //// CONDITIONALS (eager-safe only)
+    ////////////////////////////
+
+    __cv_register_numeric_conditional(ctx, "eq",  [](CV_NUMBER a, CV_NUMBER b){ return a == b; });
+    __cv_register_numeric_conditional(ctx, "neq", [](CV_NUMBER a, CV_NUMBER b){ return a != b; });
+    __cv_register_numeric_conditional(ctx, ">",   [](CV_NUMBER a, CV_NUMBER b){ return a >  b; });
+    __cv_register_numeric_conditional(ctx, ">=",  [](CV_NUMBER a, CV_NUMBER b){ return a >= b; });
+    __cv_register_numeric_conditional(ctx, "<",   [](CV_NUMBER a, CV_NUMBER b){ return a <  b; });
+    __cv_register_numeric_conditional(ctx, "<=",  [](CV_NUMBER a, CV_NUMBER b){ return a <= b; });
+
+    ////////////////////////////
+    //// LISTS / STORES
+    ////////////////////////////
+
+    ctx->registerFunction("nth", {"list", "index"},
+        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+           const std::shared_ptr<CV::Context> &fctx,
+           const CV::CursorType &cursor,
+           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+
+            if(!__cv_expect_exactly("nth", args, 2, cursor, token)){
+                return fctx->buildNil();
+            }
+
+            auto listData = __cv_unwrap(args[0].second);
+            auto indexData = __cv_unwrap(args[1].second);
+
+            if(!__cv_expect_type("nth", listData, CV::DataType::LIST, cursor, token) ||
+               !__cv_expect_type("nth", indexData, CV::DataType::NUMBER, cursor, token)){
+                return fctx->buildNil();
+            }
+
+            auto list = std::static_pointer_cast<CV::DataList>(listData);
+            int index = static_cast<int>(std::static_pointer_cast<CV::DataNumber>(indexData)->v);
+
+            if(index < 0 || index >= static_cast<int>(list->v.size())){
+                cursor->setError(
+                    CV_ERROR_MSG_INVALID_INDEX,
+                    "Provided out-of-bounds index: Expected 0 to "+
+                    std::to_string(static_cast<int>(list->v.size()) - 1)+
+                    ", provided "+std::to_string(index),
+                    token
+                );
+                return fctx->buildNil();
+            }
+
+            return list->v[index];
+        }
+    );
+
+    ctx->registerFunction("length", {"subject"},
+        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+           const std::shared_ptr<CV::Context> &fctx,
+           const CV::CursorType &cursor,
+           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+
+            if(!__cv_expect_exactly("length", args, 1, cursor, token)){
+                return fctx->buildNil();
+            }
+
+            auto data = __cv_unwrap(args[0].second);
+            auto result = fctx->buildNumber(0);
+
+            if(data->type == CV::DataType::LIST){
+                result->v = static_cast<CV_NUMBER>(std::static_pointer_cast<CV::DataList>(data)->v.size());
+                return std::static_pointer_cast<CV::Data>(result);
+            }
+
+            if(data->type == CV::DataType::STORE){
+                result->v = static_cast<CV_NUMBER>(std::static_pointer_cast<CV::DataStore>(data)->v.size());
+                return std::static_pointer_cast<CV::Data>(result);
+            }
+
+            cursor->setError(
+                CV_ERROR_MSG_WRONG_OPERANDS,
+                "Function 'length' expects LIST or STORE",
+                token
+            );
+            return fctx->buildNil();
+        }
+    );
+
+    ctx->registerFunction(">>", {"subject", "target"},
+        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+           const std::shared_ptr<CV::Context> &fctx,
+           const CV::CursorType &cursor,
+           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+
+            if(!__cv_expect_exactly(">>", args, 2, cursor, token)){
+                return fctx->buildNil();
+            }
+
+            auto subject = __cv_unwrap(args[0].second);
+            auto target = __cv_unwrap(args[1].second);
+
+            if(target->type != CV::DataType::LIST){
+                auto nl = fctx->buildList();
+                nl->v.push_back(target);
+                nl->v.push_back(subject);
+                return std::static_pointer_cast<CV::Data>(nl);
+            }
+
+            auto list = std::static_pointer_cast<CV::DataList>(target);
+            list->v.push_back(subject);
+            return std::static_pointer_cast<CV::Data>(list);
+        }
+    );
+
+    ctx->registerFunction("<<", {"subject"},
+        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+           const std::shared_ptr<CV::Context> &fctx,
+           const CV::CursorType &cursor,
+           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+
+            if(!__cv_expect_exactly("<<", args, 1, cursor, token)){
+                return fctx->buildNil();
+            }
+
+            auto data = __cv_unwrap(args[0].second);
+            if(!__cv_expect_type("<<", data, CV::DataType::LIST, cursor, token)){
+                return fctx->buildNil();
+            }
+
+            auto list = std::static_pointer_cast<CV::DataList>(data);
+            if(list->v.empty()){
+                return fctx->buildNil();
+            }
+
+            auto result = list->v.back();
+            list->v.pop_back();
+            return result;
+        }
+    );
+
+    ctx->registerFunction("l-sub",
+        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+           const std::shared_ptr<CV::Context> &fctx,
+           const CV::CursorType &cursor,
+           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+
+            if(static_cast<int>(args.size()) != 2 && static_cast<int>(args.size()) != 3){
+                cursor->setError(
+                    CV_ERROR_MSG_MISUSED_FUNCTION,
+                    "'l-sub' expects 2 or 3 arguments",
+                    token
+                );
+                return fctx->buildNil();
+            }
+
+            auto listData = __cv_unwrap(args[0].second);
+            auto fromData = __cv_unwrap(args[1].second);
+
+            if(!__cv_expect_type("l-sub", listData, CV::DataType::LIST, cursor, token) ||
+               !__cv_expect_type("l-sub", fromData, CV::DataType::NUMBER, cursor, token)){
+                return fctx->buildNil();
+            }
+
+            auto list = std::static_pointer_cast<CV::DataList>(listData);
+            int from = static_cast<int>(std::static_pointer_cast<CV::DataNumber>(fromData)->v);
+
+            int to = static_cast<int>(list->v.size()) - 1;
+            if(static_cast<int>(args.size()) == 3){
+                auto toData = __cv_unwrap(args[2].second);
+                if(!__cv_expect_type("l-sub", toData, CV::DataType::NUMBER, cursor, token)){
+                    return fctx->buildNil();
+                }
+                to = static_cast<int>(std::static_pointer_cast<CV::DataNumber>(toData)->v);
+            }
+
+            if(from < 0 || from >= static_cast<int>(list->v.size()) ||
+               to < 0 || to >= static_cast<int>(list->v.size()) ||
+               to < from){
+                cursor->setError(
+                    CV_ERROR_MSG_INVALID_INDEX,
+                    "Invalid sub-range for 'l-sub'",
+                    token
+                );
+                return fctx->buildNil();
+            }
+
+            auto result = fctx->buildList();
+            for(int i = from; i <= to; ++i){
+                result->v.push_back(list->v[i]);
+            }
+
+            return std::static_pointer_cast<CV::Data>(result);
+        }
+    );
+
+    ctx->registerFunction("l-splice",
+        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+           const std::shared_ptr<CV::Context> &fctx,
+           const CV::CursorType &cursor,
+           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+            (void)cursor;
+            (void)token;
+
+            auto result = fctx->buildList();
+            for(int i = 0; i < static_cast<int>(args.size()); ++i){
+                result->v.push_back(__cv_unwrap(args[i].second));
+            }
+            return std::static_pointer_cast<CV::Data>(result);
+        }
+    );
+
+    ctx->registerFunction("s-splice",
+        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+           const std::shared_ptr<CV::Context> &fctx,
+           const CV::CursorType &cursor,
+           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+
+            auto result = fctx->buildStore();
+
+            for(int i = 0; i < static_cast<int>(args.size()); ++i){
+                const auto &vname = args[i].first;
+                if(vname.empty()){
+                    cursor->setError(
+                        CV_ERROR_MSG_WRONG_OPERANDS,
+                        "Function 's-splice' expects every operand to have a name",
+                        token
+                    );
+                    return fctx->buildNil();
+                }
+                result->v[vname] = __cv_unwrap(args[i].second);
+            }
+
+            return std::static_pointer_cast<CV::Data>(result);
+        }
+    );
+
+    ////////////////////////////
+    //// MUTATORS
+    ////////////////////////////
+
+    ctx->registerFunction("++", {"subject"},
+        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+           const std::shared_ptr<CV::Context> &fctx,
+           const CV::CursorType &cursor,
+           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+
+            if(!__cv_expect_exactly("++", args, 1, cursor, token)){
+                return fctx->buildNil();
+            }
+
+            auto subject = __cv_unwrap(args[0].second);
+            if(!__cv_expect_type("++", subject, CV::DataType::NUMBER, cursor, token)){
+                return fctx->buildNil();
+            }
+
+            ++std::static_pointer_cast<CV::DataNumber>(subject)->v;
+            return subject;
+        }
+    );
+
+    ctx->registerFunction("--", {"subject"},
+        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+           const std::shared_ptr<CV::Context> &fctx,
+           const CV::CursorType &cursor,
+           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+
+            if(!__cv_expect_exactly("--", args, 1, cursor, token)){
+                return fctx->buildNil();
+            }
+
+            auto subject = __cv_unwrap(args[0].second);
+            if(!__cv_expect_type("--", subject, CV::DataType::NUMBER, cursor, token)){
+                return fctx->buildNil();
+            }
+
+            --std::static_pointer_cast<CV::DataNumber>(subject)->v;
+            return subject;
+        }
+    );
+
+    ctx->registerFunction("//", {"subject"},
+        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+           const std::shared_ptr<CV::Context> &fctx,
+           const CV::CursorType &cursor,
+           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+
+            if(!__cv_expect_exactly("//", args, 1, cursor, token)){
+                return fctx->buildNil();
+            }
+
+            auto subject = __cv_unwrap(args[0].second);
+            if(!__cv_expect_type("//", subject, CV::DataType::NUMBER, cursor, token)){
+                return fctx->buildNil();
+            }
+
+            std::static_pointer_cast<CV::DataNumber>(subject)->v /= static_cast<CV_NUMBER>(2.0);
+            return subject;
+        }
+    );
+
+    ctx->registerFunction("**", {"subject"},
+        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+           const std::shared_ptr<CV::Context> &fctx,
+           const CV::CursorType &cursor,
+           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+
+            if(!__cv_expect_exactly("**", args, 1, cursor, token)){
+                return fctx->buildNil();
+            }
+
+            auto subject = __cv_unwrap(args[0].second);
+            if(!__cv_expect_type("**", subject, CV::DataType::NUMBER, cursor, token)){
+                return fctx->buildNil();
+            }
+
+            auto n = std::static_pointer_cast<CV::DataNumber>(subject);
+            n->v = n->v * n->v;
+            return subject;
+        }
+    );
+
+    ////////////////////////////
+    //// UTILS
+    ////////////////////////////
+
+    ctx->registerFunction("print",
+        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+           const std::shared_ptr<CV::Context> &fctx,
+           const CV::CursorType &cursor,
+           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+
+            std::string out;
+
+            for(int i = 0; i < static_cast<int>(args.size()); ++i){
+                auto arg = __cv_unwrap(args[i].second);
+                if(!arg){
+                    cursor->setError(
+                        "Invalid Operand",
+                        "Function 'print' received a null operand while printing",
+                        token
+                    );
+                    return fctx->buildNil();
+                }
+
+                if(arg->type == CV::DataType::STRING){
+                    out += std::static_pointer_cast<CV::DataString>(arg)->v;
+                }else{
+                    out += CV::DataToText(arg);
+                }
+            }
+
+            printf("%s\n", out.c_str());
+            return fctx->buildNil();
+        }
+    );
+
+    ctx->registerFunction("typeof", {"subject"},
+        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+           const std::shared_ptr<CV::Context> &fctx,
+           const CV::CursorType &cursor,
+           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+
+            if(!__cv_expect_exactly("typeof", args, 1, cursor, token)){
+                return fctx->buildNil();
+            }
+
+            auto subject = __cv_unwrap(args[0].second);
+            return std::static_pointer_cast<CV::Data>(
+                fctx->buildString(CV::DataTypeName(subject ? subject->type : CV::DataType::NIL))
+            );
+        }
+    );
+
+    return true;
+}
+
+std::shared_ptr<CV::Data> CV::Import(
+    const std::string &fname,
+    const CV::ContextType &ctx,
+    const CV::CursorType &cursor
+){
+    if(!CV::Tools::fileExists(fname)){
+        cursor->setError(
+            CV_ERROR_MSG_LIBRARY_NOT_VALID,
+            "'"+fname+"' does not exist",
+            1
+        );
+        return ctx->buildNil();
+    }
+
+    auto literal = CV::Tools::readFile(fname);
+
+    auto root = CV::BuildTree(literal, cursor);
+    if(cursor->error){
+        return ctx->buildNil();
+    }
+
+    auto result = ctx->buildNil();
+
+    for(int i = 0; i < static_cast<int>(root.size()); ++i){
+        auto cf = std::make_shared<CV::ControlFlow>();
+        cf->state = CV::ControlFlowState::CONTINUE;
+
+        result = CV::Interpret(root[i], cursor, cf, ctx);
+        if(cursor->error){
+            return ctx->buildNil();
+        }
+
+        if(cf->state == CV::ControlFlowState::RETURN ||
+           cf->state == CV::ControlFlowState::YIELD){
+            break;
+        }
+
+        if(cf->state == CV::ControlFlowState::SKIP){
+            // top-level skip has no special meaning here
+            continue;
+        }
+    }
+
+    return result ? result : ctx->buildNil();
+}
+
+#define CV_IMPORT_LIBRARY_ENTRY_POINT_ARGS \
+    const std::shared_ptr<CV::Context> &ctx, \
+    const std::shared_ptr<CV::Cursor> &cursor
+
+std::shared_ptr<CV::Data> CV::ImportDynamicLibrary(
+    const std::string &path,
+    const std::string &fname,
+    const CV::ContextType &ctx,
+    const CV::CursorType &cursor
+){
+    using rlib = void (*)(CV_IMPORT_LIBRARY_ENTRY_POINT_ARGS);
+
+#if (_CV_PLATFORM == _CV_PLATFORM_TYPE_LINUX) || (_CV_PLATFORM == _CV_PLATFORM_TYPE_OSX)
+
+    void *handle = dlopen(path.c_str(), RTLD_LAZY);
+    if(!handle){
+        const char *err = dlerror();
+        cursor->setError(
+            CV_ERROR_MSG_LIBRARY_NOT_VALID,
+            "Failed to load dynamic library '"+fname+"': "+std::string(err ? err : "unknown error"),
+            cursor->line
+        );
+        return ctx->buildNil();
+    }
+
+    dlerror(); // clear previous error
+
+    auto registerlibrary = reinterpret_cast<rlib>(dlsym(handle, "_CV_REGISTER_LIBRARY"));
+    const char *error = dlerror();
+    if(error){
+        cursor->setError(
+            CV_ERROR_MSG_LIBRARY_NOT_VALID,
+            "Failed to find '_CV_REGISTER_LIBRARY' in '"+fname+"': "+std::string(error),
+            cursor->line
+        );
+        dlclose(handle);
+        return ctx->buildNil();
+    }
+
+    (*registerlibrary)(ctx, cursor);
+    if(cursor->error){
+        dlclose(handle);
+        return ctx->buildNil();
+    }
+
+    auto id = GEN_ID();
+    {
+        std::lock_guard<std::mutex> lock(__cv_loaded_dynamic_libs_mutex);
+        __cv_loaded_dynamic_libs[id] = {handle, path};
+    }
+
+    return std::static_pointer_cast<CV::Data>(ctx->buildNumber(id));
+
+#elif (_CV_PLATFORM == _CV_PLATFORM_TYPE_WINDOWS)
+
+    HMODULE hdll = LoadLibraryA(path.c_str());
+    if(hdll == NULL){
+        cursor->setError(
+            CV_ERROR_MSG_LIBRARY_NOT_VALID,
+            "Failed to load dynamic library '"+fname+"'",
+            cursor->line
+        );
+        return ctx->buildNil();
+    }
+
+    auto entry = reinterpret_cast<rlib>(GetProcAddress(hdll, "_CV_REGISTER_LIBRARY"));
+    if(entry == NULL){
+        cursor->setError(
+            CV_ERROR_MSG_LIBRARY_NOT_VALID,
+            "Failed to find '_CV_REGISTER_LIBRARY' in '"+fname+"'",
+            cursor->line
+        );
+        FreeLibrary(hdll);
+        return ctx->buildNil();
+    }
+
+    entry(ctx, cursor);
+    if(cursor->error){
+        FreeLibrary(hdll);
+        return ctx->buildNil();
+    }
+
+    auto id = GEN_ID();
+    {
+        std::lock_guard<std::mutex> lock(__cv_loaded_dynamic_libs_mutex);
+        __cv_loaded_dynamic_libs[id] = {hdll, path};
+    }
+
+    return std::static_pointer_cast<CV::Data>(ctx->buildNumber(id));
+
+#else
+
+    cursor->setError(
+        CV_ERROR_MSG_LIBRARY_NOT_VALID,
+        "Dynamic libraries are not supported on this platform",
+        1
+    );
+    return ctx->buildNil();
+
+#endif
+}

@@ -1,1 +1,1 @@
-[bring:dynamic-library 'libjson']
+[import:dynamic-library 'libjson']
