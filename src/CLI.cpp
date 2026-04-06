@@ -36,7 +36,7 @@ static std::shared_ptr<ExecArg> getParam(std::vector<std::string> &params, const
 
 int main(int argc, char* argv[]){
 
-	// Gather parameters
+    // Gather parameters
 	std::vector<std::string> params;
 	for(int i = 0; i < argc; ++i){
 		params.push_back(std::string(argv[i]));
@@ -85,7 +85,6 @@ int main(int argc, char* argv[]){
 		return 1;
 	}    
 
-
     // Run File
     if(useFile.size() > 0){
 
@@ -95,90 +94,69 @@ int main(int argc, char* argv[]){
         }
 
         auto cursor = std::make_shared<CV::Cursor>();
-        auto program = std::make_shared<CV::Program>();
-        auto st = std::make_shared<CV::ControlFlow>();
+        auto context = std::make_shared<CV::Context>();
 
-        program->root = program->createContext();
-        CV::SetupCore(program);
+        CV::CoreSetup(context);
 
         auto file = CV::Tools::readFile(useFile);
 
-        auto entrypoint = CV::Compile(file, program, cursor, program->root);
+        auto root = CV::BuildTree(file, cursor);
         if(cursor->error){
             std::cout << cursor->getRaised() << std::endl;
-            program->end();
             return 1;
         }
 
-        CV::Data *result = nullptr;
-        CV::InsType current = entrypoint;
+        std::shared_ptr<CV::Data> result = context->buildNil();
 
-        while(current){
-            auto st = std::make_shared<CV::ControlFlow>();
-            st->state = CV::ControlFlowState::CONTINUE;
+        for(int i = 0; i < static_cast<int>(root.size()); ++i){
+            auto cf = std::make_shared<CV::ControlFlow>();
+            cf->state = CV::ControlFlowState::CONTINUE;
 
-            result = CV::Execute(current, program, cursor, program->root, st, false);
+            result = CV::Interpret(root[i], cursor, cf, context);
             if(cursor->error){
                 std::cout << cursor->getRaised() << std::endl;
-                program->end();
                 return 1;
             }
-            
-            program->quickGC();
-
-            if(current->next == 0){
-                break;
-            }
-
-            current = program->getIns(current->next);
         }
 
         (void)result;
-
-        program->end();
         return 0;
     }else
-	// REPL
-	if(useREPL){
+    // REPL
+    if(useREPL){
         auto cursor = std::make_shared<CV::Cursor>();
-        auto program = std::make_shared<CV::Program>();
-        auto st = std::make_shared<CV::ControlFlow>();
+        auto context = std::make_shared<CV::Context>();
 
         // Persistent REPL root context
-        program->root = program->createContext();
+        CV::CoreSetup(context);
 
-        // Load native/core functions
-        CV::SetupCore(program);
-
-        // Add easy "exit" function for REPL
-        program->root->registerFunction(program, "exit",
-            [&](
-                const std::shared_ptr<CV::Program> &prog,
-                const std::string &name,
-                const std::vector<std::pair<std::string, std::shared_ptr<CV::Instruction>>> &args,
-                const std::shared_ptr<CV::Token> &token,
-                const std::shared_ptr<CV::Cursor> &cursor,
-                const std::shared_ptr<CV::Context> &ctx,
-                const std::shared_ptr<CV::ControlFlow> &st
-            ) -> CV::Data* {
+        // Easy "exit" function for REPL
+        context->registerFunction("exit",
+            [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+               const std::shared_ptr<CV::Context> &ctx,
+               const CV::CursorType &cursor,
+               const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+                (void)args;
+                (void)ctx;
+                (void)cursor;
+                (void)token;
                 std::exit(0);
-                return prog->buildNil();
+                return std::shared_ptr<CV::Data>(nullptr);
             }
         );
 
         printVersion(false, useRelaxed ? "RELAXED" : "");
 
         linenoise::SetCompletionCallback([&](const char* editBuffer, std::vector<std::string>& completions){
-            // Simple prefix completion against current root context names
-            std::lock_guard<std::mutex> lock(program->root->mutexNames);
+            std::string prefix = editBuffer ? std::string(editBuffer) : "";
 
-            for(const auto &it : program->root->names){
-                if(editBuffer && editBuffer[0] != '\0'){
-                    if(!it.first.empty() && it.first[0] == editBuffer[0]){
+            for(const auto &it : context->data){
+                if(prefix.empty()){
+                    completions.push_back(it.first);
+                }else{
+                    if(it.first.rfind(prefix, 0) == 0){
                         completions.push_back(it.first);
                     }
-                }else{
-                    completions.push_back(it.first);
                 }
             }
         });
@@ -187,7 +165,8 @@ int main(int argc, char* argv[]){
         linenoise::SetHistoryMaxLen(1000);
 
         while(true){
-            st = std::make_shared<CV::ControlFlow>();
+            auto cf = std::make_shared<CV::ControlFlow>();
+            cf->state = CV::ControlFlowState::CONTINUE;
 
             std::string input = "";
             auto quit = linenoise::Readline(
@@ -200,55 +179,56 @@ int main(int argc, char* argv[]){
             }
 
             if(input.empty()){
-                program->quickGC();
                 continue;
             }
 
             linenoise::AddHistory(input.c_str());
 
-            // Compile into the persistent REPL root context
-            auto entrypoint = CV::Compile(input, program, cursor, program->root);
+            auto root = CV::BuildTree(input, cursor);
             if(cursor->error){
                 std::cout << cursor->getRaised() << std::endl << std::endl;
                 if(useRelaxed){
                     cursor->clear();
-                    program->quickGC();
                     continue;
                 }else{
-                    program->end();
                     return 1;
                 }
             }
 
-            // Execute in the persistent REPL root context
-            auto result = CV::Execute(entrypoint, program, cursor, program->root, st);
+            std::shared_ptr<CV::Data> result = context->buildNil();
+
+            for(int i = 0; i < static_cast<int>(root.size()); ++i){
+                cf = std::make_shared<CV::ControlFlow>();
+                cf->state = CV::ControlFlowState::CONTINUE;
+
+                result = CV::Interpret(root[i], cursor, cf, context);
+                if(cursor->error){
+                    break;
+                }
+            }
+
             if(cursor->error){
                 std::cout << cursor->getRaised() << std::endl << std::endl;
                 if(useRelaxed){
                     cursor->clear();
-                    program->quickGC();
                     continue;
                 }else{
-                    program->end();
                     return 1;
                 }
             }
 
             if(!useNoReturn){
-                std::cout << CV::DataToText(program, result) << std::endl;
+                std::cout << CV::DataToText(result) << std::endl;
             }
-
-            program->quickGC();
         }
 
-        program->end();
         return cursor->error && !useRelaxed ? 1 : 0;
-	}else{
-	// Inline
+    }else{
+    // Inline
         std::string cmd = "";
-        for(int i = 1; i < params.size(); ++i){
+        for(int i = 1; i < static_cast<int>(params.size()); ++i){
             cmd += params[i];
-            if(i < params.size() - 1){
+            if(i < static_cast<int>(params.size()) - 1){
                 cmd += " ";
             }
         }
@@ -259,35 +239,35 @@ int main(int argc, char* argv[]){
         }
 
         auto cursor = std::make_shared<CV::Cursor>();
-        auto program = std::make_shared<CV::Program>();
-        auto st = std::make_shared<CV::ControlFlow>();
+        auto context = std::make_shared<CV::Context>();
 
-        program->root = program->createContext();
+        CV::CoreSetup(context);
 
-        CV::SetupCore(program);
-
-        auto entrypoint = CV::Compile(cmd, program, cursor, program->root);
+        auto root = CV::BuildTree(cmd, cursor);
         if(cursor->error){
             std::cout << cursor->getRaised() << std::endl;
-            program->end();
             return 1;
         }
 
-        auto result = CV::Execute(entrypoint, program, cursor, program->root, st);
-        if(cursor->error){
-            std::cout << cursor->getRaised() << std::endl;
-            program->end();
-            return 1;
+        std::shared_ptr<CV::Data> result = context->buildNil();
+
+        for(int i = 0; i < static_cast<int>(root.size()); ++i){
+            auto cf = std::make_shared<CV::ControlFlow>();
+            cf->state = CV::ControlFlowState::CONTINUE;
+
+            result = CV::Interpret(root[i], cursor, cf, context);
+            if(cursor->error){
+                std::cout << cursor->getRaised() << std::endl;
+                return 1;
+            }
         }
 
         if(!useNoReturn){
-            std::cout << CV::DataToText(program, result) << std::endl;
+            std::cout << CV::DataToText(result) << std::endl;
         }
 
-        program->end();
         return 0;
-	}    
-
+    }
 
 
     return 0;

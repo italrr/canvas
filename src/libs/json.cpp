@@ -4,32 +4,71 @@
 #include "../Thirdparty/json11.hpp"
 #include "../CV.hpp"
 
-static inline bool isNotFractional(CV_NUMBER d, CV_NUMBER epsilon = 1e-9){
+static inline bool __cv_json_is_not_fractional(CV_NUMBER d, CV_NUMBER epsilon = 1e-9){
     CV_NUMBER integral_part;
     CV_NUMBER fractional_part = std::modf(d, &integral_part);
     return std::fabs(fractional_part) < epsilon;
 }
 
-static CV::Data *buildNumber(const std::shared_ptr<CV::Program> &prog, CV_NUMBER n){
-    auto out = new CV::DataNumber(n);
-    prog->allocateData(out);
-    return static_cast<CV::Data*>(out);
+static std::shared_ptr<CV::Data> __cv_json_fail_num(const CV::ContextType &ctx){
+    return std::static_pointer_cast<CV::Data>(ctx->buildNumber(0));
 }
 
-static CV::Data *buildString(const std::shared_ptr<CV::Program> &prog, const std::string &s){
-    auto out = new CV::DataString(s);
-    prog->allocateData(out);
-    return static_cast<CV::Data*>(out);
+static std::shared_ptr<CV::Data> __cv_json_ok_num(const CV::ContextType &ctx){
+    return std::static_pointer_cast<CV::Data>(ctx->buildNumber(1));
 }
 
-static json11::Json buildNode(
+static std::shared_ptr<CV::Data> __cv_json_unwrap(const std::shared_ptr<CV::Data> &d){
+    return d ? d->unwrap() : std::shared_ptr<CV::Data>(nullptr);
+}
+
+static bool __cv_json_expect_exactly(
     const std::string &name,
-    const std::shared_ptr<CV::Program> &prog,
-    CV::Data *origin,
-    const std::shared_ptr<CV::Token> &token,
-    const std::shared_ptr<CV::Cursor> &cursor
+    const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+    int n,
+    const CV::CursorType &cursor,
+    const CV::TokenType &token
 ){
-    if(origin == NULL){
+    if(static_cast<int>(args.size()) != n){
+        cursor->setError(
+            CV_ERROR_MSG_MISUSED_FUNCTION,
+            "'"+name+"' expects exactly ("+std::to_string(n)+") argument(s)",
+            token
+        );
+        return false;
+    }
+    return true;
+}
+
+static bool __cv_json_expect_type(
+    const std::string &name,
+    const std::shared_ptr<CV::Data> &value,
+    CV::DataType expected,
+    const CV::CursorType &cursor,
+    const CV::TokenType &token
+){
+    auto v = __cv_json_unwrap(value);
+    if(!v || v->type != expected){
+        cursor->setError(
+            CV_ERROR_MSG_WRONG_OPERANDS,
+            "Imperative '"+name+"' expected "+CV::DataTypeName(expected)+
+            ", provided "+(v ? CV::DataTypeName(v->type) : std::string("NULL")),
+            token
+        );
+        return false;
+    }
+    return true;
+}
+
+static json11::Json __cv_json_build_node(
+    const std::string &name,
+    const std::shared_ptr<CV::Data> &origin,
+    const CV::TokenType &token,
+    const CV::CursorType &cursor
+){
+    auto value = __cv_json_unwrap(origin);
+
+    if(!value){
         cursor->setError(
             "Unhandled Type For JSON",
             "Imperative '"+name+"' was provided a null value",
@@ -38,23 +77,13 @@ static json11::Json buildNode(
         return json11::Json();
     }
 
-    switch(origin->type){
+    switch(value->type){
         case CV::DataType::STORE: {
             json11::Json::object obj;
-            auto store = static_cast<CV::DataStore*>(origin);
+            auto store = std::static_pointer_cast<CV::DataStore>(value);
 
-            for(const auto &it : store->value){
-                auto child = prog->getData(it.second);
-                if(child == NULL){
-                    cursor->setError(
-                        "Unhandled Type For JSON",
-                        "Imperative '"+name+"' store field '"+it.first+"' points to dead data id "+std::to_string(it.second),
-                        token
-                    );
-                    return json11::Json();
-                }
-
-                obj[it.first] = buildNode(name, prog, child, token, cursor);
+            for(const auto &it : store->v){
+                obj[it.first] = __cv_json_build_node(name, it.second, token, cursor);
                 if(cursor->error){
                     return json11::Json();
                 }
@@ -65,20 +94,10 @@ static json11::Json buildNode(
 
         case CV::DataType::LIST: {
             json11::Json::array obj;
-            auto list = static_cast<CV::DataList*>(origin);
+            auto list = std::static_pointer_cast<CV::DataList>(value);
 
-            for(int i = 0; i < static_cast<int>(list->value.size()); ++i){
-                auto child = prog->getData(list->value[i]);
-                if(child == NULL){
-                    cursor->setError(
-                        "Unhandled Type For JSON",
-                        "Imperative '"+name+"' list item "+std::to_string(i)+" points to dead data id "+std::to_string(list->value[i]),
-                        token
-                    );
-                    return json11::Json();
-                }
-
-                obj.push_back(buildNode(name, prog, child, token, cursor));
+            for(int i = 0; i < static_cast<int>(list->v.size()); ++i){
+                obj.push_back(__cv_json_build_node(name, list->v[i], token, cursor));
                 if(cursor->error){
                     return json11::Json();
                 }
@@ -88,14 +107,14 @@ static json11::Json buildNode(
         }
 
         case CV::DataType::NUMBER: {
-            auto v = static_cast<CV::DataNumber*>(origin)->value;
-            return isNotFractional(v)
+            auto v = std::static_pointer_cast<CV::DataNumber>(value)->v;
+            return __cv_json_is_not_fractional(v)
                 ? json11::Json(static_cast<int>(v))
                 : json11::Json(v);
         }
 
         case CV::DataType::STRING: {
-            return json11::Json(static_cast<CV::DataString*>(origin)->value);
+            return json11::Json(std::static_pointer_cast<CV::DataString>(value)->v);
         }
 
         case CV::DataType::NIL: {
@@ -105,7 +124,7 @@ static json11::Json buildNode(
         default: {
             cursor->setError(
                 "Unhandled Type For JSON",
-                "Imperative '"+name+"' was provided type '"+CV::DataTypeName(origin->type)+"' which is not handled by this JSON library",
+                "Imperative '"+name+"' was provided type '"+CV::DataTypeName(value->type)+"' which is not handled by this JSON library",
                 token
             );
             return json11::Json();
@@ -113,70 +132,58 @@ static json11::Json buildNode(
     }
 }
 
-static CV::Data *unwrapJson(
+static std::shared_ptr<CV::Data> __cv_json_unwrap_json(
     const std::string &name,
     const json11::Json &obj,
-    const std::shared_ptr<CV::Program> &prog,
-    const std::shared_ptr<CV::Token> &token,
-    const std::shared_ptr<CV::Cursor> &cursor
+    const CV::ContextType &ctx,
+    const CV::TokenType &token,
+    const CV::CursorType &cursor
 ){
     switch(obj.type()){
         case json11::Json::ARRAY: {
-            auto list = new CV::DataList();
-            prog->allocateData(list);
-
+            auto list = ctx->buildList();
             auto arr = obj.array_items();
-            for(int i = 0; i < static_cast<int>(arr.size()); ++i){
-                auto child = unwrapJson(name, arr.at(i), prog, token, cursor);
-                if(cursor->error){
-                    return prog->buildNil();
-                }
 
-                if(child != NULL){
-                    child->incRefCount();
-                    list->value.push_back(child->id);
+            for(int i = 0; i < static_cast<int>(arr.size()); ++i){
+                auto child = __cv_json_unwrap_json(name, arr.at(i), ctx, token, cursor);
+                if(cursor->error){
+                    return ctx->buildNil();
                 }
+                list->v.push_back(child);
             }
 
-            return static_cast<CV::Data*>(list);
+            return std::static_pointer_cast<CV::Data>(list);
         }
 
         case json11::Json::OBJECT: {
-            auto store = new CV::DataStore();
-            prog->allocateData(store);
+            auto store = ctx->buildStore();
+            auto curr = obj.object_items();
 
-            json11::Json::object curr{obj.object_items()};
             for(const auto &it : curr){
-                auto child = unwrapJson(name, it.second, prog, token, cursor);
+                auto child = __cv_json_unwrap_json(name, it.second, ctx, token, cursor);
                 if(cursor->error){
-                    return prog->buildNil();
+                    return ctx->buildNil();
                 }
-
-                if(child != NULL){
-                    child->incRefCount();
-                    store->value[it.first] = child->id;
-                }else{
-                    store->value[it.first] = 0;
-                }
+                store->v[it.first] = child;
             }
 
-            return static_cast<CV::Data*>(store);
+            return std::static_pointer_cast<CV::Data>(store);
         }
 
         case json11::Json::NUMBER: {
-            return buildNumber(prog, obj.number_value());
+            return std::static_pointer_cast<CV::Data>(ctx->buildNumber(obj.number_value()));
         }
 
         case json11::Json::BOOL: {
-            return buildNumber(prog, obj.bool_value() ? 1 : 0);
+            return std::static_pointer_cast<CV::Data>(ctx->buildNumber(obj.bool_value() ? 1 : 0));
         }
 
         case json11::Json::STRING: {
-            return buildString(prog, obj.string_value());
+            return std::static_pointer_cast<CV::Data>(ctx->buildString(obj.string_value()));
         }
 
         case json11::Json::NUL: {
-            return prog->buildNil();
+            return ctx->buildNil();
         }
 
         default: {
@@ -185,125 +192,102 @@ static CV::Data *unwrapJson(
                 "Imperative '"+name+"' was provided JSON type '"+std::to_string(obj.type())+"' which is not handled by this JSON library",
                 token
             );
-            return prog->buildNil();
+            return ctx->buildNil();
         }
     }
 }
 
-static CV::Data *__CV_STD_JSON_WRITE(
-    const std::shared_ptr<CV::Program> &prog,
-    const std::string &name,
-    const std::vector<std::pair<std::string, std::shared_ptr<CV::Instruction>>> &args,
-    const std::shared_ptr<CV::Token> &token,
-    const std::shared_ptr<CV::Cursor> &cursor,
-    const std::shared_ptr<CV::Context> &ctx,
-    const std::shared_ptr<CV::ControlFlow> &st
+static std::shared_ptr<CV::Data> __CV_STD_JSON_WRITE(
+    const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+    const CV::ContextType &ctx,
+    const CV::CursorType &cursor,
+    const CV::TokenType &token
 ){
-    auto fail = [&]() -> CV::Data* {
-        return buildNumber(prog, 0);
-    };
+    const std::string name = "json:write";
 
-    auto subjectIns = CV::Tools::ErrorCheck::FetchInstruction(name, "subject", args, cursor, st, token);
-    if(cursor->error){
-        return fail();
+    if(!__cv_json_expect_exactly(name, args, 2, cursor, token)){
+        return __cv_json_fail_num(ctx);
     }
 
-    auto subject = CV::Execute(subjectIns, prog, cursor, ctx, st);
-    if(cursor->error){
-        return fail();
-    }
-
-    if(subject->type != CV::DataType::LIST && subject->type != CV::DataType::STORE){
+    auto subject = __cv_json_unwrap(args[0].second);
+    if(!subject || (subject->type != CV::DataType::LIST && subject->type != CV::DataType::STORE)){
         cursor->setError(
             CV_ERROR_MSG_WRONG_OPERANDS,
             "Imperative '"+name+"' expects operand 'subject' to be LIST or STORE",
             token
         );
-        return fail();
+        return __cv_json_fail_num(ctx);
     }
 
-    auto filenameData = CV::Tools::ErrorCheck::SolveInstruction(
-        prog, name, "filename", args, ctx, cursor, st, token, CV::DataType::STRING
-    );
-    if(cursor->error){
-        return fail();
+    auto filenameData = __cv_json_unwrap(args[1].second);
+    if(!__cv_json_expect_type(name, filenameData, CV::DataType::STRING, cursor, token)){
+        return __cv_json_fail_num(ctx);
     }
 
-    auto &filename = static_cast<CV::DataString*>(filenameData)->value;
+    auto filename = std::static_pointer_cast<CV::DataString>(filenameData)->v;
 
-    auto obj = buildNode(name, prog, subject, token, cursor);
+    auto obj = __cv_json_build_node(name, subject, token, cursor);
     if(cursor->error){
-        return fail();
+        return __cv_json_fail_num(ctx);
     }
 
     std::ofstream outFile(filename);
     outFile << json11::Json(obj).dump();
     outFile.close();
 
-    return buildNumber(prog, 1);
+    return __cv_json_ok_num(ctx);
 }
 
-static CV::Data *__CV_STD_JSON_DUMP(
-    const std::shared_ptr<CV::Program> &prog,
-    const std::string &name,
-    const std::vector<std::pair<std::string, std::shared_ptr<CV::Instruction>>> &args,
-    const std::shared_ptr<CV::Token> &token,
-    const std::shared_ptr<CV::Cursor> &cursor,
-    const std::shared_ptr<CV::Context> &ctx,
-    const std::shared_ptr<CV::ControlFlow> &st
+static std::shared_ptr<CV::Data> __CV_STD_JSON_DUMP(
+    const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+    const CV::ContextType &ctx,
+    const CV::CursorType &cursor,
+    const CV::TokenType &token
 ){
-    auto fail = [&]() -> CV::Data* {
-        return buildNumber(prog, 0);
-    };
+    const std::string name = "json:dump";
 
-    auto subjectIns = CV::Tools::ErrorCheck::FetchInstruction(name, "subject", args, cursor, st, token);
-    if(cursor->error){
-        return fail();
+    if(!__cv_json_expect_exactly(name, args, 1, cursor, token)){
+        return __cv_json_fail_num(ctx);
     }
 
-    auto subject = CV::Execute(subjectIns, prog, cursor, ctx, st);
-    if(cursor->error){
-        return fail();
-    }
-
-    if(subject->type != CV::DataType::LIST && subject->type != CV::DataType::STORE){
+    auto subject = __cv_json_unwrap(args[0].second);
+    if(!subject || (subject->type != CV::DataType::LIST && subject->type != CV::DataType::STORE)){
         cursor->setError(
             CV_ERROR_MSG_WRONG_OPERANDS,
             "Imperative '"+name+"' expects operand 'subject' to be LIST or STORE",
             token
         );
-        return fail();
+        return __cv_json_fail_num(ctx);
     }
 
-    auto obj = buildNode(name, prog, subject, token, cursor);
+    auto obj = __cv_json_build_node(name, subject, token, cursor);
     if(cursor->error){
-        return fail();
+        return __cv_json_fail_num(ctx);
     }
 
-    return buildString(prog, json11::Json(obj).dump());
+    return std::static_pointer_cast<CV::Data>(
+        ctx->buildString(json11::Json(obj).dump())
+    );
 }
 
-static CV::Data *__CV_STD_JSON_PARSE_FILE(
-    const std::shared_ptr<CV::Program> &prog,
-    const std::string &name,
-    const std::vector<std::pair<std::string, std::shared_ptr<CV::Instruction>>> &args,
-    const std::shared_ptr<CV::Token> &token,
-    const std::shared_ptr<CV::Cursor> &cursor,
-    const std::shared_ptr<CV::Context> &ctx,
-    const std::shared_ptr<CV::ControlFlow> &st
+static std::shared_ptr<CV::Data> __CV_STD_JSON_PARSE_FILE(
+    const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+    const CV::ContextType &ctx,
+    const CV::CursorType &cursor,
+    const CV::TokenType &token
 ){
-    auto fail = [&]() -> CV::Data* {
-        return buildNumber(prog, 0);
-    };
+    const std::string name = "json:load";
 
-    auto filenameData = CV::Tools::ErrorCheck::SolveInstruction(
-        prog, name, "filename", args, ctx, cursor, st, token, CV::DataType::STRING
-    );
-    if(cursor->error){
-        return fail();
+    if(!__cv_json_expect_exactly(name, args, 1, cursor, token)){
+        return __cv_json_fail_num(ctx);
     }
 
-    auto &filename = static_cast<CV::DataString*>(filenameData)->value;
+    auto filenameData = __cv_json_unwrap(args[0].second);
+    if(!__cv_json_expect_type(name, filenameData, CV::DataType::STRING, cursor, token)){
+        return __cv_json_fail_num(ctx);
+    }
+
+    auto filename = std::static_pointer_cast<CV::DataString>(filenameData)->v;
 
     if(!CV::Tools::fileExists(filename)){
         cursor->setError(
@@ -311,7 +295,7 @@ static CV::Data *__CV_STD_JSON_PARSE_FILE(
             "File '"+filename+"' does not exist",
             token
         );
-        return fail();
+        return __cv_json_fail_num(ctx);
     }
 
     auto source = CV::Tools::readFile(filename);
@@ -324,33 +308,30 @@ static CV::Data *__CV_STD_JSON_PARSE_FILE(
             "Imperative '"+name+"' was provided an invalid JSON input: '"+err+"'",
             token
         );
-        return fail();
+        return __cv_json_fail_num(ctx);
     }
 
-    return unwrapJson(name, json, prog, token, cursor);
+    return __cv_json_unwrap_json(name, json, ctx, token, cursor);
 }
 
-static CV::Data *__CV_STD_JSON_PARSE(
-    const std::shared_ptr<CV::Program> &prog,
-    const std::string &name,
-    const std::vector<std::pair<std::string, std::shared_ptr<CV::Instruction>>> &args,
-    const std::shared_ptr<CV::Token> &token,
-    const std::shared_ptr<CV::Cursor> &cursor,
-    const std::shared_ptr<CV::Context> &ctx,
-    const std::shared_ptr<CV::ControlFlow> &st
+static std::shared_ptr<CV::Data> __CV_STD_JSON_PARSE(
+    const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+    const CV::ContextType &ctx,
+    const CV::CursorType &cursor,
+    const CV::TokenType &token
 ){
-    auto fail = [&]() -> CV::Data* {
-        return buildNumber(prog, 0);
-    };
+    const std::string name = "json:parse";
 
-    auto bodyData = CV::Tools::ErrorCheck::SolveInstruction(
-        prog, name, "body", args, ctx, cursor, st, token, CV::DataType::STRING
-    );
-    if(cursor->error){
-        return fail();
+    if(!__cv_json_expect_exactly(name, args, 1, cursor, token)){
+        return __cv_json_fail_num(ctx);
     }
 
-    auto body = static_cast<CV::DataString*>(bodyData)->value;
+    auto bodyData = __cv_json_unwrap(args[0].second);
+    if(!__cv_json_expect_type(name, bodyData, CV::DataType::STRING, cursor, token)){
+        return __cv_json_fail_num(ctx);
+    }
+
+    auto body = std::static_pointer_cast<CV::DataString>(bodyData)->v;
 
     std::string err;
     auto json = json11::Json::parse(body, err);
@@ -360,21 +341,20 @@ static CV::Data *__CV_STD_JSON_PARSE(
             "Imperative '"+name+"' was provided an invalid JSON input: '"+err+"'",
             token
         );
-        return fail();
+        return __cv_json_fail_num(ctx);
     }
 
-    return unwrapJson(name, json, prog, token, cursor);
+    return __cv_json_unwrap_json(name, json, ctx, token, cursor);
 }
 
 extern "C" void _CV_REGISTER_LIBRARY(
-    const std::shared_ptr<CV::Program> &prog,
-    const std::shared_ptr<CV::Context> &ctx,
-    const std::shared_ptr<CV::Cursor> &cursor
+    const CV::ContextType &ctx,
+    const CV::CursorType &cursor
 ){
     (void)cursor;
 
-    ctx->registerFunctionPtr(prog, "json:write", {"subject", "filename"}, __CV_STD_JSON_WRITE);
-    ctx->registerFunctionPtr(prog, "json:dump", {"subject"}, __CV_STD_JSON_DUMP);
-    ctx->registerFunctionPtr(prog, "json:load", {"filename"}, __CV_STD_JSON_PARSE_FILE);
-    ctx->registerFunctionPtr(prog, "json:parse", {"body"}, __CV_STD_JSON_PARSE);
+    ctx->registerFunction("json:write", {"subject", "filename"}, __CV_STD_JSON_WRITE);
+    ctx->registerFunction("json:dump",  {"subject"}, __CV_STD_JSON_DUMP);
+    ctx->registerFunction("json:load",  {"filename"}, __CV_STD_JSON_PARSE_FILE);
+    ctx->registerFunction("json:parse", {"body"}, __CV_STD_JSON_PARSE);
 }

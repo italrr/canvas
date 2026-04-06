@@ -1,1 +1,1 @@
-[bring:dynamic-library 'libio']
+[import:dynamic-library 'libio']

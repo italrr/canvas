@@ -34,8 +34,8 @@
 
     namespace CV {
 
-        static const CV_NUMBER VERSION[3] = { 0, 9, 1 };
-        static const std::string RELEASE = "Dec. 20th 2025"; 
+        static const CV_NUMBER VERSION[3] = { 1, 0, 0 };
+        static const std::string RELEASE = "April 6th 2026"; 
 
         ////////////////////////////
         //// PLATFORM
@@ -109,6 +109,12 @@
             #define _CV_PLATFORM _CV_PLATFORM_TYPE_UNDEFINED
         #endif  
 
+
+        struct Cursor;
+        struct Data;
+        struct Context;
+        typedef std::shared_ptr<Cursor> CursorType;
+
         ////////////////////////////
         //// TYPES
         ///////////////////////////
@@ -120,8 +126,8 @@
             LIST,
             STORE,
             FUNCTION,
-            THREAD,
-            ANY // not a valid type, just a handy option
+            CONTEXT, 
+            PROXY
         };
 
         static std::string DataTypeName(int v){
@@ -140,10 +146,13 @@
                 };
                 case CV::DataType::FUNCTION: {
                     return "FUNCTION";
-                };    
-                case CV::DataType::THREAD: {
-                    return "THREAD";
-                };                                                                                                                  
+                };     
+                case CV::DataType::CONTEXT: {
+                    return "CONTEXT";
+                };       
+                case CV::DataType::PROXY: {
+                    return "PROXY";
+                };                                                                                                                                      
                 default:
                 case CV::DataType::NIL: {
                     return "NIL";
@@ -151,103 +160,101 @@
             }
         }
 
-        struct Program;
-        struct Context;
         struct Cursor;
         struct Token;
-        struct ControlFlow;        
         struct Data;
-        struct Instruction;
-        struct Data;
+        struct Context;
 
-        using Lambda = std::function<
-            CV::Data*(
-                const std::shared_ptr<CV::Program> &prog,
-                const std::string &name,
-                const std::vector<std::pair<std::string, std::shared_ptr<CV::Instruction>>> &args,
-                const std::shared_ptr<CV::Token> &token,
-                const std::shared_ptr<CV::Cursor> &cursor,
-                const std::shared_ptr<CV::Context> &ctx,
-                const std::shared_ptr<CV::ControlFlow> &st
-            )
-        >;
-
-        using LambdaPtr =
-            CV::Data* (*)(
-                const std::shared_ptr<CV::Program> &prog,
-                const std::string &name,
-                const std::vector<std::pair<std::string, std::shared_ptr<CV::Instruction>>> &args,
-                const std::shared_ptr<CV::Token> &token,
-                const std::shared_ptr<CV::Cursor> &cursor,
-                const std::shared_ptr<CV::Context> &ctx,
-                const std::shared_ptr<CV::ControlFlow> &st
-            );
-            
         struct Data {
-            int id;
-            int ref;
             CV::DataType type;
-            std::mutex mutexRefCount;
             Data();
-            virtual ~Data() = default;
-            virtual void clear(const std::shared_ptr<CV::Program> &prog);
-            virtual void build(const std::shared_ptr<CV::Program> &prog);
-            int getRefCount();
-            void incRefCount();
-            void decRefCount();          
+            virtual std::shared_ptr<CV::Data> unwrap(){ return std::make_shared<CV::Data>(); };
         };
 
-        struct DataNumber : Data {
-            CV_NUMBER value;
-            DataNumber(CV_NUMBER n = 0);
-        };
-
-        struct DataString : Data {
-            std::string value;
-            DataString(const std::string &value = "");
-        };        
-
-        struct DataList : Data {
-            std::vector<int> value;
+        struct DataNumber : Data, std::enable_shared_from_this<CV::DataNumber> {
+            CV_NUMBER v;
+            DataNumber();
+            std::shared_ptr<CV::Data> unwrap() override;
+        };      
+        
+        struct DataString : Data, std::enable_shared_from_this<CV::DataString> {
+            std::string v;
+            DataString();
+            std::shared_ptr<CV::Data> unwrap() override;
+        };   
+        
+        struct DataList : Data, std::enable_shared_from_this<CV::DataList> {
+            std::vector<std::shared_ptr<CV::Data>> v;
             DataList();
-            void clear(const std::shared_ptr<CV::Program> &prog);
-        };       
-
-        struct DataStore : Data {
-            std::unordered_map<std::string, int> value;
+            std::shared_ptr<CV::Data> unwrap() override;
+        };    
+        
+        struct DataStore : Data, std::enable_shared_from_this<CV::DataStore> {
+            std::unordered_map<std::string, std::shared_ptr<CV::Data>> v;
             DataStore();
-            void clear(const std::shared_ptr<CV::Program> &prog);
-        };           
-        
-        struct DataFunction : Data {
-            bool isBinary;
-            bool isVariadic;
-            CV::Lambda lambda;
-            CV::LambdaPtr blambda;
-            int closureCtxId;
-            std::shared_ptr<CV::Token> body;
-            std::vector<std::string> params;
-            DataFunction();
-            void clear(const std::shared_ptr<CV::Program> &prog);
-        };
-        
-        namespace ThreadState {
-            enum ThreadState : int {
-                UNDEFINED = 0,
-                CREATED = 10,
-                STARTED,
-                FINISHED
-            };
+            std::shared_ptr<CV::Data> unwrap() override;
+        };   
 
-            static std::string name(int state){
-                switch(state){
-                    case CV::ThreadState::CREATED:  return "CREATED";
-                    case CV::ThreadState::STARTED:  return "STARTED";
-                    case CV::ThreadState::FINISHED: return "FINISHED";
-                    default:                        return "UNDEFINED";
-                }
-            }
-        }    
+        struct DataFunction : Data, std::enable_shared_from_this<CV::DataFunction> {
+            std::vector<std::string> params;
+            bool isLambda;
+            bool isVariadic;
+            std::shared_ptr<CV::Token> body;
+            std::function<std::shared_ptr<CV::Data>(
+                const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+                const std::shared_ptr<CV::Context> &ctx,
+                const std::shared_ptr<CV::Cursor> &cursor,
+                const std::shared_ptr<CV::Token> &token
+            )> lambda;
+            DataFunction();
+            std::shared_ptr<CV::Data> unwrap() override;
+        }; 
+        
+        struct DataProxy : Data, std::enable_shared_from_this<CV::DataProxy> {
+            std::string pname;
+            int ptype;
+            std::shared_ptr<CV::Data> target;
+            DataProxy();
+            std::shared_ptr<CV::Data> unwrap() override;
+        };         
+
+        struct Context : Data, std::enable_shared_from_this<CV::Context> {
+            std::shared_ptr<Context> head;
+            std::unordered_map<std::string, std::shared_ptr<CV::Data>> data;
+            std::set<std::string> namedNames;
+            Context();
+            std::pair<std::shared_ptr<CV::Context>, std::shared_ptr<CV::Data>> getNamed(const std::string &name);
+            std::shared_ptr<CV::Context> buildContext(bool inherit = true);
+            std::shared_ptr<CV::Data> buildNil();
+            std::shared_ptr<CV::DataNumber> buildNumber(CV_NUMBER v = 0);
+            std::shared_ptr<CV::DataString> buildString(const std::string &v = "");
+            std::shared_ptr<CV::DataList> buildList();
+            std::shared_ptr<CV::DataStore> buildStore();
+            std::shared_ptr<CV::Data> copy(const std::shared_ptr<CV::Data> &target);
+            std::shared_ptr<CV::Data> unwrap() override;
+            void registerFunction(
+                const std::string &name,
+                const std::vector<std::string> &params,
+                const std::function<std::shared_ptr<CV::Data>(
+                    const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+                    const std::shared_ptr<CV::Context> &ctx,
+                    const std::shared_ptr<CV::Cursor> &cursor,
+                    const std::shared_ptr<CV::Token> &token
+                )> &lambda
+            );
+
+            void registerFunction(
+                const std::string &name,
+                const std::function<std::shared_ptr<CV::Data>(
+                    const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+                    const std::shared_ptr<CV::Context> &ctx,
+                    const std::shared_ptr<CV::Cursor> &cursor,
+                    const std::shared_ptr<CV::Token> &token
+                )> &lambda
+            );            
+
+        };  
+        typedef std::shared_ptr<CV::Context> ContextType;
         
         ////////////////////////////
         //// PARSING
@@ -257,8 +264,7 @@
             enum Prefixer : int {
                 UNDEFINED,
                 NAMER,
-                EXPANDER,
-                PARALELLER
+                EXPANDER
             };
             static std::string name(int v){
                 switch(v){
@@ -268,9 +274,6 @@
                     case CV::Prefixer::EXPANDER: {
                         return "EXPANDER";
                     };
-                    case CV::Prefixer::PARALELLER: {
-                        return "PARALELLER";
-                    };
                     case CV::Prefixer::UNDEFINED:
                     default: {
                         return "UNDEFINED";
@@ -278,6 +281,25 @@
                 }
             }
         }
+
+        namespace ControlFlowState {
+            enum ControlFlowState : int {
+                CONTINUE,
+                SKIP,
+                YIELD,
+                RETURN
+            };
+        }
+        
+        struct ControlFlow {
+            int state;
+            std::shared_ptr<CV::Data> payload;
+            ControlFlow(){
+                this->state = CV::ControlFlowState::CONTINUE;
+            }
+        };   
+        
+        typedef std::shared_ptr<CV::ControlFlow> ControlFlowType;
 
         struct Token;
         struct Cursor {
@@ -299,7 +321,6 @@
             void setError(const std::string &title, const std::string &message, int line);
         };
 
-        typedef std::shared_ptr<Cursor> CursorType;
 
         struct Token {
             std::string first;
@@ -316,245 +337,6 @@
         };
 
         typedef std::shared_ptr<Token> TokenType;
-
-        ////////////////////////////
-        //// JIT
-        ///////////////////////////
-
-        #define CV_INS_RANGE_TYPE_CONSTRUCTORS 100
-        #define CV_INS_RANGE_TYPE_CONTROL_FLOW 200
-        #define CV_INS_RANGE_TYPE_PROXY 1000
-        #define CV_INS_PREFIXER_IDENTIFIER_INSTRUCTION 4000000
-
-        namespace InstructionType {
-            enum InstructionType : int {
-                
-                INVALID = 0,
-                NOOP = 10,
-                LIBRAY_IMPORT,
-                
-                // CONSTRUCTORS
-                LET = CV_INS_RANGE_TYPE_CONSTRUCTORS,
-                MUT,
-                CARBON_COPY,
-                CONSTRUCT_LIST,
-                CONSTRUCT_STORE,
-
-                // CONTROL FLOW
-                CF_INTERRUPT = CV_INS_RANGE_TYPE_CONTROL_FLOW,
-                CF_LOOP_DO,
-                CF_LOOP_FOR,
-                CF_LOOP_ITER,            
-                CF_INVOKE_FUNCTION,
-                CF_RAW_TOKEN_REFERENCE,
-                CF_AWAIT,
-
-                // PROXIES
-                PROXY_STATIC = CV_INS_RANGE_TYPE_PROXY,
-                PROXY_PROMISE,
-                PROXY_DYNAMIC,
-                PROXY_NAMER,
-                PROXY_EXPANDER,
-                PROXY_PARALELER,
-                PROXY_ACCESS,
-            };
-        }
-
-        namespace InterruptType {
-            enum InterruptType : int {
-                UNDEFINED = 0,
-                RETURN = 10,
-                YIELD,
-                SKIP
-            };
-            static std::string name(int t){
-                switch(t){
-                    case CV::InterruptType::RETURN: {
-                        return "RETURN";
-                    };
-                    case CV::InterruptType::YIELD: {
-                        return "YIELD";
-                    };
-                    case CV::InterruptType::SKIP: {
-                        return "SKIP";
-                    };
-                    default: {
-                        return "UNDEFINED";
-                    };
-
-                }
-            }
-            static int type(const std::string &name){
-                if(name == "YIELD"){
-                    return CV::InterruptType::YIELD;
-                }else
-                if(name == "RETURN"){
-                    return CV::InterruptType::RETURN;
-                }else
-                if(name == "SKIP"){
-                    return CV::InterruptType::SKIP;
-                }else{
-                    return CV::InterruptType::UNDEFINED;
-                }
-            }
-        }
-
-        namespace ControlFlowState {
-            enum ControlFlowState : int {
-                CONTINUE,
-                SKIP,
-                YIELD,
-                RETURN,
-                CRASH
-            };
-        }
-
-        struct Instruction {
-            int id;
-            int type;
-            std::vector<int> params;
-            std::vector<int> data;
-            std::vector<std::string> literal;
-            std::shared_ptr<Token> token;
-            int next;
-            int prev;
-            Instruction(){
-                this->next = CV::InstructionType::INVALID;
-                this->prev = CV::InstructionType::INVALID;
-                this->type = CV::InstructionType::INVALID;
-                this->id = CV::InstructionType::INVALID;
-            }
-        };
-
-        typedef std::shared_ptr<CV::Instruction> InsType;
-
-        struct ControlFlow {
-            int state;
-            int ctx;
-            int ref;
-            int next;
-            int current;
-            int prev;
-            CV::Data* payload;
-            ControlFlow(){
-                this->state = CV::ControlFlowState::CONTINUE;
-                this->ref = 0;
-                this->ctx = 0;
-                this->next = CV::InstructionType::INVALID;
-                this->current = CV::InstructionType::INVALID;
-                this->prev = CV::InstructionType::INVALID;                
-            }
-        };
-        
-        typedef std::shared_ptr<CV::ControlFlow> CFType;
-
-        ////////////////////////////
-        //// Context
-        ///////////////////////////        
-        struct Context {
-            int id;
-            int top;
-            std::set<int> dependants;
-            std::mutex mutexData;
-            std::mutex mutexNames;
-            std::mutex mutexDependants;
-            std::unordered_map<std::string, int> names;
-            std::set<int> data;
-            Context(int root = -1);
-            void insertDependant(int ctxId);
-            bool removeDependant(int id);
-            bool isNamed(int dataId);
-            std::pair<int,int> getNamed(const std::shared_ptr<CV::Program> &prog, const std::string &name, bool localOnly = false);
-            bool isName(const std::string &name);
-            void setName(const std::string &name, int id);
-            bool removeName(int id);
-            bool isDataIn(int id);
-            bool setData(const std::shared_ptr<CV::Program> &prog, int dataId);
-            bool removeData(const std::shared_ptr<CV::Program> &prog, int dataId);
-            void clear(const std::shared_ptr<CV::Program> &prog);
-            void registerFunction(
-                const std::shared_ptr<CV::Program> &prog,
-                const std::string &name,
-                const std::vector<std::string> &params,
-                const CV::Lambda &lambda
-            );
-            void registerFunction(
-                const std::shared_ptr<CV::Program> &prog,
-                const std::string &name,
-                const CV::Lambda &lambda
-            );   
-            void registerFunctionPtr(
-                const std::shared_ptr<CV::Program> &prog,
-                const std::string &name,
-                const std::vector<std::string> &params,
-                const CV::LambdaPtr lambda
-            );
-
-            void registerFunctionPtr(
-                const std::shared_ptr<CV::Program> &prog,
-                const std::string &name,
-                const CV::LambdaPtr lambda
-            );                     
-        };
-        typedef std::shared_ptr<CV::Context> ContextType;
-        
-        ////////////////////////////
-        //// Program
-        ///////////////////////////
-        struct Program : std::enable_shared_from_this<Program> {
-            bool shuttingDown;
-            std::mutex mutexContext;
-            std::mutex mutexStack;
-            std::mutex mutexIns;
-            std::mutex loadedDynamicLibsMutex;
-
-            std::unordered_map<int, std::shared_ptr<CV::Context>> contexts;
-            std::unordered_map<int, CV::Data*> stack;
-            std::unordered_map<int, CV::InsType> instructions;
-
-            std::mutex prefetchMutex;
-            std::unordered_map<int, int> prefetched;
-
-            CV::ContextType root;
-
-            std::unordered_map<unsigned, std::pair<void*,std::string>> loadedDynamicLibs;
-
-            Program();
-            ~Program();
-
-            void setPrefetch(int insId, int v);
-            bool removePrefetch(int insId);
-            int getPrefetch(int id);
-            bool isPrefetched(int id);
-            void clearPrefetch();            
-
-
-            void end();
-            CV::InsType createInstruction(unsigned type, const std::shared_ptr<CV::Token> &token);
-            std::shared_ptr<CV::Instruction> &getIns(int id);
-
-            bool swapId(int fdataId, int tdataId);
-            bool placeData(int dataId, int ctxId);
-            bool moveData(int dataId, int fctxId, int tctxId);
-            
-            CV::ContextType getContext(int id);
-            CV::ContextType createContext(int root = -1);
-            bool deleteContext(int id);
-
-            CV::Data *getData(int dataId);
-
-            int allocateData(CV::Data *ref);
-            bool deallocateData(int id);
-
-            CV::Data* buildNil();
-            CV::DataNumber* buildNumber(CV_NUMBER n);
-            CV::DataString* buildString(const std::string &s);
-            CV::DataList* buildList();
-
-            void quickGC();
-        };
-
-        typedef std::shared_ptr<CV::Program> ProgramType;
 
         ////////////////////////////
         //// TOOLS
@@ -583,111 +365,42 @@
             std::string lower(const std::string &in);
             std::string upper(const std::string &in);
             std::string fileExtension(const std::string &filename);
-            bool isInList(const std::string &v, const std::vector<std::string> &list);
-            std::shared_ptr<CV::Instruction> fetchInstruction(
-                const std::string &name,
-                const std::vector<std::pair<std::string, std::shared_ptr<CV::Instruction>>> &ins
-            );
-            namespace ErrorCheck {
-                bool IsType(
-                    const std::string &fname,
-                    const std::string &vname,
-                    CV::Data* v,
-                    const std::shared_ptr<CV::Cursor> &cursor,
-                    const std::shared_ptr<CV::ControlFlow> &st,
-                    const CV::TokenType &token,
-                    int expType
-                );
-                bool AreAllType(
-                    const std::string &name,
-                    const std::vector<CV::Data*> &params,
-                    const std::shared_ptr<CV::Cursor> &cursor,
-                    const std::shared_ptr<CV::ControlFlow> &st,
-                    const CV::TokenType &token,
-                    int expType
-                );
-                std::shared_ptr<CV::Instruction> FetchInstruction(
-                    const std::string &fname,
-                    const std::string &vname,
-                    const std::vector<std::pair<std::string, std::shared_ptr<CV::Instruction>>> &ins,
-                    const std::shared_ptr<CV::Cursor> &cursor,
-                    const std::shared_ptr<CV::ControlFlow> &st,
-                    const CV::TokenType &token
-                );   
-                
-                CV::Data *SolveInstruction(
-                    const std::shared_ptr<CV::Program> &prog,
-                    const std::string &fname,
-                    const std::string &vname,
-                    const std::vector<std::pair<std::string, std::shared_ptr<CV::Instruction>>> &ins,
-                    const std::shared_ptr<CV::Context> &ctx,
-                    const std::shared_ptr<CV::Cursor> &cursor,
-                    const std::shared_ptr<CV::ControlFlow> &st,
-                    const CV::TokenType &token,
-                    int expType
-                );        
-                std::shared_ptr<CV::Instruction> FetchInstructionIfExists(
-                    const std::string &vname,
-                    const std::vector<std::pair<std::string, std::shared_ptr<CV::Instruction>>> &ins
-                );
-                CV::Data *SolveInstructionIfExists(
-                    const std::shared_ptr<CV::Program> &prog,
-                    const std::string &fname,
-                    const std::string &vname,
-                    const std::vector<std::pair<std::string, std::shared_ptr<CV::Instruction>>> &ins,
-                    const std::shared_ptr<CV::Context> &ctx,
-                    const std::shared_ptr<CV::Cursor> &cursor,
-                    const std::shared_ptr<CV::ControlFlow> &st,
-                    const std::shared_ptr<CV::Token> &token,
-                    int expType
-                );                
-            }
+            bool isInList(const std::string &v, const std::vector<std::string> &list);   
+        }
 
-        }        
-
-
-        ////////////////////////////
-        //// Data To Text
-        ///////////////////////////
-        std::string DataToText(const std::shared_ptr<CV::Program> &prog, CV::Data *t);        
-
-
-        ////////////////////////////
-        //// API
-        ///////////////////////////        
-        CV::InsType Compile(const std::string &input, const CV::ProgramType &prog, const CV::CursorType &cursor, const CV::ContextType &ctx = NULL);
-        CV::InsType Compile(const CV::TokenType &input, const CV::ProgramType &prog, const CV::CursorType &cursor, const CV::ContextType &ctx);
-        CV::InsType Translate(const CV::TokenType &token, const CV::ProgramType &prog, const CV::ContextType &ctx, const CV::CursorType &cursor);
-        CV::Data *Execute(
-            const CV::InsType &entry,
-            const CV::ProgramType &prog,
-            const CV::CursorType &cursor,
-            const CV::ContextType &ctx,
-            CFType cf,
-            bool followNext = true
-        );
-        void SetupCore(const CV::ProgramType &prog);
         void SetUseColor(bool v);
-        std::string GetPrompt();
-        bool GetBooleanValue(CV::Data *input);
-        CV::Data *Copy(
-            const std::shared_ptr<CV::Program> &prog,
-            CV::Data *subject            
+        std::string GetPrompt();  
+        std::string DataToText(const std::shared_ptr<CV::Data> &t);      
+
+        bool CoreSetup(
+            const std::shared_ptr<CV::Context> &ctx
         );
-        int Import(
+
+        std::vector<CV::TokenType> BuildTree(
+            const std::string &input,
+            const CV::CursorType &cursor
+        );        
+
+        std::shared_ptr<CV::Data> Interpret(
+            const CV::TokenType &token,
+            const CV::CursorType &cursor,
+            const CV::ControlFlowType &cf,
+            const CV::ContextType &ctx
+        );
+
+        std::shared_ptr<CV::Data> Import(
             const std::string &fname,
-            const std::shared_ptr<CV::Program> &prog,
-            const std::shared_ptr<CV::Context> &ctx,
-            const std::shared_ptr<CV::Cursor> &cursor
+            const CV::ContextType &ctx,
+            const CV::CursorType &cursor
         );
-        int ImportDynamicLibrary(
+
+        std::shared_ptr<CV::Data> ImportDynamicLibrary(
             const std::string &path,
             const std::string &fname,
-            const std::shared_ptr<CV::Program> &prog,
-            const std::shared_ptr<CV::Context> &ctx,
-            const std::shared_ptr<CV::Cursor> &cursor
+            const CV::ContextType &ctx,
+            const CV::CursorType &cursor
         );        
-     
+
     }
 
 #endif
