@@ -254,9 +254,8 @@ namespace CV {
         }
 
         bool fileExists(const std::string &path){
-			struct stat tt;
-			stat(path.c_str(), &tt);
-			return S_ISREG(tt.st_mode);	            
+			struct stat tt{};
+			return stat(path.c_str(), &tt) == 0 && S_ISREG(tt.st_mode);
         }
         
 		std::string fileExtension(const std::string &filename){
@@ -331,7 +330,7 @@ void CV::Cursor::setError(const std::string &title, const std::string &message, 
     this->title = title;
     this->message = message;
     this->line = line;
-    this->subject = subject;
+    this->subject = nullptr;
     this->error = true;
     accessMutex.unlock();
 }
@@ -402,6 +401,10 @@ CV::Data::Data(){
 CV::DataNumber::DataNumber(){
     this->type = CV::DataType::NUMBER;
 }
+CV::DataNumber::DataNumber(CV_NUMBER nv){
+    this->type = CV::DataType::NUMBER;
+    this->v = nv;
+}
 std::shared_ptr<CV::Data> CV::DataNumber::unwrap(){
     return shared_from_this();
 }
@@ -410,6 +413,10 @@ std::shared_ptr<CV::Data> CV::DataNumber::unwrap(){
 // STRING
 //
 CV::DataString::DataString(){
+    this->type = CV::DataType::STRING;
+}
+CV::DataString::DataString(const std::string &v){
+    this->v = v;
     this->type = CV::DataType::STRING;
 }
 std::shared_ptr<CV::Data> CV::DataString::unwrap(){
@@ -514,6 +521,7 @@ void CV::Context::registerFunction(
     const std::string &name,
     const std::vector<std::string> &params,
     const std::function<std::shared_ptr<CV::Data>(
+        const std::string &fnName,
         const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
         const std::shared_ptr<CV::Context> &ctx,
         const std::shared_ptr<CV::Cursor> &cursor,
@@ -540,6 +548,7 @@ void CV::Context::registerFunction(
 void CV::Context::registerFunction(
     const std::string &name,
     const std::function<std::shared_ptr<CV::Data>(
+        const std::string &fnName,
         const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
         const std::shared_ptr<CV::Context> &ctx,
         const std::shared_ptr<CV::Cursor> &cursor,
@@ -560,6 +569,49 @@ void CV::Context::registerFunction(
     fn->lambda = lambda;
 
     this->data[name] = fn;
+}
+
+void CV::Context::registerFunction(
+    const std::string &name,
+    const std::vector<std::string> &params,
+    const std::function<std::shared_ptr<CV::Data>(
+        const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+        const std::shared_ptr<CV::Context> &ctx,
+        const std::shared_ptr<CV::Cursor> &cursor,
+        const std::shared_ptr<CV::Token> &token
+    )> &lambda
+){
+    this->registerFunction(name, params, [lambda](
+        const std::string &fnName,
+        const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+        const std::shared_ptr<CV::Context> &ctx,
+        const std::shared_ptr<CV::Cursor> &cursor,
+        const std::shared_ptr<CV::Token> &token
+    ) -> std::shared_ptr<CV::Data> {
+        (void)fnName;
+        return lambda(args, ctx, cursor, token);
+    });
+}
+
+void CV::Context::registerFunction(
+    const std::string &name,
+    const std::function<std::shared_ptr<CV::Data>(
+        const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+        const std::shared_ptr<CV::Context> &ctx,
+        const std::shared_ptr<CV::Cursor> &cursor,
+        const std::shared_ptr<CV::Token> &token
+    )> &lambda
+){
+    this->registerFunction(name, [lambda](
+        const std::string &fnName,
+        const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+        const std::shared_ptr<CV::Context> &ctx,
+        const std::shared_ptr<CV::Cursor> &cursor,
+        const std::shared_ptr<CV::Token> &token
+    ) -> std::shared_ptr<CV::Data> {
+        (void)fnName;
+        return lambda(args, ctx, cursor, token);
+    });
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -614,6 +666,9 @@ void CV::Token::refresh(){
 
 static std::vector<CV::TokenType> ParseTokens(std::string input, char sep, const std::shared_ptr<CV::Cursor> &cursor, int startLine){
     std::vector<std::shared_ptr<CV::Token>> tokens; 
+    if(input.empty()){
+        return tokens;
+    }
     std::string buffer;
     int open = 0;
     bool onString = false;
@@ -1193,7 +1248,7 @@ std::shared_ptr<CV::Data> CV::Interpret(
     if(token->first.size() == 0){
         // Instruction list
         if(areAllFunctions(token, ctx) && token->inner.size() >= 2){
-            return Interpret(token, cursor, cf, ctx);
+            return __cv_run_children(token, 0, cursor, cf, ctx);
         }else
         if(areAllNames(token, ctx)){
             return bStoreConstruct(token->first, token, token->inner, ctx);
@@ -1235,7 +1290,6 @@ std::shared_ptr<CV::Data> CV::Interpret(
             }
 
             auto r = ctx->buildNil();
-            cf->state = type;
 
             if(token->inner.size() > 0){
                 r = Interpret(token->inner[0], cursor, cf, ctx);
@@ -1245,6 +1299,7 @@ std::shared_ptr<CV::Data> CV::Interpret(
                 }
             }
 
+            cf->state = type;
             return r;
         }else   
         /*
@@ -1259,8 +1314,20 @@ std::shared_ptr<CV::Data> CV::Interpret(
             fn->isLambda = false;
             fn->body = token->inner[1];
 
+            auto closureCtx = ctx;
+            while(closureCtx){
+                for(const auto &it : closureCtx->data){
+                    if(fn->closure.count(it.first) == 0){
+                        fn->closure[it.first] = it.second;
+                    }
+                }
+                closureCtx = closureCtx->head;
+            }
+
             auto paramNameList = token->inner[0]->inner;
-            paramNameList.insert(paramNameList.begin(), token->inner[0]);
+            if(!token->inner[0]->first.empty()){
+                paramNameList.insert(paramNameList.begin(), token->inner[0]);
+            }
 
             auto hasParam = [&](const std::string &name){
                 for(const auto &p : fn->params){
@@ -1366,9 +1433,14 @@ std::shared_ptr<CV::Data> CV::Interpret(
             switch(subject->type){
                 case CV::DataType::STRING: {
                     std::static_pointer_cast<CV::DataString>(subject)->v = std::static_pointer_cast<CV::DataString>(target)->v;
+                    break;
                 };
                 case CV::DataType::NUMBER: {
                     std::static_pointer_cast<CV::DataNumber>(subject)->v = std::static_pointer_cast<CV::DataNumber>(target)->v;
+                    break;
+                };
+                default: {
+                    break;
                 };                
             }
 
@@ -2376,6 +2448,20 @@ std::shared_ptr<CV::Data> CV::Interpret(
                         }
 
 
+                        if(!fn->isVariadic && allParams.size() > fn->params.size()){
+                            cursor->setError(
+                                CV_ERROR_MSG_WRONG_OPERANDS,
+                                CV::Tools::format(
+                                    "Function '%s' expects exactly (%i) argument(s), provided %i",
+                                    qname.c_str(),
+                                    static_cast<int>(fn->params.size()),
+                                    static_cast<int>(allParams.size())
+                                ),
+                                token
+                            );
+                            return ctx->buildNil();
+                        }
+
                         // Check for missing names
                         if(!fn->isVariadic){
                             for(int i = 0; i < fn->params.size(); ++i){
@@ -2395,36 +2481,54 @@ std::shared_ptr<CV::Data> CV::Interpret(
                         }
 
                         if(fn->isLambda){
-                            auto r = fn->lambda(allParams, fnCtx, cursor, token);
+                            auto r = fn->lambda(
+                                qname,
+                                allParams,
+                                fnCtx,
+                                cursor,
+                                token
+                            );
                             if(cursor->error){
                                 cursor->subject = token;
                                 return ctx->buildNil();
                             }
                             return r;
                         }else{
-                            auto paramCtx = fnCtx->buildContext(true);
+                            auto closureCtx = std::make_shared<CV::Context>();
+                            closureCtx->data = fn->closure;
+                            closureCtx->data[qname] = fn;
+                            auto paramCtx = closureCtx->buildContext(true);
+                            auto fnCf = std::make_shared<CV::ControlFlow>();
                             if(fn->isVariadic){
                                 auto list = paramCtx->buildList();
                                 paramCtx->data["@"] = list;
                                 for(int i = 0; i < allParams.size(); ++i){
                                     list->v.push_back(allParams[i].second);
                                 }
-                                auto r = Interpret(fn->body, cursor, cf, paramCtx);
+                                auto r = Interpret(fn->body, cursor, fnCf, paramCtx);
                                 if(cursor->error){
                                     cursor->subject = token;
                                     return ctx->buildNil();
-                                }  
+                                }
+                                if(fnCf->state == CV::ControlFlowState::YIELD){
+                                    cf->state = CV::ControlFlowState::YIELD;
+                                    cf->payload = fnCf->payload;
+                                }
                                 return r;                              
                             }else{
                                 for(int i = 0; i < allParams.size(); ++i){
                                     auto &a = allParams[i];
                                     paramCtx->data[a.first] = a.second;
                                 }
-                                auto r = Interpret(fn->body, cursor, cf, paramCtx);
+                                auto r = Interpret(fn->body, cursor, fnCf, paramCtx);
                                 if(cursor->error){
                                     cursor->subject = token;
                                     return ctx->buildNil();
-                                }  
+                                }
+                                if(fnCf->state == CV::ControlFlowState::YIELD){
+                                    cf->state = CV::ControlFlowState::YIELD;
+                                    cf->payload = fnCf->payload;
+                                }
                                 return r;                                
                             }
                         }
@@ -2547,6 +2651,7 @@ std::shared_ptr<CV::Data> CV::Context::copy(
             result->isLambda = from->isLambda;
             result->isVariadic= from->isVariadic;
             result->body = from->body;
+            result->closure = from->closure;
             result->lambda = from->lambda;
             return result;
         }
@@ -2565,6 +2670,15 @@ std::shared_ptr<CV::Data> CV::Context::copy(
             return this->buildNil();
         }        
     }
+}
+
+void CV::SetColorTableText(const std::unordered_map<int, std::string> &ct){
+    CV::Tools::ColorTable::TextColorCodes = ct;
+    CV::Tools::ColorTable::BoldTextColorCodes = ct;
+}
+
+void CV::SetColorTableBackground(const std::unordered_map<int, std::string> &ct){
+    CV::Tools::ColorTable::BackgroundColorCodes = ct;
 }
 
 void CV::SetUseColor(bool v){
@@ -2805,6 +2919,7 @@ static void __cv_register_numeric_conditional(
         fname,
         {"a", "b"},
         [fname, comparator](
+            const std::string &fnName,
             const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
             const std::shared_ptr<CV::Context> &fctx,
             const CV::CursorType &cursor,
@@ -2844,16 +2959,19 @@ bool CV::CoreSetup(
     ////////////////////////////
 
     ctx->registerFunction("+",
-        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
-           const std::shared_ptr<CV::Context> &fctx,
-           const CV::CursorType &cursor,
-           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+        [](
+            const std::string &fnName,
+            const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+            const std::shared_ptr<CV::Context> &fctx,
+            const CV::CursorType &cursor,
+            const CV::TokenType &token
+        ) -> std::shared_ptr<CV::Data> {
 
             auto result = fctx->buildNumber(0);
 
             for(int i = 0; i < static_cast<int>(args.size()); ++i){
                 auto v = __cv_unwrap(args[i].second);
-                if(!__cv_expect_type("+", v, CV::DataType::NUMBER, cursor, token)){
+                if(!__cv_expect_type(fnName, v, CV::DataType::NUMBER, cursor, token)){
                     return fctx->buildNil();
                 }
                 result->v += std::static_pointer_cast<CV::DataNumber>(v)->v;
@@ -2864,17 +2982,20 @@ bool CV::CoreSetup(
     );
 
     ctx->registerFunction("-",
-        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
-           const std::shared_ptr<CV::Context> &fctx,
-           const CV::CursorType &cursor,
-           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+        [](
+            const std::string &fnName,
+            const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+            const std::shared_ptr<CV::Context> &fctx,
+            const CV::CursorType &cursor,
+            const CV::TokenType &token
+        ) -> std::shared_ptr<CV::Data> {
 
-            if(!__cv_expect_at_least("-", args, 1, cursor, token)){
+            if(!__cv_expect_at_least(fnName, args, 1, cursor, token)){
                 return fctx->buildNil();
             }
 
             auto first = __cv_unwrap(args[0].second);
-            if(!__cv_expect_type("-", first, CV::DataType::NUMBER, cursor, token)){
+            if(!__cv_expect_type(fnName, first, CV::DataType::NUMBER, cursor, token)){
                 return fctx->buildNil();
             }
 
@@ -2882,7 +3003,7 @@ bool CV::CoreSetup(
 
             for(int i = 1; i < static_cast<int>(args.size()); ++i){
                 auto v = __cv_unwrap(args[i].second);
-                if(!__cv_expect_type("-", v, CV::DataType::NUMBER, cursor, token)){
+                if(!__cv_expect_type(fnName, v, CV::DataType::NUMBER, cursor, token)){
                     return fctx->buildNil();
                 }
                 result->v -= std::static_pointer_cast<CV::DataNumber>(v)->v;
@@ -2893,16 +3014,19 @@ bool CV::CoreSetup(
     );
 
     ctx->registerFunction("*",
-        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
-           const std::shared_ptr<CV::Context> &fctx,
-           const CV::CursorType &cursor,
-           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+        [](
+            const std::string &fnName,
+            const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+            const std::shared_ptr<CV::Context> &fctx,
+            const CV::CursorType &cursor,
+            const CV::TokenType &token
+        ) -> std::shared_ptr<CV::Data> {
 
             auto result = fctx->buildNumber(1);
 
             for(int i = 0; i < static_cast<int>(args.size()); ++i){
                 auto v = __cv_unwrap(args[i].second);
-                if(!__cv_expect_type("*", v, CV::DataType::NUMBER, cursor, token)){
+                if(!__cv_expect_type(fnName, v, CV::DataType::NUMBER, cursor, token)){
                     return fctx->buildNil();
                 }
                 result->v *= std::static_pointer_cast<CV::DataNumber>(v)->v;
@@ -2913,17 +3037,20 @@ bool CV::CoreSetup(
     );
 
     ctx->registerFunction("/",
-        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
-           const std::shared_ptr<CV::Context> &fctx,
-           const CV::CursorType &cursor,
-           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+        [](
+            const std::string &fnName,
+            const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+            const std::shared_ptr<CV::Context> &fctx,
+            const CV::CursorType &cursor,
+            const CV::TokenType &token
+        ) -> std::shared_ptr<CV::Data> {
 
-            if(!__cv_expect_at_least("/", args, 1, cursor, token)){
+            if(!__cv_expect_at_least(fnName, args, 1, cursor, token)){
                 return fctx->buildNil();
             }
 
             auto first = __cv_unwrap(args[0].second);
-            if(!__cv_expect_type("/", first, CV::DataType::NUMBER, cursor, token)){
+            if(!__cv_expect_type(fnName, first, CV::DataType::NUMBER, cursor, token)){
                 return fctx->buildNil();
             }
 
@@ -2931,7 +3058,7 @@ bool CV::CoreSetup(
 
             for(int i = 1; i < static_cast<int>(args.size()); ++i){
                 auto v = __cv_unwrap(args[i].second);
-                if(!__cv_expect_type("/", v, CV::DataType::NUMBER, cursor, token)){
+                if(!__cv_expect_type(fnName, v, CV::DataType::NUMBER, cursor, token)){
                     return fctx->buildNil();
                 }
 
@@ -2957,10 +3084,13 @@ bool CV::CoreSetup(
     ////////////////////////////
 
     ctx->registerFunction("and",
-        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
-           const std::shared_ptr<CV::Context> &fctx,
-           const CV::CursorType &cursor,
-           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+        [](
+            const std::string &fnName,
+            const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+            const std::shared_ptr<CV::Context> &fctx,
+            const CV::CursorType &cursor,
+            const CV::TokenType &token
+        ) -> std::shared_ptr<CV::Data> {
             (void)cursor;
             (void)token;
 
@@ -2978,12 +3108,15 @@ bool CV::CoreSetup(
     );
 
     ctx->registerFunction("not", {"value"},
-        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
-           const std::shared_ptr<CV::Context> &fctx,
-           const CV::CursorType &cursor,
-           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+        [](
+            const std::string &fnName,
+            const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+            const std::shared_ptr<CV::Context> &fctx,
+            const CV::CursorType &cursor,
+            const CV::TokenType &token
+        ) -> std::shared_ptr<CV::Data> {
 
-            if(!__cv_expect_exactly("not", args, 1, cursor, token)){
+            if(!__cv_expect_exactly(fnName, args, 1, cursor, token)){
                 return fctx->buildNil();
             }
 
@@ -3009,20 +3142,23 @@ bool CV::CoreSetup(
     ////////////////////////////
 
     ctx->registerFunction("nth", {"list", "index"},
-        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
-           const std::shared_ptr<CV::Context> &fctx,
-           const CV::CursorType &cursor,
-           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+        [](
+            const std::string &fnName,
+            const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+            const std::shared_ptr<CV::Context> &fctx,
+            const CV::CursorType &cursor,
+            const CV::TokenType &token
+        ) -> std::shared_ptr<CV::Data> {
 
-            if(!__cv_expect_exactly("nth", args, 2, cursor, token)){
+            if(!__cv_expect_exactly(fnName, args, 2, cursor, token)){
                 return fctx->buildNil();
             }
 
             auto listData = __cv_unwrap(args[0].second);
             auto indexData = __cv_unwrap(args[1].second);
 
-            if(!__cv_expect_type("nth", listData, CV::DataType::LIST, cursor, token) ||
-               !__cv_expect_type("nth", indexData, CV::DataType::NUMBER, cursor, token)){
+            if(!__cv_expect_type(fnName, listData, CV::DataType::LIST, cursor, token) ||
+               !__cv_expect_type(fnName, indexData, CV::DataType::NUMBER, cursor, token)){
                 return fctx->buildNil();
             }
 
@@ -3045,12 +3181,15 @@ bool CV::CoreSetup(
     );
 
     ctx->registerFunction("length", {"subject"},
-        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
-           const std::shared_ptr<CV::Context> &fctx,
-           const CV::CursorType &cursor,
-           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+        [](
+            const std::string &fnName,
+            const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+            const std::shared_ptr<CV::Context> &fctx,
+            const CV::CursorType &cursor,
+            const CV::TokenType &token
+        ) -> std::shared_ptr<CV::Data> {
 
-            if(!__cv_expect_exactly("length", args, 1, cursor, token)){
+            if(!__cv_expect_exactly(fnName, args, 1, cursor, token)){
                 return fctx->buildNil();
             }
 
@@ -3077,12 +3216,15 @@ bool CV::CoreSetup(
     );
 
     ctx->registerFunction(">>", {"subject", "target"},
-        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
-           const std::shared_ptr<CV::Context> &fctx,
-           const CV::CursorType &cursor,
-           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+        [](
+            const std::string &fnName,
+            const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+            const std::shared_ptr<CV::Context> &fctx,
+            const CV::CursorType &cursor,
+            const CV::TokenType &token
+        ) -> std::shared_ptr<CV::Data> {
 
-            if(!__cv_expect_exactly(">>", args, 2, cursor, token)){
+            if(!__cv_expect_exactly(fnName, args, 2, cursor, token)){
                 return fctx->buildNil();
             }
 
@@ -3103,17 +3245,20 @@ bool CV::CoreSetup(
     );
 
     ctx->registerFunction("<<", {"subject"},
-        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
-           const std::shared_ptr<CV::Context> &fctx,
-           const CV::CursorType &cursor,
-           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+        [](
+            const std::string &fnName,
+            const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+            const std::shared_ptr<CV::Context> &fctx,
+            const CV::CursorType &cursor,
+            const CV::TokenType &token
+        ) -> std::shared_ptr<CV::Data> {
 
-            if(!__cv_expect_exactly("<<", args, 1, cursor, token)){
+            if(!__cv_expect_exactly(fnName, args, 1, cursor, token)){
                 return fctx->buildNil();
             }
 
             auto data = __cv_unwrap(args[0].second);
-            if(!__cv_expect_type("<<", data, CV::DataType::LIST, cursor, token)){
+            if(!__cv_expect_type(fnName, data, CV::DataType::LIST, cursor, token)){
                 return fctx->buildNil();
             }
 
@@ -3129,15 +3274,18 @@ bool CV::CoreSetup(
     );
 
     ctx->registerFunction("l-sub",
-        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
-           const std::shared_ptr<CV::Context> &fctx,
-           const CV::CursorType &cursor,
-           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+        [](
+            const std::string &fnName,
+            const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+            const std::shared_ptr<CV::Context> &fctx,
+            const CV::CursorType &cursor,
+            const CV::TokenType &token
+        ) -> std::shared_ptr<CV::Data> {
 
             if(static_cast<int>(args.size()) != 2 && static_cast<int>(args.size()) != 3){
                 cursor->setError(
                     CV_ERROR_MSG_MISUSED_FUNCTION,
-                    "'l-sub' expects 2 or 3 arguments",
+                    "'"+fnName+"' expects 2 or 3 arguments",
                     token
                 );
                 return fctx->buildNil();
@@ -3146,8 +3294,8 @@ bool CV::CoreSetup(
             auto listData = __cv_unwrap(args[0].second);
             auto fromData = __cv_unwrap(args[1].second);
 
-            if(!__cv_expect_type("l-sub", listData, CV::DataType::LIST, cursor, token) ||
-               !__cv_expect_type("l-sub", fromData, CV::DataType::NUMBER, cursor, token)){
+            if(!__cv_expect_type(fnName, listData, CV::DataType::LIST, cursor, token) ||
+               !__cv_expect_type(fnName, fromData, CV::DataType::NUMBER, cursor, token)){
                 return fctx->buildNil();
             }
 
@@ -3157,7 +3305,7 @@ bool CV::CoreSetup(
             int to = static_cast<int>(list->v.size()) - 1;
             if(static_cast<int>(args.size()) == 3){
                 auto toData = __cv_unwrap(args[2].second);
-                if(!__cv_expect_type("l-sub", toData, CV::DataType::NUMBER, cursor, token)){
+                if(!__cv_expect_type(fnName, toData, CV::DataType::NUMBER, cursor, token)){
                     return fctx->buildNil();
                 }
                 to = static_cast<int>(std::static_pointer_cast<CV::DataNumber>(toData)->v);
@@ -3184,10 +3332,13 @@ bool CV::CoreSetup(
     );
 
     ctx->registerFunction("l-splice",
-        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
-           const std::shared_ptr<CV::Context> &fctx,
-           const CV::CursorType &cursor,
-           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+        [](
+            const std::string &fnName,
+            const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+            const std::shared_ptr<CV::Context> &fctx,
+            const CV::CursorType &cursor,
+            const CV::TokenType &token
+        ) -> std::shared_ptr<CV::Data> {
             (void)cursor;
             (void)token;
 
@@ -3200,10 +3351,13 @@ bool CV::CoreSetup(
     );
 
     ctx->registerFunction("s-splice",
-        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
-           const std::shared_ptr<CV::Context> &fctx,
-           const CV::CursorType &cursor,
-           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+        [](
+            const std::string &fnName,
+            const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+            const std::shared_ptr<CV::Context> &fctx,
+            const CV::CursorType &cursor,
+            const CV::TokenType &token
+        ) -> std::shared_ptr<CV::Data> {
 
             auto result = fctx->buildStore();
 
@@ -3212,7 +3366,7 @@ bool CV::CoreSetup(
                 if(vname.empty()){
                     cursor->setError(
                         CV_ERROR_MSG_WRONG_OPERANDS,
-                        "Function 's-splice' expects every operand to have a name",
+                        "Function '"+fnName+"' expects every operand to have a name",
                         token
                     );
                     return fctx->buildNil();
@@ -3223,23 +3377,51 @@ bool CV::CoreSetup(
             return std::static_pointer_cast<CV::Data>(result);
         }
     );
+	
+    ctx->registerFunction("s-join",
+        [](
+            const std::string &fnName,
+            const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+            const std::shared_ptr<CV::Context> &fctx,
+            const CV::CursorType &cursor,
+            const CV::TokenType &token
+        ) -> std::shared_ptr<CV::Data> {
+
+            std::string result;
+
+            for(int i = 0; i < static_cast<int>(args.size()); ++i){
+                auto value = __cv_unwrap(args[i].second);
+                if(!__cv_expect_type(fnName, value, CV::DataType::STRING, cursor, token)){
+                    return fctx->buildNil();
+                }
+                result += std::static_pointer_cast<CV::DataString>(value)->v;
+            }
+
+            return std::static_pointer_cast<CV::Data>(
+				fctx->buildString(result)
+			);
+        }
+    );	
 
     ////////////////////////////
     //// MUTATORS
     ////////////////////////////
 
     ctx->registerFunction("++", {"subject"},
-        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
-           const std::shared_ptr<CV::Context> &fctx,
-           const CV::CursorType &cursor,
-           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+        [](
+            const std::string &fnName,
+            const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+            const std::shared_ptr<CV::Context> &fctx,
+            const CV::CursorType &cursor,
+            const CV::TokenType &token
+        ) -> std::shared_ptr<CV::Data> {
 
-            if(!__cv_expect_exactly("++", args, 1, cursor, token)){
+            if(!__cv_expect_exactly(fnName, args, 1, cursor, token)){
                 return fctx->buildNil();
             }
 
             auto subject = __cv_unwrap(args[0].second);
-            if(!__cv_expect_type("++", subject, CV::DataType::NUMBER, cursor, token)){
+            if(!__cv_expect_type(fnName, subject, CV::DataType::NUMBER, cursor, token)){
                 return fctx->buildNil();
             }
 
@@ -3249,17 +3431,20 @@ bool CV::CoreSetup(
     );
 
     ctx->registerFunction("--", {"subject"},
-        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
-           const std::shared_ptr<CV::Context> &fctx,
-           const CV::CursorType &cursor,
-           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+        [](
+            const std::string &fnName,
+            const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+            const std::shared_ptr<CV::Context> &fctx,
+            const CV::CursorType &cursor,
+            const CV::TokenType &token
+        ) -> std::shared_ptr<CV::Data> {
 
-            if(!__cv_expect_exactly("--", args, 1, cursor, token)){
+            if(!__cv_expect_exactly(fnName, args, 1, cursor, token)){
                 return fctx->buildNil();
             }
 
             auto subject = __cv_unwrap(args[0].second);
-            if(!__cv_expect_type("--", subject, CV::DataType::NUMBER, cursor, token)){
+            if(!__cv_expect_type(fnName, subject, CV::DataType::NUMBER, cursor, token)){
                 return fctx->buildNil();
             }
 
@@ -3269,17 +3454,20 @@ bool CV::CoreSetup(
     );
 
     ctx->registerFunction("//", {"subject"},
-        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
-           const std::shared_ptr<CV::Context> &fctx,
-           const CV::CursorType &cursor,
-           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+        [](
+            const std::string &fnName,
+            const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+            const std::shared_ptr<CV::Context> &fctx,
+            const CV::CursorType &cursor,
+            const CV::TokenType &token
+        ) -> std::shared_ptr<CV::Data> {
 
-            if(!__cv_expect_exactly("//", args, 1, cursor, token)){
+            if(!__cv_expect_exactly(fnName, args, 1, cursor, token)){
                 return fctx->buildNil();
             }
 
             auto subject = __cv_unwrap(args[0].second);
-            if(!__cv_expect_type("//", subject, CV::DataType::NUMBER, cursor, token)){
+            if(!__cv_expect_type(fnName, subject, CV::DataType::NUMBER, cursor, token)){
                 return fctx->buildNil();
             }
 
@@ -3289,17 +3477,20 @@ bool CV::CoreSetup(
     );
 
     ctx->registerFunction("**", {"subject"},
-        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
-           const std::shared_ptr<CV::Context> &fctx,
-           const CV::CursorType &cursor,
-           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+        [](
+            const std::string &fnName,
+            const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+            const std::shared_ptr<CV::Context> &fctx,
+            const CV::CursorType &cursor,
+            const CV::TokenType &token
+        ) -> std::shared_ptr<CV::Data> {
 
-            if(!__cv_expect_exactly("**", args, 1, cursor, token)){
+            if(!__cv_expect_exactly(fnName, args, 1, cursor, token)){
                 return fctx->buildNil();
             }
 
             auto subject = __cv_unwrap(args[0].second);
-            if(!__cv_expect_type("**", subject, CV::DataType::NUMBER, cursor, token)){
+            if(!__cv_expect_type(fnName, subject, CV::DataType::NUMBER, cursor, token)){
                 return fctx->buildNil();
             }
 
@@ -3314,10 +3505,13 @@ bool CV::CoreSetup(
     ////////////////////////////
 
     ctx->registerFunction("print",
-        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
-           const std::shared_ptr<CV::Context> &fctx,
-           const CV::CursorType &cursor,
-           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+        [](
+            const std::string &fnName,
+            const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+            const std::shared_ptr<CV::Context> &fctx,
+            const CV::CursorType &cursor,
+            const CV::TokenType &token
+        ) -> std::shared_ptr<CV::Data> {
 
             std::string out;
 
@@ -3326,7 +3520,7 @@ bool CV::CoreSetup(
                 if(!arg){
                     cursor->setError(
                         "Invalid Operand",
-                        "Function 'print' received a null operand while printing",
+                        "Function '"+fnName+"' received a null operand while printing",
                         token
                     );
                     return fctx->buildNil();
@@ -3345,12 +3539,15 @@ bool CV::CoreSetup(
     );
 
     ctx->registerFunction("typeof", {"subject"},
-        [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
-           const std::shared_ptr<CV::Context> &fctx,
-           const CV::CursorType &cursor,
-           const CV::TokenType &token) -> std::shared_ptr<CV::Data> {
+        [](
+            const std::string &fnName,
+            const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+            const std::shared_ptr<CV::Context> &fctx,
+            const CV::CursorType &cursor,
+            const CV::TokenType &token
+        ) -> std::shared_ptr<CV::Data> {
 
-            if(!__cv_expect_exactly("typeof", args, 1, cursor, token)){
+            if(!__cv_expect_exactly(fnName, args, 1, cursor, token)){
                 return fctx->buildNil();
             }
 

@@ -34,8 +34,8 @@
 
     namespace CV {
 
-        static const CV_NUMBER VERSION[3] = { 1, 0, 0 };
-        static const std::string RELEASE = "April 6th 2026"; 
+        static const CV_NUMBER VERSION[3] = { 1, 1, 0 };
+        static const std::string RELEASE = "August 25th 2026"; 
 
         ////////////////////////////
         //// PLATFORM
@@ -174,12 +174,14 @@
         struct DataNumber : Data, std::enable_shared_from_this<CV::DataNumber> {
             CV_NUMBER v;
             DataNumber();
+            DataNumber(CV_NUMBER nv);
             std::shared_ptr<CV::Data> unwrap() override;
         };      
         
         struct DataString : Data, std::enable_shared_from_this<CV::DataString> {
             std::string v;
             DataString();
+            DataString(const std::string &v);
             std::shared_ptr<CV::Data> unwrap() override;
         };   
         
@@ -200,7 +202,9 @@
             bool isLambda;
             bool isVariadic;
             std::shared_ptr<CV::Token> body;
+            std::unordered_map<std::string, std::shared_ptr<CV::Data>> closure;
             std::function<std::shared_ptr<CV::Data>(
+                const std::string &fnName,
                 const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
                 const std::shared_ptr<CV::Context> &ctx,
                 const std::shared_ptr<CV::Cursor> &cursor,
@@ -236,6 +240,29 @@
                 const std::string &name,
                 const std::vector<std::string> &params,
                 const std::function<std::shared_ptr<CV::Data>(
+                    const std::string &fnName,
+                    const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+                    const std::shared_ptr<CV::Context> &ctx,
+                    const std::shared_ptr<CV::Cursor> &cursor,
+                    const std::shared_ptr<CV::Token> &token
+                )> &lambda
+            );
+
+            void registerFunction(
+                const std::string &name,
+                const std::function<std::shared_ptr<CV::Data>(
+                    const std::string &fnName,
+                    const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
+                    const std::shared_ptr<CV::Context> &ctx,
+                    const std::shared_ptr<CV::Cursor> &cursor,
+                    const std::shared_ptr<CV::Token> &token
+                )> &lambda
+            );            
+
+            void registerFunction(
+                const std::string &name,
+                const std::vector<std::string> &params,
+                const std::function<std::shared_ptr<CV::Data>(
                     const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
                     const std::shared_ptr<CV::Context> &ctx,
                     const std::shared_ptr<CV::Cursor> &cursor,
@@ -251,7 +278,7 @@
                     const std::shared_ptr<CV::Cursor> &cursor,
                     const std::shared_ptr<CV::Token> &token
                 )> &lambda
-            );            
+            );
 
         };  
         typedef std::shared_ptr<CV::Context> ContextType;
@@ -368,6 +395,8 @@
             bool isInList(const std::string &v, const std::vector<std::string> &list);   
         }
 
+		void SetColorTableText(const std::unordered_map<int, std::string> &ct);
+		void SetColorTableBackground(const std::unordered_map<int, std::string> &ct);
         void SetUseColor(bool v);
         std::string GetPrompt();  
         std::string DataToText(const std::shared_ptr<CV::Data> &t);      

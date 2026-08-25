@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <iostream>
 #include "Thirdparty/cpp-linenoise.hpp"
 #include "CV.hpp"
 
@@ -23,7 +24,7 @@ static std::shared_ptr<ExecArg> getParam(std::vector<std::string> &params, const
 			if(i < params.size()-1 && !single){
 				v->val = params[i + 1];
 				v->valid = true;
-				params.erase(params.begin() + i, params.begin() + i + 1);
+				params.erase(params.begin() + i, params.begin() + i + 2);
 			}else{
 				v->valid = single;
 				params.erase(params.begin() + i);
@@ -131,7 +132,7 @@ int main(int argc, char* argv[]){
         CV::CoreSetup(context);
 
         // Easy "exit" function for REPL
-        context->registerFunction("exit",
+        context->registerFunction("exit", {},
             [](const std::vector<std::pair<std::string, std::shared_ptr<CV::Data>>> &args,
                const std::shared_ptr<CV::Context> &ctx,
                const CV::CursorType &cursor,

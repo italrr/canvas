@@ -1,11 +1,12 @@
-canvas [~]
-----------
+# canvas [~]
 
-`canvas` is a dynamic, high-level, general-purpose scripting language designed as an extension interface and rapid prototyping tool for other projects.
+`canvas` is a dynamic, high-level scripting language designed mainly as an extension interface and rapid prototyping tool for other projects.
 
-The philosophy of `canvas` is to stay as simple as possible while still giving the user a lot of expressive power. It favors a compact prefix syntax, first-class aggregate types, and a runtime model based on contexts and values instead of classes, inheritance, or large frameworks.
+The idea behind `canvas` is simple: keep the language small, predictable, and easy to embed while still giving it enough expressive power to be useful.
 
-`canvas` has gone through several rewrites and experiments. Version **1.0.0** is the first stable release of the current design.
+It uses compact prefix syntax, bracket-structured code, first-class aggregate values, lexical closures, and a runtime built around contexts and values instead of classes or large frameworks.
+
+`canvas` has gone through several rewrites and experiments. Version **1.1.0** continues the current direct-interpreter design and expands its function/runtime behavior.
 
 ## Features
 
@@ -13,40 +14,57 @@ The philosophy of `canvas` is to stay as simple as possible while still giving t
 - Prefix notation
 - Bracket-structured syntax
 - First-class **LIST** and **STORE** values
-- Basic types are **NIL**, **NUMBER**, **STRING**, **LIST**, **STORE**, and **FUNCTION**
-- Mostly immutable data model, with explicit mutation where needed
-- Dynamic library system for native modules
+- Basic types:
+  - **NIL**
+  - **NUMBER**
+  - **STRING**
+  - **LIST**
+  - **STORE**
+  - **FUNCTION**
+- First-class functions
+- Lexical closures
+- Named arguments
+- Variadic functions
+- Mostly immutable data, with explicit mutation
+- Dynamic native library system
 - Relaxed parser for informal input
-- Error handling through explicit return values and control-flow, not exceptions
-- Standard/native modules such as:
+- Simple explicit error handling
+- Native modules:
   - `json`
   - `io`
   - `math`
   - `time`
   - `file`
 
-## Design notes
+## Design
 
 ### No OOP
-`canvas` does not try to be object-oriented. You can store functions inside stores, but stores are not classes and there is no inheritance model.
+
+`canvas` is not object-oriented.
+
+Stores can contain functions, but they are just stores. There are no classes, inheritance, constructors, or object hierarchies.
 
 ```canvas
-[[let test [b:store [~n 10] [~k [fn [a b] [+ a b]]]]]]
-[[let f [test ~k]]]
-[f 1 2]
+[[let test [b:store [~n 10] [~add [fn [a b] [+ a b]]]]]
+ [let f [test ~add]]
+ [f 1 2]]
 ```
 
 ## Syntax
 
-`canvas` organizes code using brackets. Statements are prefix-notated and can themselves contain nested statements.
-
-At a high level:
+Code is organized with brackets and uses prefix notation.
 
 ```text
-"[ []...[] -> STATEMENT(S) ]" -> PROGRAM
+[operation argument argument ...]
 ```
 
-In practice, the interpreter is intentionally relaxed and will try to repair incomplete or informal input when possible.
+Statements can contain other statements:
+
+```canvas
+[+ 1 [* 2 3]]
+```
+
+The parser is intentionally relaxed.
 
 ```canvas
 [~]> + 1 1
@@ -68,11 +86,12 @@ In practice, the interpreter is intentionally relaxed and will try to repair inc
 [5 9 2]
 ```
 
-The takeaway is simple: `canvas` is flexible, but explicit bracketing is always safer when ambiguity matters.
+Explicit brackets are still recommended when code could be ambiguous.
 
 ## Values
 
 ### Numbers
+
 ```canvas
 42
 3.14
@@ -80,69 +99,109 @@ The takeaway is simple: `canvas` is flexible, but explicit bracketing is always 
 ```
 
 ### Strings
+
 ```canvas
 'hello'
 'canvas'
 ```
 
 ### Lists
+
 ```canvas
 [1 2 3]
 ```
 
 ### Stores
+
 ```canvas
-[[~name 'Italo'] [~role 'builder']]
+[[~name 'Alex'] [~role 'Engineer']]
 ```
 
-## Variables and functions
+## Variables
 
 ### `let`
+
 ```canvas
 [[let a 5] a]
 ```
 
 ### `mut`
+
 ```canvas
 [[let a 5] [mut a 9] a]
 ```
 
+## Functions
+
 ### `fn`
+
 ```canvas
 [[let add [fn [a b] [+ a b]]]
-[add 2 3]]
+ [add 2 3]]
+```
+
+Functions are first-class values and can be returned from other functions.
+
+### Closures
+
+Functions capture the lexical values available where they are created.
+
+```canvas
+[let make [fn [a b] [[let c 5] [return [fn [] [+ a b c]]]]]] [let closure [make 10 20]] [closure]
+```
+
+Result:
+
+```canvas
+35
+```
+
+### Variadic functions
+
+`@` can be used as the argument list for a variadic function.
+
+```canvas
+[fn [@] @]
 ```
 
 ## Stores
 
-### Explicit store construction
+### Explicit store
+
 ```canvas
-[b:store [~name 'Italo'] [~role 'builder']]
+[b:store [~name 'Alex'] [~role 'builder']]
 ```
 
-### Implicit store construction
+### Implicit store
+
 If every member of an aggregate is named, `canvas` treats it as a store.
 
 ```canvas
-[[~name 'Italo'] [~role 'builder']]
+[[~name 'Alex'] [~role 'builder']]
 ```
 
-### Store access
+### Access
+
 ```canvas
-[[let user [b:store [~name 'Italo'] [~role 'builder']]]
-[user ~name]]
+[[let user [b:store [~name 'Alex'] [~role 'builder']]]
+ [user ~name]]
 ```
 
 ## Prefixers
 
-Prefixers are one of the main expressive tools in `canvas`.
+Prefixers are one of the main expressive features in `canvas`.
 
 ### `~` Namer
-The namer associates a name with a value. It is used in store construction, named arguments, selectors, iterators, and other named runtime structures.
+
+Associates a name with a value.
+
+It is used by stores, named arguments, selectors, iterators, and other named runtime structures.
 
 ```canvas
-[[~name 'Italo'] [~role 'builder']]
+[[~name 'Alex'] [~role 'builder']]
 ```
+
+Named arguments can also be passed out of order:
 
 ```canvas
 [[let pair [fn [a b] [b:list a b]]]
@@ -150,37 +209,40 @@ The namer associates a name with a value. It is used in store construction, name
 ```
 
 ### `^` Expander
-The expander spreads the contents of a list into the surrounding collector.
+
+Expands a list into the surrounding collector.
 
 ```canvas
-[[1 ^[2 3] 4]]
+[1 ^[2 3] 4]
 ```
 
 ```canvas
-[[+ 1 ^[2 3]]]
+[+ 1 ^[2 3]]
 ```
 
-This works in places that collect multiple values, such as list construction and function argument collection.
+It can be used during list construction and function argument collection.
 
 ### `%` Template formatter
-The template formatter evaluates its children and always returns a string.
 
-- Named values define temporary names
-- String values are appended to the output
-- `{name}` placeholders are resolved from the current template scope
+Evaluates its children and returns a string.
+
+Named values define temporary names and `{name}` placeholders resolve from the template scope.
 
 ```canvas
-[% [~name 'Italo'] 'Hello {name}']
+[% [~name 'Alex'] 'Hello {name}']
 ```
 
 Result:
 
 ```canvas
-'Hello Italo'
+'Hello Alex'
 ```
 
 ### `?` Safe execution
-The `?` prefix evaluates code and ignores errors. If the code fails, it simply returns `nil` and does not pollute the outer cursor/error state.
+
+Executes code while swallowing errors.
+
+If the expression fails, it returns `nil` without changing the outer error state.
 
 ```canvas
 ?[nth [1 2 3] 999]
@@ -189,54 +251,90 @@ The `?` prefix evaluates code and ignores errors. If the code fails, it simply r
 ## Control flow
 
 ### `if`
+
 ```canvas
-[if [> 5 3]
-    'yes'
-    'no']
+[if [> 5 3] 'yes' 'no']
 ```
 
 ### `while`
+
 ```canvas
 [[let n 0]
- [while [< n 5]
-    [++ n]]
+ [while [< n 5] [++ n]]
  n]
 ```
 
 ### `for`
+
 ```canvas
 [for [~x [0 5]]
     [print x]]
 ```
 
 ### `foreach`
+
 ```canvas
 [foreach [~item [1 2 3]]
     [print item]]
 ```
 
-## Imports
-
-### Script imports
-Use `import` to load another `.cv` file into the current context.
+### `return`
 
 ```canvas
-[import 'math_helpers']
+[fn [a] [return [+ a 1]]]
 ```
 
-### Native/dynamic library imports
+### `yield`
+
+`yield` propagates a value through the current control flow.
+
+### `skip`
+
+`skip` skips the current loop iteration.
+
+## Strings
+
+Strings use single quotes.
+
+```canvas
+'hello world'
+```
+
+`s-join` joins values into a string.
+
+```canvas
+[s-join 'Hello' ' ' 'world']
+```
+
+Result:
+
+```canvas
+'Hello world'
+```
+
+## Imports
+
+### Script libraries
+
+Use `import` to load another `.cv` file.
+
+```canvas
+[import 'helpers']
+```
+
+### Native libraries
+
 Use `import:dynamic-library` to load a native module.
 
 ```canvas
 [import:dynamic-library 'json']
 ```
 
-After loading, the module registers its functions into the current context.
+The module registers its functions directly into the current context.
 
-## Standard and native modules
+## Native modules
 
 ### `json`
-Examples:
 
 ```canvas
 [[import:dynamic-library 'json']
@@ -249,7 +347,6 @@ Examples:
 ```
 
 ### `io`
-Examples:
 
 ```canvas
 [[import:dynamic-library 'io']
@@ -262,20 +359,18 @@ Examples:
 ```
 
 ### `math`
-Examples:
 
 ```canvas
 [[import:dynamic-library 'math']
- [[math ~sin] 0]]
+ [math:sin 0]]
 ```
 
 ```canvas
 [[import:dynamic-library 'math']
- [math ~pi]]
+ math:pi]
 ```
 
 ### `time`
-Examples:
 
 ```canvas
 [[import:dynamic-library 'time']
@@ -288,7 +383,6 @@ Examples:
 ```
 
 ### `file`
-Examples:
 
 ```canvas
 [[import:dynamic-library 'file']
@@ -300,41 +394,32 @@ Examples:
  [file:get-extension './test.txt']]
 ```
 
-### `bmp`
-Bitmap/image helper functionality is available through the native `bmp` module.
-
 ## Error handling
 
-`canvas` favors explicit error handling instead of exception-style flow.
+`canvas` keeps error handling simple.
 
-Examples:
+Functions can return `nil`, callers can inspect returned values, and `?` can intentionally ignore failures.
 
-- functions may return `nil`
-- callers may inspect returned values
-- `?` can be used to swallow failures intentionally
-
-This keeps the runtime small and predictable.
+There is no exception-based language-level control flow.
 
 ## Building
 
 ### Requirements
 
 - CMake
-- A C++17-capable compiler
-- A C11-capable C compiler
+- C++17 compiler
+- C11 compiler
 
-Primary target is Unix-like environments. MinGW-style setups are also supported by the build system.
+Unix-like environments and MinGW-style Windows builds are supported.
 
-### Build
-
-Debug/development style build:
+### Debug
 
 ```bash
 cmake -S . -B build -DCV_ENABLE_SANITIZERS=ON
 cmake --build build -j
 ```
 
-Release build:
+### Release
 
 ```bash
 cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release -DCV_ENABLE_SANITIZERS=OFF
@@ -349,15 +434,18 @@ cmake --install build-release
 
 ## Goals
 
-The goal of `canvas` is not to compete with giant general-purpose ecosystems. It is meant to be:
+`canvas` is not trying to compete with large general-purpose language ecosystems.
+
+It is meant to stay:
 
 - easy to embed
 - easy to extend
-- expressive for configuration, automation, and project-specific scripting
-- small enough to understand and evolve
+- easy to understand
+- useful for automation and project-specific scripting
+- small enough to change without fighting the language itself
 
 ## Status
 
-**Version: 1.0.0**
+**Version: 1.1.0**
 
-Canvas 1.0.0 is the first stable release of the current direct-interpreter design.
+Canvas 1.1.0 continues the current direct-interpreter design, with improved function semantics, lexical closures, native API compatibility, and general runtime fixes.
