@@ -13,7 +13,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
-
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
@@ -171,30 +170,19 @@ class Runner:
             return run_subprocess(cmd, timeout, cwd=workdir, env=env)
 
     def run_project(self, payload: dict, timeout: float) -> RunResult:
-        """
-        payload = {
-            "entry_name": "main.cv",
-            "files": {"main.cv": "...", "math.cv": "..."},
-            "cwd_subdir": "",   # optional
-            "env": {...}        # optional
-        }
-        """
         with tempfile.TemporaryDirectory(prefix="canvas-proj-") as td:
             root = Path(td)
-            files = payload["files"]
-            for rel, content in files.items():
+            for rel, content in payload["files"].items():
                 p = root / rel
                 p.parent.mkdir(parents=True, exist_ok=True)
                 p.write_text(content, encoding="utf-8")
 
             env = os.environ.copy()
             env.update(payload.get("env", {}))
-            # Make imports work from lib fallback if desired
             env.setdefault("CANVAS_LIB_HOME", str(root / "lib"))
 
             entry = root / payload["entry_name"]
             cwd = str(root / payload.get("cwd_subdir", "")) if payload.get("cwd_subdir") else str(root)
-
             if self.file_flag:
                 cmd = [self.binary, self.file_flag, str(entry)]
             else:
@@ -222,7 +210,8 @@ def build_cases(binary_path: str) -> list[Case]:
         Case("literal:store", "inline", "[[~a 1] [~b 2]]",
              one_of(["[[~a 1] [~b 2]]", "[[~b 2] [~a 1]]"]), {"core"}),
         Case("let:basic", "inline", "[let a 5] [a]", exact("5"), {"core"}),
-        Case("mut:number", "inline", "[let a 5] [mut a 7] [a]", exact("7"), {"core"}),
+        Case("mut:number", "inline", "[let a 5] [mut a 7] [a]", exact("7"), {"core", "mut"}),
+        Case("mut:string", "inline", "[let a 'before'] [mut a 'after'] [a]", exact("'after'"), {"core", "mut", "regression"}),
         Case("cc:copy-number", "inline", "[let a 5] [let b [cc a]] [mut a 9] [b]", exact("5"), {"core"}),
     ]
 
@@ -241,6 +230,12 @@ def build_cases(binary_path: str) -> list[Case]:
         Case("if:false", "inline", "[if 0 'yes' 'no']", exact("'no'"), {"core", "flow"}),
     ]
 
+    # Strings
+    cases += [
+        Case("string:join", "inline", "[s-join 'Hello' ' ' 'world']", exact("'Hello world'"), {"core", "string", "regression"}),
+        Case("string:join-empty", "inline", "[s-join 'a' '' 'b']", exact("'ab'"), {"core", "string"}),
+    ]
+
     # Lists / stores
     cases += [
         Case("length:list", "inline", "length [1 2 3 4]", exact("4"), {"core", "list"}),
@@ -252,19 +247,38 @@ def build_cases(binary_path: str) -> list[Case]:
         Case("list:push", "inline", ">> 4 [1 2 3]", exact("[1 2 3 4]"), {"core", "list"}),
         Case("list:pop", "inline", "<< [1 2 3]", exact("3"), {"core", "list"}),
         Case("list:sub", "inline", "l-sub [1 2 3 4 5] 1 3", exact("[2 3 4]"), {"core", "list"}),
-        Case("store:access", "inline", "[[let user [b:store [~name 'Italo'] [~role 'builder']]] [user ~name]]",
-             exact("'Italo'"), {"core", "store"}),
+        Case("store:access", "inline", "[[let user [b:store [~name 'Alex'] [~role 'builder']]] [user ~name]]",
+             exact("'Alex'"), {"core", "store"}),
         Case("store:multi-access", "inline",
-             "[[let user [b:store [~name 'Italo'] [~role 'builder'] [~years 10]]] [user ~name ~years]]",
-             one_of(["['Italo' 10]", "[10 'Italo']"]), {"core", "store"}),
+             "[[let user [b:store [~name 'Alex'] [~role 'builder'] [~years 10]]] [user ~name ~years]]",
+             one_of(["['Alex' 10]", "[10 'Alex']"]), {"core", "store"}),
     ]
 
-    # Proxies / named args / functions
+    # Functions / named arguments / closures
     cases += [
         Case("fn:basic", "inline", "[[let add [fn [a b] [+ a b]]] [add 2 3]]", exact("5"), {"core", "fn"}),
+        Case("fn:zero-args", "inline", "[[let answer [fn [] 42]] [answer]]", exact("42"), {"core", "fn", "regression"}),
         Case("fn:named-args", "inline", "[[let pair [fn [a b] [b:list a b]]] [pair [~b 9] [~a 3]]]",
              exact("[3 9]"), {"core", "fn"}),
         Case("fn:variadic", "inline", "[[let id [fn [@] @]] [id 1 2 3]]", exact("[1 2 3]"), {"core", "fn"}),
+        Case("fn:return-is-local", "inline",
+             "[[let inner [fn [] [return 5]]] [let outer [fn [] [[inner] [return 9]]]] [outer]]",
+             exact("9"), {"core", "fn", "flow", "regression"}),
+        Case("closure:capture-params-and-local", "inline",
+             "[let make [fn [a b] [[let c 5] [return [fn [] [+ a b c]]]]]] [let closure [make 10 20]] [closure]",
+             exact("35"), {"core", "fn", "closure", "regression"}),
+        Case("closure:captured-mutation", "inline",
+             "[[let make [fn [start] [[let n start] [return [fn [] [++ n]]]]]] [let counter [make 0]] [counter] [counter] [counter]]",
+             exact("3"), {"core", "fn", "closure", "mut"}),
+        Case("closure:independent-instances", "inline",
+             "[[let make [fn [start] [[let n start] [return [fn [] [++ n]]]]]] [let a [make 0]] [let b [make 10]] [b:list [cc [a]] [cc [a]] [cc [b]] [cc [a]] [cc [b]]]]",
+             exact("[1 2 11 3 12]"), {"core", "fn", "closure", "mut"}),
+        Case("closure:lexical-shadowing", "inline",
+             "[[let x 100] [let make [fn [x] [return [fn [] x]]]] [let f [make 5]] [mut x 200] [f]]",
+             exact("5"), {"core", "fn", "closure"}),
+        Case("closure:copy", "inline",
+             "[[let make [fn [a] [return [fn [] a]]]] [let f [make 7]] [let g [cc f]] [g]]",
+             exact("7"), {"core", "fn", "closure", "copy", "regression"}),
         Case("typeof:number", "inline", "typeof 5", exact("'NUMBER'"), {"core", "util"}),
         Case("typeof:store", "inline", "typeof [[~a 1] [~b 2]]", exact("'STORE'"), {"core", "util"}),
     ]
@@ -279,48 +293,28 @@ def build_cases(binary_path: str) -> list[Case]:
 
     # while / for / foreach
     cases += [
-        Case("while:count", "inline",
-             "[[let n 0] [while [< n 5] [++ n]] [n]]",
-             exact("5"), {"core", "loop"}),
-        Case("for:sum", "inline",
-             "[[let sum 0] [for [~x [0 5]] [mut sum [+ sum x]]] [sum]]",
-             exact("10"), {"core", "loop"}),
-        Case("for:step", "inline",
-             "[[let sum 0] [for [~x [0 10 2]] [mut sum [+ sum x]]] [sum]]",
-             exact("20"), {"core", "loop"}),
-        Case("foreach:list", "inline",
-             "[[let sum 0] [foreach [~x [1 2 3 4]] [mut sum [+ sum x]]] [sum]]",
-             exact("10"), {"core", "loop"}),
+        Case("while:count", "inline", "[[let n 0] [while [< n 5] [++ n]] [n]]", exact("5"), {"core", "loop"}),
+        Case("for:sum", "inline", "[[let sum 0] [for [~x [0 5]] [mut sum [+ sum x]]] [sum]]", exact("10"), {"core", "loop"}),
+        Case("for:step", "inline", "[[let sum 0] [for [~x [0 10 2]] [mut sum [+ sum x]]] [sum]]", exact("20"), {"core", "loop"}),
+        Case("foreach:list", "inline", "[[let sum 0] [foreach [~x [1 2 3 4]] [mut sum [+ sum x]]] [sum]]", exact("10"), {"core", "loop"}),
         Case("foreach:store-values", "inline",
              "[[let total 0] [let s [b:store [~a 1] [~b 2] [~c 3]]] [foreach [~v s] [mut total [+ total v]]] [total]]",
              exact("6"), {"core", "loop"}),
     ]
 
-    # print smoke
+    # Print smoke
     cases += [
         Case("print:basic", "inline", "print 'hello'", contains("hello"), {"core", "util"}),
     ]
 
     # File-mode tests
     cases += [
-        Case(
-            "file:basic-program",
-            "file",
-            "[let a 5]\n[let b 7]\n[print [+ a b]]\n",
-            contains("12"), {"file"}
-        ),
-        Case(
-            "file:loops",
-            "file",
-            "[let sum 0]\n[for [~x [0 5]] [mut sum [+ sum x]]]\n[print sum]\n",
-            contains("10"), {"file", "loop"}
-        ),
-        Case(
-            "file:functions",
-            "file",
-            "[let add [fn [a b] [+ a b]]]\n[print [add 9 4]]\n",
-            contains("13"), {"file", "fn"}
-        ),
+        Case("file:basic-program", "file", "[let a 5]\n[let b 7]\n[print [+ a b]]\n", contains("12"), {"file"}),
+        Case("file:loops", "file", "[let sum 0]\n[for [~x [0 5]] [mut sum [+ sum x]]]\n[print sum]\n", contains("10"), {"file", "loop"}),
+        Case("file:functions", "file", "[let add [fn [a b] [+ a b]]]\n[print [add 9 4]]\n", contains("13"), {"file", "fn"}),
+        Case("file:closure", "file",
+             "[let make [fn [a b] [[let c 5] [return [fn [] [+ a b c]]]]]]\n[let closure [make 10 20]]\n[print [closure]]\n",
+             contains("35"), {"file", "fn", "closure", "regression"}),
     ]
 
     # Project import tests
@@ -332,7 +326,7 @@ def build_cases(binary_path: str) -> list[Case]:
                 "entry_name": "main.cv",
                 "files": {
                     "main.cv": "[import 'math']\n[print [double 6]]\n",
-                    "math.cv": "[let double [fn [x] [+ x x]]]\n"
+                    "math.cv": "[let double [fn [x] [+ x x]]]\n",
                 },
             },
             contains("12"), {"project", "import"}
@@ -350,6 +344,18 @@ def build_cases(binary_path: str) -> list[Case]:
             },
             contains("12"), {"project", "import"}
         ),
+        Case(
+            "project:closure-across-import",
+            "project",
+            {
+                "entry_name": "main.cv",
+                "files": {
+                    "main.cv": "[import 'maker']\n[let f [make-adder 10]]\n[print [f 5]]\n",
+                    "maker.cv": "[let make-adder [fn [a] [return [fn [b] [+ a b]]]]]\n",
+                },
+            },
+            contains("15"), {"project", "import", "fn", "closure"}
+        ),
     ]
 
     # Error cases
@@ -361,24 +367,29 @@ def build_cases(binary_path: str) -> list[Case]:
         Case("error:bad-foreach", "inline", "[foreach [~x 5] [print x]]", contains("Illegal Iterator", exit_code=1), {"error"}),
         Case("error:div-zero", "inline", "/ 10 0", contains("Division by zero", exit_code=1), {"error"}),
         Case("error:mismatching-brackets", "inline", "[[let a 1]", contains("Syntax Error", exit_code=1), {"error"}),
+        Case("error:fn-too-many-args", "inline", "[[let add [fn [a b] [+ a b]]] [add 1 2 3]]",
+             contains("expects exactly (2) argument(s)", exit_code=1), {"error", "fn", "regression"}),
+        Case("error:s-join-non-string", "inline", "[s-join 'a' 1]",
+             contains("STRING", exit_code=1), {"error", "string"}),
     ]
 
     # Soak-ish repeats
     cases += [
         Case("soak:inline-add", "inline", "+ 2 3", exact("5"), {"soak"}, repeat=200),
         Case("soak:inline-fn", "inline", "[[let add [fn [a b] [+ a b]]] [add 2 3]]", exact("5"), {"soak"}, repeat=200),
+        Case("soak:closure", "inline",
+             "[let make [fn [a b] [[let c 5] [return [fn [] [+ a b c]]]]]] [let closure [make 10 20]] [closure]",
+             exact("35"), {"soak", "closure", "fn"}, repeat=100),
         Case("soak:for-sum", "inline", "[[let sum 0] [for [~x [0 20]] [mut sum [+ sum x]]] [sum]]", exact("190"), {"soak", "loop"}, repeat=100),
         Case("soak:file", "file", "[let a 5]\n[let b 7]\n[print [+ a b]]\n", contains("12"), {"soak", "file"}, repeat=50),
     ]
 
     # Optional dynamic json tests
-    maybe_json = detect_json_library(binary_path)
-    if maybe_json:
+    if detect_json_library(binary_path):
         cases += [
             Case("dynlib:json-dump", "inline",
                  "[[import 'json'][json:dump [[~a [1 2 3]] [~b [[~x 1] [~y nil]]]]]]",
-                 json_eq({"a": [1, 2, 3], "b": {"x": 1, "y": None}}),
-                 {"dynlib", "json"}),
+                 json_eq({"a": [1, 2, 3], "b": {"x": 1, "y": None}}), {"dynlib", "json"}),
             Case("dynlib:json-parse", "inline",
                  "[[import 'json'][json:parse '{\"a\":1,\"b\":[2,3],\"ok\":true}']]",
                  one_of([
@@ -388,8 +399,7 @@ def build_cases(binary_path: str) -> list[Case]:
                      "[[~b [2 3]] [~ok 1] [~a 1]]",
                      "[[~ok 1] [~a 1] [~b [2 3]]]",
                      "[[~ok 1] [~b [2 3]] [~a 1]]",
-                 ]),
-                 {"dynlib", "json"}),
+                 ]), {"dynlib", "json"}),
         ]
 
     return cases
@@ -427,8 +437,6 @@ def main():
     if file_flag.lower() in {"none", "empty", "null"}:
         file_flag = ""
 
-    from pathlib import Path
-
     binary_path = str(Path(args.bin).resolve())
     runner = Runner(binary_path, file_flag)
     cases = build_cases(binary_path)
@@ -438,8 +446,7 @@ def main():
         cases = [c for c in cases if c.tags & wanted]
 
     if args.only:
-        frags = args.only
-        cases = [c for c in cases if any(f in c.name for f in frags)]
+        cases = [c for c in cases if any(f in c.name for f in args.only)]
 
     if args.shuffle:
         random.shuffle(cases)
@@ -449,6 +456,7 @@ def main():
         return 1
 
     print("STARTING CANVAS TEST SUITE")
+
     total = 0
     failed = 0
     started = time.time()
@@ -459,7 +467,6 @@ def main():
             total += 1
             result = runner.run_case(case)
             ok, detail = case.validator(result)
-
             if not ok:
                 failed += 1
                 suffix = f" [{i}/{repeats}]" if repeats > 1 else ""
@@ -476,9 +483,11 @@ def main():
 
     elapsed = time.time() - started
     print(f"\nDONE. SUCCEEDED {total - failed} | FAILED {failed} | TOTAL {total} | TIME {elapsed:.2f}s")
+
     if failed == 0:
         print("\n<---------------------ALL TESTS PASSED--------------------->")
         return 0
+
     return 1
 
 
